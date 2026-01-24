@@ -1,0 +1,12 @@
+
+# Compiled scheme files
+*.go
+*.log
+
+# Datasets and logs
+trajectories.jsonl
+dataset-*.jsonl
+
+# Editor backups
+*~
+\#*\#

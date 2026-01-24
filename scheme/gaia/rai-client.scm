@@ -1,0 +1,31 @@
+(define-module (gaia rai-client)
+  #:use-module (web client)
+  #:use-module (web response)
+  #:use-module (web uri)
+  #:use-module (rnrs bytevectors)
+  #:use-module (ice-9 receive)
+  #:use-module (gaia utils)
+  #:export (chat-with-rai create-agent))
+
+(define RAI_HOST "http://localhost:8000")
+
+(define (create-agent name model system-prompt)
+  (let* ((url (string-append RAI_HOST "/api/v1/agents/" name))
+         (body (scm->json `(("model" . ,model)
+                            ("system" . ,system-prompt)
+                            ("backend" . "ollama"))))
+         (headers '((content-type . (application/json)))))
+    (http-post url #:body body #:headers headers)))
+
+(define (chat-with-rai session-id input model)
+  (let* ((url (string-append RAI_HOST "/api/v1/run"))
+         (body (scm->json `(("chain_input" . ,input)
+                            ("session_id" . ,session-id)
+                            ("chain_configs" . ,(vector `(("model" . ,model)))))))
+         (headers '((content-type . (application/json)))))
+    (receive (response-header response-body)
+        (http-post url #:body body #:headers headers)
+      (let ((json-response (json->scm (utf8->string response-body))))
+        ;; Extract the actual text response from the RAI format
+        ;; Adjust this extraction based on actual RAI response structure
+        json-response))))
