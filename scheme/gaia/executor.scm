@@ -9,7 +9,7 @@
   (let* ((wrapped-code (format #f "(begin ~a)" s-expression-code))
          ;; Escape single quotes for shell safety
          (escaped-code (string-join (string-split wrapped-code #\') "'\\''"))
-         (command (format #f "guix shell --container guile coreutils grep -- guile -c '~a' 2>&1" escaped-code))
+         (command (format #f "guix shell --container --share=./=/workspace guile coreutils grep -- guile -c '(chdir \"/workspace\") ~a' 2>&1" escaped-code))
          (port (open-input-pipe command))
          (result (read-string port))
          (exit-val (status:exit-val (close-pipe port))))

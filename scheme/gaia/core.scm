@@ -14,7 +14,8 @@
 
 (define SYSTEM_PROMPT
   "# ROLE
-You are GAIA (GNU AI Assistant), an advanced system operator powered by the RAI (Rich AI) server. Your primary goal is to solve technical tasks within a GNU Guix environment using the Recursive Language Model (RLM) paradigm.
+You are GAIA (GNU AI Assistant), an advanced system operator.
+Your primary goal is to solve technical tasks within a GNU Guix environment (using GNU Guile/Scheme language (i.e. s-experssions or g-expressions).
 
 # ENVIRONMENT & TOOLS
 - Operating System: GNU Guix.
@@ -22,42 +23,61 @@ You are GAIA (GNU AI Assistant), an advanced system operator powered by the RAI 
 - Execution Method: You do not read large files directly. Instead, you generate Guile Scheme code that runs inside isolated 'guix shell --container' environments to investigate the system.
 
 # RLM OPERATIONAL RULES
-1. INVESTIGATE, DON'T READ: If a task involves large files (logs, source code, system state), do NOT ask the user to provide the text. Write a Guile script to explore the file (e.g., using `mmap`, `stat`, or `ice-9 rdelim`).
-2. PROGRAMMATIC EXTRACTION: Your code should find and return only the relevant fragments of data needed for the next step.
-3. RECURSION: If the result of your code execution shows that the data is still too complex, propose the next specific sub-task. The GAIA system will call you recursively with the new context.
-4. CODE BLOCKS: Always wrap your Scheme code in triple backticks: ```scheme ... ```.
+1. INVESTIGATE, DON'T READ: If a task involves large files (logs, source code, system state), do NOT ask the user to provide the text. Write a Guile script to explore the file.
+2. RECURSIVE DELEGATION: If a task is complex or requires analyzing a specific component in isolation, DELEGATE it to a sub-agent.
+   - To delegate, use a code block with language 'delegate' containing an S-expression: `(delegate \"Goal\" \"Context\")`.
+   - The system will spawn a FRESH agent with only that goal and context.
+   - The result will be returned to you.
+3. DIRECT EXECUTION: If a task is simple, write a Guile Scheme script to execute it using `(system*)` or other Guile primitives. 
+   - Wrap Scheme code in triple backticks: ```scheme ... ```.
 
 # GUILE SCHEME GUIDELINES
 - Use functional programming patterns.
-- Always include necessary modules, e.g., `(use-modules (ice-9 rdelim) (ice-9 regex) (guix profiles))`.
-- Focus on safety and precision. Ensure your S-expressions are well-formed and balanced.
+- Always include necessary modules.
+- Focus on safety and precision.
 
 # EXAMPLE TASK FLOW
-User: \"Find all 'Permission Denied' errors in /var/log/messages and summarize the affected services.\"
+User: \"Find errors in /var/log/syslog\"
 GAIA Thinking:
-1. Check file size using (stat).
-2. If large, write a script to grep for \"Permission Denied\".
-3. Return the unique service names found.
-4. If there are many errors, spawn a sub-task for each unique service.")
+1. File is large. I should delegate the analysis.
+GAIA Output:
+```delegate
+(delegate \"Find all 'Permission Denied' errors\" \"File: /var/log/syslog\")
+```
+GAIA (System): Returns \"Result: Found 5 errors...\"
+GAIA: \"The sub-agent found 5 errors. I will now summarize them.\"
+")
 
 (define (extract-code response)
   "Extracts Scheme code from the LLM response (markdown code block)."
   (let ((str (if (string? response) response (scm->json response))))
-    ;; Simple regex-like search (Guile's regex is POSIX)
-    ;; For now, just look for ```scheme ... ``` or return the whole string if it looks like code
     (if (string-contains str "```scheme")
         (let* ((start (+ (string-contains str "```scheme") 9))
                (end (string-contains str "```" start)))
           (substring str start end))
         #f)))
 
+(define (extract-delegation response)
+  "Extracts delegation S-expression from the LLM response."
+  (let ((str (if (string? response) response (scm->json response))))
+    (if (string-contains str "```delegate")
+        (let* ((start (+ (string-contains str "```delegate") 11))
+               (end (string-contains str "```" start))
+               (sexp-str (substring str start end)))
+          (catch #t
+            (lambda () (with-input-from-string sexp-str read))
+            (lambda _ #f)))
+        #f)))
+
 (define MAX-RECURSION-DEPTH 15)
 
 (define (rlm-loop session-id last-output depth)
   (if (> depth MAX-RECURSION-DEPTH)
-      (display "\n[GAIA] Max recursion depth reached. Stopping loop.\n")
       (begin
-        (display "\n[GAIA] Thinking...\n")
+        (display "\n[GAIA] Max recursion depth reached. Returning current state.\n")
+        last-output)
+      (begin
+        (display (string-append "\n[GAIA] Thinking (Depth " (number->string depth) ")...\n"))
         (let* ((response (chat-with-rai session-id last-output MODEL SYSTEM_PROMPT))
                (payload (assoc-ref response "payload"))
                (response-text (if payload (assoc-ref payload "content") "Error: No payload in response")))
@@ -76,28 +96,50 @@ GAIA Thinking:
                   (newline port)
                   (close-port port)))
 
-          (let ((code (extract-code response-text)))
-            (if (and code (> (string-length code) 0) (not (string=? code response-text)))
-                (begin
-                  (display "\n[GAIA] Executing Code...\n")
-                  (let ((result (guix-investigate code)))
-                    (display "\n[GAIA] Result: ")
-                    (display result)
-                    (newline)
+          ;; 1. Check for Delegation first
+          (let ((delegation (extract-delegation response-text)))
+            (if delegation
+                (match delegation
+                  (('delegate goal context)
+                   (display "\n[GAIA] Delegating sub-task...\n")
+                   (let* ((sub-session-id (string-append session-id "-sub-" (number->string (random 1000))))
+                          (initial-input (string-append "GOAL: " goal "\nCONTEXT: " context))
+                          ;; Recursive call with NEW session ID
+                          (sub-result (rlm-loop sub-session-id initial-input (+ depth 1))))
+                     
+                     (display (string-append "\n[GAIA] Sub-task finished. Result: " sub-result "\n"))
+                     ;; Continue in CURRENT session with the result
+                     (rlm-loop session-id (string-append "Sub-agent execution finished. Result: " sub-result) depth)))
+                  (_ 
+                   (rlm-loop session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")" depth)))
+                
+                ;; 2. Check for Scheme Execution
+                (let ((code (extract-code response-text)))
+                  (if (and code (> (string-length code) 0) (not (string=? code response-text)))
+                      (begin
+                        (display "\n[GAIA] Executing Code...\n")
+                        (let ((result (guix-investigate code)))
+                          (display "\n[GAIA] Result: ")
+                          (display result)
+                          (newline)
 
-                    ;; Log execution
-                    (let ((exec-log `(("session_id" . ,session-id)
-                                      ("code" . ,code)
-                                      ("result" . ,result)
-                                      ("type" . "execution"))))
-                      (let ((port (open-file "trajectories.jsonl" "a")))
-                          (display (scm->json exec-log) port)
-                          (newline port)
-                          (close-port port)))
+                          ;; Log execution
+                          (let ((exec-log `(("session_id" . ,session-id)
+                                            ("code" . ,code)
+                                            ("result" . ,result)
+                                            ("type" . "execution"))))
+                            (let ((port (open-file "trajectories.jsonl" "a")))
+                                (display (scm->json exec-log) port)
+                                (newline port)
+                                (close-port port)))
 
-                    ;; Recurse with result
-                    (rlm-loop session-id (string-append "The code execution result was: " result) (+ depth 1))))
-                (display "\n[GAIA] Awaiting further instructions.\n")))))))
+                          ;; Recurse in SAME session with result
+                          (rlm-loop session-id (string-append "The code execution result was: " result) depth)))
+                      
+                      ;; 3. No code, just text response -> Finish?
+                      ;; Ideally we should have a FINAL signal, but for now if no code/delegate, we assume it's a question/answer or wait for user.
+                      ;; In this loop, we return the text as the final answer for this node.
+                      response-text))))))))
 
 (define (start-gaia)
   (activate-readline)
