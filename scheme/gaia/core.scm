@@ -11,11 +11,10 @@
 (define MODEL "ministral-3:3b")
 
 
-
 (define SYSTEM_PROMPT
   "# ROLE
 You are GAIA (GNU AI Assistant), an advanced system operator.
-Your primary goal is to solve technical tasks within a GNU Guix environment (using GNU Guile/Scheme language (i.e. s-experssions or g-expressions).
+Your primary goal is to solve technical tasks within a GNU Guix environment using GNU Guile/Scheme language (i.e. s-experssions or g-expressions).
 
 # ENVIRONMENT & TOOLS
 - Operating System: GNU Guix.
@@ -28,7 +27,7 @@ Your primary goal is to solve technical tasks within a GNU Guix environment (usi
    - To delegate, use a code block with language 'delegate' containing an S-expression: `(delegate \"Goal\" \"Context\")`.
    - The system will spawn a FRESH agent with only that goal and context.
    - The result will be returned to you.
-3. DIRECT EXECUTION: If a task is simple, write a Guile Scheme script to execute it using `(system*)` or other Guile primitives. 
+3. DIRECT EXECUTION: If a task is simple, write a Guile Scheme script to execute it using `(system*)` or other Guile primitives.
    - Wrap Scheme code in triple backticks: ```scheme ... ```.
 
 # GUILE SCHEME GUIDELINES
@@ -106,13 +105,13 @@ GAIA: \"The sub-agent found 5 errors. I will now summarize them.\"
                           (initial-input (string-append "GOAL: " goal "\nCONTEXT: " context))
                           ;; Recursive call with NEW session ID
                           (sub-result (rlm-loop sub-session-id initial-input (+ depth 1))))
-                     
+
                      (display (string-append "\n[GAIA] Sub-task finished. Result: " sub-result "\n"))
                      ;; Continue in CURRENT session with the result
                      (rlm-loop session-id (string-append "Sub-agent execution finished. Result: " sub-result) depth)))
-                  (_ 
+                  (_
                    (rlm-loop session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")" depth)))
-                
+
                 ;; 2. Check for Scheme Execution
                 (let ((code (extract-code response-text)))
                   (if (and code (> (string-length code) 0) (not (string=? code response-text)))
@@ -135,7 +134,7 @@ GAIA: \"The sub-agent found 5 errors. I will now summarize them.\"
 
                           ;; Recurse in SAME session with result
                           (rlm-loop session-id (string-append "The code execution result was: " result) depth)))
-                      
+
                       ;; 3. No code, just text response -> Finish?
                       ;; Ideally we should have a FINAL signal, but for now if no code/delegate, we assume it's a question/answer or wait for user.
                       ;; In this loop, we return the text as the final answer for this node.
