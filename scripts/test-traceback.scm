@@ -1,0 +1,10 @@
+(add-to-load-path (string-append (dirname (current-filename)) "/../scheme"))
+(use-modules (gaia executor))
+
+(display "Running triggering error code...\n")
+(let ((result (guix-investigate "(error \"This is a test error traceback\")")))
+  (display "Result captured from executor:\n")
+  (display (string-append "'" result "'\n"))
+  (if (string-contains result "This is a test error traceback")
+      (display "SUCCESS: Traceback captured.\n")
+      (display "FAILURE: Traceback NOT captured.\n")))

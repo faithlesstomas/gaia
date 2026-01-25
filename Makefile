@@ -17,5 +17,8 @@ test-rlm:
 dataset:
 	$(GUIX_SHELL) guile -L scheme -c '(use-modules (gaia curator)) (curate-dataset "trajectories.jsonl" "dataset-success.jsonl" "dataset-failure.jsonl")'
 
+benchmark:
+	$(GUIX_SHELL) guile -L scheme scripts/benchmark-needle.scm
+
 clean:
 	rm -f *.go dataset-*.jsonl

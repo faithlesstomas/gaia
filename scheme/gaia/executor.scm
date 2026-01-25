@@ -9,10 +9,11 @@
   (let* ((wrapped-code (format #f "(begin ~a)" s-expression-code))
          ;; Escape single quotes for shell safety
          (escaped-code (string-join (string-split wrapped-code #\') "'\\''"))
-         (command (format #f "guix shell --container guile coreutils -- guile -c '~a'" escaped-code))
+         (command (format #f "guix shell --container guile coreutils grep -- guile -c '~a' 2>&1" escaped-code))
          (port (open-input-pipe command))
          (result (read-string port))
          (exit-val (status:exit-val (close-pipe port))))
     (if (eq? exit-val 0)
         result
-        (string-append "Error: Execution failed with exit code " (number->string exit-val)))))
+        (string-append "Error: Execution failed with exit code " (number->string exit-val)
+                       "\nOutput:\n" result))))

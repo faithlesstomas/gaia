@@ -1,19 +1,24 @@
 # GAIA: GNU AI Assistant
 
-**GAIA** (GNU AI Assistant) is a next-generation system operator designed for the GNU Guix ecosystem. 
-It implements the **Recursive Language Model (RLM)** paradigm, allowing an AI agent to solve complex, 
+**GAIA** (GNU AI Assistant) is a next-generation system operator designed for the GNU Guix ecosystem.
+It implements the **Recursive Language Model (RLM)** paradigm of inference strategy, allowing an AI agent to solve complex,
 large-scale system tasks by programmatically investigating the environment rather than merely "reading" it.
 
-## 🧠 The Philosophy: Intelligence as an Operator
+The RLM idea comes from this paper: https://arxiv.org/abs/2512.24601
 
-Traditional AI assistants fail when faced with massive data (e.g., 1GB log files) due to context window limits. 
+This implementation test's whether it make sense to implement RLM in functional and homoiconic language like Guile, a GNU Scheme derivative.
+Hopefully it will evolve in a general purpose AI Assistant useful in GNU Guix and/or Linux ecosystem.
+
+## The Philosophy: Intelligence as an Operator
+
+Traditional AI assistants fail when faced with massive data (e.g., 1GB log files) due to context window limits.
 GAIA solves this by treating the LLM as a **planner** and the system as a **programmatic environment**.
 
 * **Don't Read, Investigate:** Instead of uploading files, GAIA generates Guile Scheme code to explore them locally.
 * **Recursive Decomposition:** Complex tasks are broken down into sub-tasks and handled by recursive agent calls.
 * **Functional Isolation:** Every investigative step runs in a bit-reproducible, isolated `guix shell --container`.
 
-## 🏗️ Architecture
+## Architecture
 
 GAIA acts as the "Hands" (Scheme/Guix) for a "Brain" (LLM) hosted by the **RAI Server**.
 
@@ -21,14 +26,14 @@ GAIA acts as the "Hands" (Scheme/Guix) for a "Brain" (LLM) hosted by the **RAI S
 2. **GAIA (Guile Scheme):** The System Core. Handles the RLM loop, code parsing, and recursive logic.
 3. **GNU Guix:** The Execution Layer. Provides safe, isolated, and reproducible sandboxes for AI-generated code.
 
-## 🛠️ Key Features
+## Key Features
 
 * **RLM Toolkit:** Native Guile implementation of the Recursive Language Model paradigm.
 * **Guix Sandboxing:** Securely run AI-generated scripts in ephemeral containers.
 * **Deterministic Replay:** Debug system behavior offline by replaying saved AI trajectories without API costs.
 * **Self-Improvement Loop:** Automatically log and curate "Success" vs "Failure" datasets for local fine-tuning (Gemma/Qwen).
 
-## 🚦 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -40,9 +45,8 @@ GAIA acts as the "Hands" (Scheme/Guix) for a "Brain" (LLM) hosted by the **RAI S
 Clone the repository and enter the environment:
 
 ```bash
-git clone <repository-url>
+git clone https://gitlab.com/tk-lab1/ai/gaia
 cd gaia
-guix shell
 ```
 
 ### Usage
@@ -51,6 +55,15 @@ guix shell
 GAIA acts as a client. Ensure the [RAI Server](https://gitlab.com/tk-lab1/ai/rai) is running locally or accessible via network.
 ```bash
 # In a separate terminal (if running locally):
+git clone https://gitlab.com/tk-lab1/ai/rai
+cd rai
+python -m venv .venv
+sourve .venv/bin/activate
+python -m pip install -e .
+# Read RAI project README or or doc for details of installing different LLM providers/adapters and their dependencies,
+# eg. for local ollama you need to install ollama server as well.
+rai config # setup server configuration
+rai serve
 curl http://localhost:8000/health
 ```
 
@@ -75,7 +88,7 @@ make dataset
 
 ```
 
-## 📈 The Learning Loop
+## The Learning Loop
 
 GAIA doesn't just work; it grows. Every interaction is stored in `trajectories.jsonl`.
 
@@ -83,6 +96,6 @@ GAIA doesn't just work; it grows. Every interaction is stored in `trajectories.j
 * **Curator:** Filters successful interactions into a high-quality dataset.
 * **Goal:** Fine-tune smaller, local models to match or exceed frontier model performance on Guix-specific tasks.
 
-## 📜 License
+## License
 
 GAIA is part of the GNU ecosystem and is released under the **GPLv3+ License**.
