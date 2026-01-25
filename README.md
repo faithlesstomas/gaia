@@ -104,18 +104,18 @@ GAIA is part of the GNU ecosystem and is released under the **GPLv3+ License**.
 
 The choice of Guile Scheme (a homoiconic Lisp dialect) is not accidental. It allows GAIA to treat its own code as data, enabling features impossible in Python/Javascript architectures.
 
-*   **[Completed] Static Safety Validator:**
+*   [x] **Static Safety Validator:**
     *   **Concept:** Parse LLM-generated code as an AST (Abstract Syntax Tree) before execution. recursively check for banned primitives (e.g., `system*`, `delete-file`) even in deeply nested expressions.
     *   **Status:** *Implemented* (see `validate-safety` in `executor.scm`).
 
-*   **[Planned] Code Instrumentation & Auto-Logging:**
+*   [ ] **Code Instrumentation & Auto-Logging:**
     *   **Concept:** Automatically rewrite user code to wrap function calls in error handlers or performance loggers without asking the LLM to do so.
 
-*   **[Planned] G-Expressions ("Context Teleportation"):**
+*   [ ] **G-Expressions ("Context Teleportation"):**
     *   **Concept:** Use GNU Guix's G-expressions (`#~`) to serialize entire variable contexts and modules when spawning sub-agents, solving the "data transfer" problem in RLM.
 
-*   **[Planned] The Self-Modifying Agent:**
+*   [ ] **The Self-Modifying Agent:**
     *   **Concept:** Allow GAIA to "refactor" its own cognitive loop (`rlm-loop`) at runtime by treating the loop logic as a mutable list.
 
-*   **[Planned] Persistent Thought Environment (REPL):**
+*   [ ] **Persistent Thought Environment (REPL):**
     *   **Concept:** Maintain a long-running Guile REPL where the agent defines helper functions in Step 1 and reuses them in Step 10, mimicking human memory.
