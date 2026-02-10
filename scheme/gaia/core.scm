@@ -2,11 +2,11 @@
   #:use-module (gaia rai-client)
   #:use-module (gaia executor)
   #:use-module (gaia utils)
-  #:use-module (gaia utils)
   #:use-module (ice-9 match)
+  #:use-module (ice-9 regex)
   #:use-module (ice-9 readline)
   #:use-module (ice-9 rdelim)
-  #:export (start-gaia SYSTEM_PROMPT extract-code))
+  #:export (start-gaia SYSTEM_PROMPT extract-code extract-final-signal extract-confidence))
 
 (define MODEL "ministral-3:3b")
 
@@ -30,6 +30,16 @@ Your primary goal is to solve technical tasks within a GNU Guix environment usin
 3. DIRECT EXECUTION: If a task is simple, write a Guile Scheme script to execute it using `(system*)` or other Guile primitives.
    - Wrap Scheme code in triple backticks: ```scheme ... ```.
 
+# COMPLETION SIGNALS
+When you have solved the task completely, you MUST use one of these signals:
+- FINAL(answer) - for direct text answers. Example: FINAL(The file contains 42 errors)
+- FINAL_VAR(variable_name) - for answers stored in a variable from code execution.
+
+After each step, rate your confidence that the task is fully complete on a scale of 0-100%:
+- CONFIDENCE(score) - Example: CONFIDENCE(95) if you're very confident the task is done
+- If CONFIDENCE >= 95%, the system will stop automatically
+- If CONFIDENCE < 95%, continue investigating
+
 # GUILE SCHEME GUIDELINES
 - Use functional programming patterns.
 - Always include necessary modules.
@@ -43,8 +53,10 @@ GAIA Output:
 ```delegate
 (delegate \"Find all 'Permission Denied' errors\" \"File: /var/log/syslog\")
 ```
+CONFIDENCE(30)
+
 GAIA (System): Returns \"Result: Found 5 errors...\"
-GAIA: \"The sub-agent found 5 errors. I will now summarize them.\"
+GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permission Denied' errors in /var/log/syslog) CONFIDENCE(100)\"
 ")
 
 (define (extract-code response)
@@ -68,7 +80,30 @@ GAIA: \"The sub-agent found 5 errors. I will now summarize them.\"
             (lambda _ #f)))
         #f)))
 
+(define (extract-final-signal response)
+  "Extracts FINAL() or FINAL_VAR() signal from LLM response."
+  (let ((str (if (string? response) response (scm->json response))))
+    (cond
+     ((string-match "FINAL\\(([^)]+)\\)" str) =>
+      (lambda (m) (list 'final (match:substring m 1))))
+     ((string-match "FINAL_VAR\\(([^)]+)\\)" str) =>
+      (lambda (m) (list 'final-var (match:substring m 1))))
+     (else #f))))
+
+(define (extract-confidence response)
+  "Extracts CONFIDENCE(score) from LLM response. Returns number 0-100 or #f."
+  (let ((str (if (string? response) response (scm->json response))))
+    (cond
+     ((string-match "CONFIDENCE\\(([0-9]+)\\)" str) =>
+      (lambda (m)
+        (let ((score (string->number (match:substring m 1))))
+          (if (and score (>= score 0) (<= score 100))
+              score
+              #f))))
+     (else #f))))
+
 (define MAX-RECURSION-DEPTH 15)
+(define CONFIDENCE-THRESHOLD 95)
 
 (define (rlm-loop session-id last-output depth)
   (if (> depth MAX-RECURSION-DEPTH)
@@ -85,20 +120,42 @@ GAIA: \"The sub-agent found 5 errors. I will now summarize them.\"
           (display response-text)
           (newline)
 
-          ;; Log interaction
-          (let ((log-entry `(("session_id" . ,session-id)
-                             ("input" . ,last-output)
-                             ("response" . ,response-text)
-                             ("timestamp" . ,(number->string (current-time))))))
+          ;; Check for completion signals
+          (let ((final-sig (extract-final-signal response-text))
+                (conf-val (extract-confidence response-text)))
+            
+            ;; Log interaction
+            (let ((log-entry `(("session_id" . ,session-id)
+                               ("input" . ,last-output)
+                               ("response" . ,response-text)
+                               ("timestamp" . ,(number->string (current-time)))
+                               ("confidence" . ,(if conf-val conf-val "null"))
+                               ("final_signal" . ,(if final-sig "true" "false")))))
               (let ((port (open-file "trajectories.jsonl" "a")))
-                  (display (scm->json log-entry) port)
-                  (newline port)
-                  (close-port port)))
+                (display (scm->json log-entry) port)
+                (newline port)
+                (close-port port)))
 
-          ;; 1. Check for Delegation first
-          (let ((delegation (extract-delegation response-text)))
-            (if delegation
-                (match delegation
+            ;; Decision Logic: FINAL > Confidence > Delegation > Code > Text
+            (cond
+             ;; 1. FINAL signal
+             ((and final-sig (match final-sig (('final ans) ans) (('final-var var) var) (_ #f))) =>
+              (lambda (answer)
+                (display "\n[GAIA] \u2713 FINAL signal detected.\n")
+                (if (equal? (car final-sig) 'final)
+                    (display (string-append "[GAIA] Answer: " answer "\n"))
+                    (display (string-append "[GAIA] Answer stored in: " answer "\n")))
+                answer))
+             
+             ;; 2. High Confidence
+             ((and conf-val (>= conf-val CONFIDENCE-THRESHOLD))
+              (display (string-append "\n[GAIA] \u2713 High confidence (" (number->string conf-val) "%) - stopping.\n"))
+              response-text)
+
+             ;; 3. Delegation
+             ((extract-delegation response-text) =>
+              (lambda (delegation)
+                 (match delegation
                   (('delegate goal context)
                    (display "\n[GAIA] Delegating sub-task...\n")
                    (let* ((sub-session-id (string-append session-id "-sub-" (number->string (random 1000))))
@@ -110,35 +167,38 @@ GAIA: \"The sub-agent found 5 errors. I will now summarize them.\"
                      ;; Continue in CURRENT session with the result
                      (rlm-loop session-id (string-append "Sub-agent execution finished. Result: " sub-result) depth)))
                   (_
-                   (rlm-loop session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")" depth)))
+                   (rlm-loop session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")" depth)))))
 
-                ;; 2. Check for Scheme Execution
-                (let ((code (extract-code response-text)))
-                  (if (and code (> (string-length code) 0) (not (string=? code response-text)))
-                      (begin
-                        (display "\n[GAIA] Executing Code...\n")
-                        (let ((result (guix-investigate code)))
-                          (display "\n[GAIA] Result: ")
-                          (display result)
-                          (newline)
+             ;; 4. Scheme Execution
+             ((extract-code response-text) =>
+              (lambda (code)
+                (if (and code (> (string-length code) 0) (not (string=? code response-text)))
+                    (begin
+                      (display "\n[GAIA] Executing Code...\n")
+                      (let ((result (guix-investigate code)))
+                        (display "\n[GAIA] Result: ")
+                        (display result)
+                        (newline)
 
-                          ;; Log execution
-                          (let ((exec-log `(("session_id" . ,session-id)
-                                            ("code" . ,code)
-                                            ("result" . ,result)
-                                            ("type" . "execution"))))
+                        ;; Log execution
+                        (let ((exec-log `(("session_id" . ,session-id)
+                                          ("code" . ,code)
+                                          ("result" . ,result)
+                                          ("type" . "execution"))))
                             (let ((port (open-file "trajectories.jsonl" "a")))
                                 (display (scm->json exec-log) port)
                                 (newline port)
                                 (close-port port)))
 
-                          ;; Recurse in SAME session with result
-                          (rlm-loop session-id (string-append "The code execution result was: " result) depth)))
-
-                      ;; 3. No code, just text response -> Finish?
-                      ;; Ideally we should have a FINAL signal, but for now if no code/delegate, we assume it's a question/answer or wait for user.
-                      ;; In this loop, we return the text as the final answer for this node.
-                      response-text))))))))
+                        ;; Recurse in SAME session with result
+                        (rlm-loop session-id (string-append "The code execution result was: " result) depth)))
+                    ;; Invalid code block
+                    response-text)))
+             
+             ;; 5. Fallback (Text only)
+             (else 
+              (display "\n[GAIA] \u26a0 No actionable output. Treating as final answer (unless low confidence).\n")
+              response-text)))))))
 
 (define (start-gaia)
   (activate-readline)
