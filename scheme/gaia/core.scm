@@ -233,23 +233,71 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
               (display "\n[GAIA] \u26a0 No actionable output. Treating as final answer (unless low confidence).\n")
               response-text)))))))
 
+(define (handle-command input session-id)
+  "Parses and executes meta-commands or delegates to RLM."
+  (cond
+   ;; ,exit
+   ((string=? input ",exit")
+    (display "Bye.\n")
+    #f) ;; Return #f to stop loop
+   
+   ;; ,help
+   ((string=? input ",help")
+    (display "Available commands:\n")
+    (display "  ,ask <query>   - One-shot question to AI (no RLM loop)\n")
+    (display "  ,eval <scheme> - Execute Scheme code locally\n")
+    (display "  ,help          - Show this help\n")
+    (display "  ,exit          - Quit GAIA\n")
+    (display "  <query>        - Start standard RLM investigation\n")
+    #t)
+
+   ;; ,ask <query>
+   ((string-prefix? ",ask " input)
+    (let ((query (substring input 5)))
+      (display "[Direct Question] Asking AI...\n")
+      (let* ((response (chat-with-rai session-id query MODEL "You are a helpful Guile Scheme expert."))
+             (payload (assoc-ref response "payload"))
+             (content (if payload (assoc-ref payload "content") "Error No Payload")))
+        (display "\nAI: ")
+        (display content)
+        (newline))
+      #t))
+
+   ;; ,eval <scheme>
+   ((string-prefix? ",eval " input)
+    (let ((code (substring input 6)))
+      (catch #t
+        (lambda ()
+          (display (eval-string code))
+          (newline))
+        (lambda (key . args) 
+          (display (format #f "Error: ~a ~a\n" key args))))
+      #t))
+
+   ;; Standard RLM Loop
+   (else
+    (rlm-loop session-id input 0)
+    #t)))
+
 (define (start-gaia . args)
   (activate-readline)
-  (display "Initializing GAIA...\n")
-  ;; Generate a dynamic session ID using rudimentary randomness
+  (display "Initializing GAIA (GNU AI Assistant)...\n")
+  (display "Type ',help' for commands or enter a task.\n")
+  
   (let ((session-id (string-append "gaia-"
                                    (number->string (current-time))
                                    "-"
                                    (number->string (random 10000)))))
 
     (display (string-append "Session ID: " session-id "\n"))
-    (display "GAIA Ready. Type your query (or 'exit'): > ")
+    
     (let loop ()
+      (display "\n[GAIA]> ")
       (let ((input (read-line)))
         (cond
          ((eof-object? input) (newline))
-         ((string=? input "exit") (display "Bye.\n"))
+         ((string=? input "") (loop))
          (else
-          (rlm-loop session-id input 0)
-          (display "\n> ")
-          (loop)))))))
+          (if (handle-command input session-id)
+              (loop)
+              #t)))))))
