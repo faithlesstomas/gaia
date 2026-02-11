@@ -12,6 +12,15 @@
 
 
 
+(define C-RESET "\x1b[0m")
+(define C-BOLD "\x1b[1m")
+(define C-RED "\x1b[31m")
+(define C-GREEN "\x1b[32m")
+(define C-YELLOW "\x1b[33m")
+(define C-BLUE "\x1b[34m")
+(define C-CYAN "\x1b[36m")
+(define C-GREY "\x1b[90m")
+
 (define SYSTEM_PROMPT
   "# ROLE
 You are GAIA (GNU AI Assistant), an advanced system operator.
@@ -124,12 +133,12 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
         (display "\n[GAIA] Max recursion depth reached. Returning current state.\n")
         last-output)
       (begin
-        (display (string-append "\n[GAIA] Thinking (Depth " (number->string depth) ")...\n"))
+        (display (string-append C-GREY "\n[GAIA] Thinking (Depth " (number->string depth) ")..." C-RESET "\n"))
         (let* ((response (chat-with-rai session-id last-output (get-config 'model) SYSTEM_PROMPT))
                (payload (assoc-ref response "payload"))
                (response-text (if payload (assoc-ref payload "content") "Error: No payload in response")))
 
-          (display "\n[GAIA] Says: ")
+          (display (string-append C-BLUE "\n[GAIA] Says: " C-RESET))
           (display response-text)
           (newline)
 
@@ -154,15 +163,15 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
              ;; 1. FINAL signal
              ((and final-sig (match final-sig (('final ans) ans) (('final-var var) var) (_ #f))) =>
               (lambda (answer)
-                (display "\n[GAIA] \u2713 FINAL signal detected.\n")
+                (display (string-append C-GREEN "\n[GAIA] \u2713 FINAL signal detected." C-RESET "\n"))
                 (if (equal? (car final-sig) 'final)
-                    (display (string-append "[GAIA] Answer: " answer "\n"))
-                    (display (string-append "[GAIA] Answer stored in: " answer "\n")))
+                    (display (string-append C-BOLD "[GAIA] Answer: " C-RESET answer "\n"))
+                    (display (string-append C-BOLD "[GAIA] Answer stored in: " C-RESET answer "\n")))
                 answer))
              
              ;; 2. High Confidence
              ((and conf-val (>= conf-val CONFIDENCE-THRESHOLD))
-              (display (string-append "\n[GAIA] \u2713 High confidence (" (number->string conf-val) "%) - stopping.\n"))
+              (display (string-append C-GREEN "\n[GAIA] \u2713 High confidence (" (number->string conf-val) "%) - stopping." C-RESET "\n"))
               response-text)
 
              ;; 3. Delegation
@@ -170,7 +179,7 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
               (lambda (delegation)
                  (match delegation
                   (('delegate goal context)
-                   (display "\n[GAIA] Delegating sub-task...\n")
+                   (display (string-append C-YELLOW "\n[GAIA] Delegating sub-task..." C-RESET "\n"))
                    (let* ((sub-session-id (string-append session-id "-sub-" (number->string (random 1000))))
                           (initial-input (string-append "GOAL: " goal "\nCONTEXT: " context))
                           ;; Recursive call with NEW session ID
@@ -187,7 +196,7 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
               (lambda (code)
                 (if (and code (> (string-length code) 0) (not (string=? code response-text)))
                     (begin
-                      (display "\n[GAIA] Executing Code...\n")
+                      (display (string-append C-YELLOW "\n[GAIA] Executing Code..." C-RESET "\n"))
                       (match (guix-investigate code)
                         (('ok result)
                          (display "\n[GAIA] Result: ")
@@ -210,7 +219,7 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
                         
                         (('error type msg)
                          (let ((feedback (handle-error type msg depth)))
-                           (display (string-append "\n[GAIA] Error: " feedback "\n"))
+                           (display (string-append C-RED "\n[GAIA] Error: " feedback C-RESET "\n"))
                            
                            ;; Log execution (error)
                            (let ((exec-log `(("session_id" . ,session-id)
@@ -231,7 +240,7 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
              
              ;; 5. Fallback (Text only)
              (else 
-              (display "\n[GAIA] \u26a0 No actionable output. Treating as final answer (unless low confidence).\n")
+              (display (string-append C-RED "\n[GAIA] \u26a0 No actionable output. Treating as final answer (unless low confidence)." C-RESET "\n"))
               response-text)))))))
 
 (define (handle-command input session-id)
@@ -244,7 +253,7 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
    
    ;; ,help
    ((string=? input ",help")
-    (display "Available commands:\n")
+    (display (string-append C-BOLD "Available commands:" C-RESET "\n"))
     (display "  ,ask <query>   - One-shot question to AI (no RLM loop)\n")
     (display "  ,eval <scheme> - Execute Scheme code locally\n")
     (display "  ,help          - Show this help\n")
@@ -282,11 +291,11 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
 
 (define (start-gaia . args)
   (activate-readline)
-  (display "Initializing GAIA (GNU AI Assistant)...\n")
+  (display (string-append C-BOLD C-GREEN "Initializing GAIA (GNU AI Assistant)..." C-RESET "\n"))
   
   (load-config)
-  (display (format #f "Config Loaded:\n  Model: ~a\n  Backend: ~a\n  URL: ~a\n" 
-                   (get-config 'model)
+  (display (format #f "Config Loaded:\n  Model: ~a~a~a\n  Backend: ~a\n  URL: ~a\n" 
+                   C-CYAN (get-config 'model) C-RESET
                    (get-config 'backend)
                    (get-config 'rai-url)))
                    
@@ -300,12 +309,12 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
     (display (string-append "Session ID: " session-id "\n"))
     
     (let loop ()
-      (display "\n[GAIA]> ")
-      (let ((input (read-line)))
+      (let ((input (readline (string-append "\n" C-BOLD C-GREEN "(GAIA) >" C-RESET " "))))
         (cond
          ((eof-object? input) (newline))
          ((string=? input "") (loop))
          (else
+          (add-history input) ;; Add to readline history
           (if (handle-command input session-id)
               (loop)
               #t)))))))
