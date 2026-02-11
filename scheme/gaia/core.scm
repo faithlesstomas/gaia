@@ -158,7 +158,7 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
                 (newline port)
                 (close-port port)))
 
-            ;; Decision Logic: FINAL > Confidence > Delegation > Code > Text
+            ;; Decision Logic: FINAL > Delegation > Code > Confidence > Text
             (cond
              ;; 1. FINAL signal
              ((and final-sig (match final-sig (('final ans) ans) (('final-var var) var) (_ #f))) =>
@@ -168,13 +168,8 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
                     (display (string-append C-BOLD "[GAIA] Answer: " C-RESET answer "\n"))
                     (display (string-append C-BOLD "[GAIA] Answer stored in: " C-RESET answer "\n")))
                 answer))
-             
-             ;; 2. High Confidence
-             ((and conf-val (>= conf-val CONFIDENCE-THRESHOLD))
-              (display (string-append C-GREEN "\n[GAIA] \u2713 High confidence (" (number->string conf-val) "%) - stopping." C-RESET "\n"))
-              response-text)
 
-             ;; 3. Delegation
+             ;; 2. Delegation (Action)
              ((extract-delegation response-text) =>
               (lambda (delegation)
                  (match delegation
@@ -191,7 +186,7 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
                   (_
                    (rlm-loop session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")" depth)))))
 
-             ;; 4. Scheme Execution
+             ;; 3. Scheme Execution (Action)
              ((extract-code response-text) =>
               (lambda (code)
                 (if (and code (> (string-length code) 0) (not (string=? code response-text)))
@@ -237,6 +232,11 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
                       
                     ;; Invalid code block
                     response-text)))
+             
+             ;; 4. High Confidence (Stop only if no action taken)
+             ((and conf-val (>= conf-val CONFIDENCE-THRESHOLD))
+              (display (string-append C-GREEN "\n[GAIA] \u2713 High confidence (" (number->string conf-val) "%) - stopping." C-RESET "\n"))
+              response-text)
              
              ;; 5. Fallback (Text only)
              (else 
