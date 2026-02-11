@@ -23,18 +23,18 @@
    (else #t)))
 
 (define (guix-investigate s-expression-code)
-  "Executes the given S-expression code inside a guix shell container."
+  "Executes the given S-expression code inside a guix shell container. Returns (ok result) or (error type message)."
   (let* ((wrapped-str (format #f "(begin ~a)" s-expression-code))
          ;; Parse locally to validate
-         (parsed-sexp (catch #t 
+         (parsed-sexp (catch #t
                              (lambda () (with-input-from-string wrapped-str read))
                              (lambda _ #f))))
-    
+
     (if (not parsed-sexp)
-        "Error: Could not parse code (Syntax Error)."
+        (list 'error 'syntax "Error: Could not parse code (Syntax Error).")
         (let ((safety-result (validate-safety parsed-sexp)))
           (if (string? safety-result)
-              safety-result ;; Return security error
+              (list 'error 'permission safety-result) ;; Return security error
               ;; Proceed with execution if safe
               (let* ((escaped-code (string-join (string-split wrapped-str #\') "'\\''"))
                      (command (format #f "guix shell --container --share=./=/workspace guile coreutils grep -- guile -c '(chdir \"/workspace\") ~a' 2>&1" escaped-code))
@@ -42,6 +42,6 @@
                      (result (read-string port))
                      (exit-val (status:exit-val (close-pipe port))))
                 (if (eq? exit-val 0)
-                    result
-                    (string-append "Error: Execution failed with exit code " (number->string exit-val)
-                                   "\nOutput:\n" result))))))))
+                    (list 'ok result)
+                    (list 'error 'runtime (string-append "Error: Execution failed with exit code " (number->string exit-val)
+                                                         "\nOutput:\n" result)))))))))
