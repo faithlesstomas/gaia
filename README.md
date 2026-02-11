@@ -95,6 +95,7 @@ GAIA doesn't just work; it grows. Every interaction is stored in `trajectories.j
 * **Logger:** Captures prompts, generated code, and execution results.
 * **Curator:** Filters successful interactions into a high-quality dataset.
 * **Goal:** Fine-tune smaller, local models to match or exceed frontier model performance on Guix-specific tasks.
+* **Guide:** See [fine_tuning_guide.md](file:///home/tomasz/.gemini/antigravity/brain/596335a5-f6e9-4386-a118-9a9a169615f1/fine_tuning_guide.md) for instructions.
 
 ## Benchmark Results (Phase 3)
 

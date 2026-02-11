@@ -31,3 +31,7 @@ dataset:
 
 clean:
 	rm -f *.go dataset-*.jsonl
+
+clean-trajectories:
+	rm -f trajectories.jsonl
+
