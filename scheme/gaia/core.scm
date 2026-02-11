@@ -6,9 +6,10 @@
   #:use-module (ice-9 regex)
   #:use-module (ice-9 readline)
   #:use-module (ice-9 rdelim)
+  #:use-module (gaia config)
   #:export (start-gaia SYSTEM_PROMPT extract-code extract-final-signal extract-confidence rlm-loop))
 
-(define MODEL "ministral-3:3b")
+
 
 
 (define SYSTEM_PROMPT
@@ -124,7 +125,7 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
         last-output)
       (begin
         (display (string-append "\n[GAIA] Thinking (Depth " (number->string depth) ")...\n"))
-        (let* ((response (chat-with-rai session-id last-output MODEL SYSTEM_PROMPT))
+        (let* ((response (chat-with-rai session-id last-output (get-config 'model) SYSTEM_PROMPT))
                (payload (assoc-ref response "payload"))
                (response-text (if payload (assoc-ref payload "content") "Error: No payload in response")))
 
@@ -255,7 +256,7 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
    ((string-prefix? ",ask " input)
     (let ((query (substring input 5)))
       (display "[Direct Question] Asking AI...\n")
-      (let* ((response (chat-with-rai session-id query MODEL "You are a helpful Guile Scheme expert."))
+      (let* ((response (chat-with-rai session-id query (get-config 'model) "You are a helpful Guile Scheme expert."))
              (payload (assoc-ref response "payload"))
              (content (if payload (assoc-ref payload "content") "Error No Payload")))
         (display "\nAI: ")
@@ -282,6 +283,13 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
 (define (start-gaia . args)
   (activate-readline)
   (display "Initializing GAIA (GNU AI Assistant)...\n")
+  
+  (load-config)
+  (display (format #f "Config Loaded:\n  Model: ~a\n  Backend: ~a\n  URL: ~a\n" 
+                   (get-config 'model)
+                   (get-config 'backend)
+                   (get-config 'rai-url)))
+                   
   (display "Type ',help' for commands or enter a task.\n")
   
   (let ((session-id (string-append "gaia-"
