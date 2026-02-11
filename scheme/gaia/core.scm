@@ -6,7 +6,7 @@
   #:use-module (ice-9 regex)
   #:use-module (ice-9 readline)
   #:use-module (ice-9 rdelim)
-  #:export (start-gaia SYSTEM_PROMPT extract-code extract-final-signal extract-confidence))
+  #:export (start-gaia SYSTEM_PROMPT extract-code extract-final-signal extract-confidence rlm-loop))
 
 (define MODEL "ministral-3:3b")
 
@@ -233,7 +233,7 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
               (display "\n[GAIA] \u26a0 No actionable output. Treating as final answer (unless low confidence).\n")
               response-text)))))))
 
-(define (start-gaia)
+(define (start-gaia . args)
   (activate-readline)
   (display "Initializing GAIA...\n")
   ;; Generate a dynamic session ID using rudimentary randomness

@@ -8,7 +8,7 @@
 
 (define HAYSTACK-FILE "haystack.txt")
 (define NEEDLE "GAIA_SECRET_KEY_999")
-(define FILE-SIZE-MB 10)
+(define FILE-SIZE-MB (string->number (or (getenv "BENCHMARK_SIZE_MB") "10")))
 
 (define (generate-haystack)
   (display (format #f "Generating ~aMB haystack...\n" FILE-SIZE-MB))
