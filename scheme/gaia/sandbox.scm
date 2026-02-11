@@ -73,7 +73,7 @@
     (module-use! m (resolve-interface '(ice-9 match)))
     (module-use! m (resolve-interface '(ice-9 regex)))
     (module-use! m (resolve-interface '(srfi srfi-1)))
-    
+    (module-use! m (resolve-interface '(gaia tools)))     
     m))
 
 (define (eval-safe code-sexp)

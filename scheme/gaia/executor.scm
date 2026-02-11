@@ -41,11 +41,21 @@
                      ;; We assume /workspace maps to project root, so 'scheme' dir is at /workspace/scheme
                      (container-command 
                       (format #f 
-                             "(begin (add-to-load-path \"/workspace/scheme\") (use-modules (gaia sandbox)) (let ((res (eval-safe '~a))) (if (not (unspecified? res)) (display res))))"
+                             "(begin (add-to-load-path \"/workspace/scheme\") (use-modules (gaia sandbox)) (let ((res (eval-safe '~a))) (if (not (unspecified? res)) (write res))))"
                               escaped-code))
-                     (escaped-container-cmd (string-join (string-split container-command #\') "'\\''"))
                      
-                     (command (format #f "guix shell --container --share=./=/workspace guile coreutils grep -- guile --no-auto-compile -c '~a' 2>&1" escaped-container-cmd))
+                     ;; Helper to shell-quote a string (wrap in single quotes, escape inner single quotes)
+                     (shell-quote (lambda (s) (string-append "'" (string-join (string-split s #\') "'\\''") "'")))
+                     
+                     ;; Level 1: Guile command runs code, redirects stderr to stdout
+                     (guile-cmd-inner (format #f "guile --no-auto-compile -c ~a 2>&1" (shell-quote container-command)))
+                     
+                     ;; Level 2: Bash command runs guile command
+                     ;; We explicitly use bash to handle the redirection
+                     (bash-cmd (format #f "bash -c ~a" (shell-quote guile-cmd-inner)))
+
+                     ;; Level 3: Guix Shell executes bash
+                     (command (format #f "guix shell --container --share=./=/workspace guile coreutils grep sed gawk bash -- ~a" bash-cmd))
                      (port (open-input-pipe command))
                      (result (read-string port))
                      (exit-val (status:exit-val (close-pipe port))))

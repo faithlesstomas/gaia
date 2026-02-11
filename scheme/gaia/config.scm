@@ -4,7 +4,7 @@
 
 (define %default-config
   `((rai-url . "http://localhost:8000")
-    (model . "ministral-3b")
+    (model . "ministral-3:3b")
     (backend . "ollama")
     (framework . "pydantic_ai")
     (system-prompt . #f))) ;; Default system prompt is usually hardcoded in core, but can be overridden
