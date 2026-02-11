@@ -37,7 +37,15 @@
               (list 'error 'permission safety-result) ;; Return security error
               ;; Proceed with execution if safe
               (let* ((escaped-code (string-join (string-split wrapped-str #\') "'\\''"))
-                     (command (format #f "guix shell --container --share=./=/workspace guile coreutils grep -- guile -c '(chdir \"/workspace\") ~a' 2>&1" escaped-code))
+                     ;; We wrap the code to run inside our sandbox module
+                     ;; We assume /workspace maps to project root, so 'scheme' dir is at /workspace/scheme
+                     (container-command 
+                      (format #f 
+                             "(begin (add-to-load-path \"/workspace/scheme\") (use-modules (gaia sandbox)) (let ((res (eval-safe '~a))) (if (not (unspecified? res)) (display res))))"
+                              escaped-code))
+                     (escaped-container-cmd (string-join (string-split container-command #\') "'\\''"))
+                     
+                     (command (format #f "guix shell --container --share=./=/workspace guile coreutils grep -- guile --no-auto-compile -c '~a' 2>&1" escaped-container-cmd))
                      (port (open-input-pipe command))
                      (result (read-string port))
                      (exit-val (status:exit-val (close-pipe port))))
