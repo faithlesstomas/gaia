@@ -27,7 +27,14 @@ benchmark:
 	BENCHMARK_SIZE_MB=10 $(GUIX_SHELL) guile -L scheme scripts/benchmark-needle.scm
 
 dataset:
-	$(GUIX_SHELL) guile -L scheme -c '(use-modules (gaia curator)) (curate-dataset "trajectories.jsonl" "dataset-success.jsonl" "dataset-failure.jsonl")'
+	$(GUIX_SHELL) guile -L scheme -c '(use-modules (gaia curator)) (curate-dataset "trajectories.jsonl" "dataset-success.jsonl" "dataset-failure.jsonl")' $(if $(RAI_URL), --push-to-rai $(RAI_URL))
+
+learn:
+	@echo "Curating and pushing to RAI..."
+	$(MAKE) dataset RAI_URL=http://localhost:8000
+	@echo "Triggering training..."
+	curl -X POST -H "Content-Type: application/json" -d '{"base_model": "ministral-8b", "dataset_id": "dataset-success.jsonl"}' http://localhost:8000/train/start
+
 
 clean:
 	rm -f *.go dataset-*.jsonl

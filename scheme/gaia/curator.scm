@@ -84,4 +84,22 @@
       (close-port fail-port)
       
       (display (format #f "Curated: ~a successful sessions, ~a failed sessions.\n"
-                       success-count failure-count)))))
+                       success-count failure-count))
+      
+      ;; Check for push-to-rai flag (simple check for now)
+      (let ((args (command-line)))
+        (cond
+          ((member "--push-to-rai" args) =>
+           (lambda (tail)
+             (if (null? (cdr tail))
+                 (display "Error: --push-to-rai requires a URL argument.\n")
+                 (let ((url (cadr tail)))
+                   (display (format #f "Pushing dataset to RAI at ~a...\n" url))
+                   ;; Use curl for simplicity
+                   (let ((status (system* "curl" "-X" "POST" 
+                                          "-F" (string-append "file=@" output-success) 
+                                          (string-append url "/train/dataset"))))
+                     (if (zero? status)
+                         (display "Dataset pushed successfully.\n")
+                         (display "Failed to push dataset.\n"))))))))))))
+
