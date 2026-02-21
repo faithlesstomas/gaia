@@ -1,3 +1,6 @@
+RAI_URL ?= http://localhost:8000
+BASE_MODEL ?= gemma-3-4b
+
 .PHONY: run repl check test-units test-rlm benchmark dataset clean
 
 GUIX_SHELL = guix shell -m guix.scm --
@@ -31,9 +34,11 @@ dataset:
 
 learn:
 	@echo "Curating and pushing to RAI..."
-	$(MAKE) dataset RAI_URL=http://localhost:8000
+	@$(MAKE) dataset RAI_URL=http://localhost:8000
 	@echo "Triggering training..."
-	curl -X POST -H "Content-Type: application/json" -d '{"base_model": "ministral-8b", "dataset_id": "dataset-success.jsonl"}' http://localhost:8000/train/start
+	@curl -X POST -H "Content-Type: application/json" -d '{"base_model": "$(BASE_MODEL)", "dataset_id": "dataset-success.jsonl"}' http://localhost:8000/train/start | jq
+	@echo "Check staus with:"
+	@echo "curl http://localhost:8000/train/status/{job_id}"
 
 
 clean:
@@ -41,4 +46,3 @@ clean:
 
 clean-trajectories:
 	rm -f trajectories.jsonl
-

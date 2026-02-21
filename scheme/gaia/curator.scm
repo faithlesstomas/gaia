@@ -41,12 +41,17 @@
     ;; System prompt is implicit in the model, but we can add it if needed.
     ;; For now, we map Input -> Human, Response -> GPT
     
+    (define (ensure-string val)
+      (cond ((string? val) val)
+            ((not val) "")
+            (else (format #f "~a" val))))
+            
     (define (build-conv steps acc)
       (if (null? steps)
           acc
           (let* ((step (car steps))
-                 (input (assoc-ref step "input"))
-                 (response (assoc-ref step "response")))
+                 (input (ensure-string (assoc-ref step "input")))
+                 (response (ensure-string (assoc-ref step "response"))))
             (build-conv (cdr steps)
                         (append acc 
                                 (list `(("from" . "human") ("value" . ,input))
