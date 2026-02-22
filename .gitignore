@@ -12,3 +12,21 @@ haystack.txt
 # Editor backups
 *~
 \#*\#
+.vscode/
+
+# ML outputs and checkpoints
+outputs/
+tmp/
+
+# Sensitive / credentials
+hf_token
+
+# Scratch / debug scripts
+debug_tok.py
+fix_tok.py
+fix_all_tok.py
+patch_tokenizer.py
+patch_tokenizer2.py
+test_hf_peft.py
+test_tok.py
+test-output.txt
