@@ -1,5 +1,5 @@
 GAIA_RAI_URL ?= http://localhost:8000
-GAIA_MODEL ?= gemma-3-4b
+GAIA_MODEL ?= gemma3:12b
 GAIA_BACKEND ?= ollama
 GAIA_BASE_MODEL ?= gemma-3-4b
 
@@ -18,7 +18,7 @@ run:
 repl:
 	$(GUIX_SHELL) guile -L scheme
 
-check: test-units
+check: test-units test-tools
 
 test-units:
 	@echo "Running core unit tests..."
@@ -28,12 +28,16 @@ test-units:
 	@echo "Running error handling tests..."
 	$(GUIX_SHELL) guile -L scheme scripts/test-error-handling.scm
 
+test-tools:
+	@echo "Running tools unit tests..."
+	$(GUIX_SHELL) guile -L scheme scripts/test-tools.scm
+
 test-rlm:
-	@echo "Running RLM functional test (Small Benchmark)..."
-	BENCHMARK_SIZE_MB=1 $(GUIX_SHELL) guile -L scheme scripts/benchmark-needle.scm
+	@echo "Running RLM pipeline sanity check (deterministic)..."
+	$(GUIX_SHELL) guile -L scheme scripts/test-sanity.scm
 
 benchmark:
-	@echo "Running Full Benchmark..."
+	@echo "Running Full S-NIAH Benchmark (10MB haystack)..."
 	BENCHMARK_SIZE_MB=10 $(GUIX_SHELL) guile -L scheme scripts/benchmark-needle.scm
 
 dataset:

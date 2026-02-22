@@ -1,6 +1,7 @@
 (add-to-load-path (string-append (dirname (current-filename)) "/../scheme"))
 
 (use-modules (gaia core)
+             (gaia config)
              (gaia executor) ;; for guix-investigate if needed, but rlm-loop handles it
              (ice-9 rdelim)
              (ice-9 format)
@@ -25,11 +26,18 @@
   (display "Haystack generated.\n"))
 
 (define (run-benchmark)
+  ;; Load config from environment variables
+  (load-config)
+  (display (format #f "[BENCHMARK] Config:\n  Model:   ~a\n  Backend: ~a\n  URL:     ~a\n"
+                   (get-config 'model)
+                   (get-config 'backend)
+                   (get-config 'rai-url)))
+
   (generate-haystack)
   (display "Starting RLM Benchmark (End-to-End via rlm-loop)...\n")
   (display "[BENCHMARK] Task: Find secret key in haystack.txt.\n")
 
-  (let ((session-id (string-append "bench-" (number->string (random 10000))))
+  (let ((session-id (string-append "bench-" (number->string (current-time)) "-" (number->string (random 1000000000))))
         (initial-prompt (format #f "There is a file named '~a' in the current directory. It contains a secret key that starts with 'GAIA_SECRET_KEY_'. Find it and return it using the FINAL() signal." HAYSTACK-FILE)))
 
     ;; Run RLM Loop

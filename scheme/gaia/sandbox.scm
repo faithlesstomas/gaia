@@ -9,39 +9,42 @@
     ;; Arithmetic
     + - * / = > < >= <= quotient remainder modulo
     positive? negative? zero? odd? even? abs max min
-    
+
     ;; Booleans
     not and or boolean?
-    
+
     ;; Lists
     list cons car cdr pair? null? list? length append reverse
     list-ref member memq memv assoc assq assv
     map for-each filter
-    
+
     ;; Strings
     string? string-length string-append substring string->number number->string
-    string=? string<? string>? 
-    
+    string=? string<? string>?
+
     ;; Symbols
     symbol? symbol->string string->symbol
-    
+
     ;; Vectors
     vector? vector-length vector-ref vector-set! make-vector vector
-    
+
     ;; Control Flow
     if cond case begin let let* letrec lambda define set!
     do while ;; Macros often need syntax-rules which is in (guile)
     quote quasiquote unquote unquote-splicing
-    
+
     ;; Basic I/O (Stdout only)
     display newline format
-    
+
     ;; Exceptions (Basic)
     catch throw error
-    
+
     ;; Ports (String only - for now)
     open-input-string open-output-string get-output-string
     call-with-input-string call-with-output-string
+
+    ;; Modules
+    use-modules
     ))
 
 (define (make-safe-interface)
@@ -63,21 +66,20 @@
   "Creates a fresh module that uses ONLY the safe interface."
   (let ((m (make-module))
         (safe-interface (make-safe-interface)))
-    ;; We do NOT want (guile) by default. make-module creates an empty one but usually 
+    ;; We do NOT want (guile) by default. make-module creates an empty one but usually
     ;; the system adds the-root-module.
-    
+
     ;; Add our safe interface
     (module-use! m safe-interface)
-    
+
     ;; Add other safe libraries
     (module-use! m (resolve-interface '(ice-9 match)))
     (module-use! m (resolve-interface '(ice-9 regex)))
     (module-use! m (resolve-interface '(srfi srfi-1)))
-    (module-use! m (resolve-interface '(gaia tools)))     
+    (module-use! m (resolve-interface '(gaia tools)))
     m))
 
 (define (eval-safe code-sexp)
   "Evaluates s-expression in a fresh safe module."
   (let ((m (make-safe-module)))
     (eval code-sexp m)))
-

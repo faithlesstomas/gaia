@@ -55,7 +55,7 @@
                      (bash-cmd (format #f "bash -c ~a" (shell-quote guile-cmd-inner)))
 
                      ;; Level 3: Guix Shell executes bash
-                     (command (format #f "guix shell --container --share=./=/workspace guile coreutils grep sed gawk bash -- ~a" bash-cmd))
+                     (command (format #f "guix shell --container --share=./=/workspace guile coreutils grep sed gawk bash git guix -- ~a" bash-cmd))
                      (port (open-input-pipe command))
                      (result (read-string port))
                      (exit-val (status:exit-val (close-pipe port))))
