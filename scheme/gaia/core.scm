@@ -6,6 +6,7 @@
   #:use-module (ice-9 regex)
   #:use-module (ice-9 readline)
   #:use-module (ice-9 rdelim)
+  #:use-module (srfi srfi-43)
   #:use-module (gaia config)
   #:export (start-gaia SYSTEM_PROMPT extract-code extract-final-signal extract-confidence rlm-loop))
 
@@ -256,23 +257,28 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
 (define (handle-command input session-id)
   "Parses and executes meta-commands or delegates to RLM."
   (cond
-   ;; ,exit
-   ((string=? input ",exit")
+   ;; /exit
+   ((string=? input "/exit")
     (display "Bye.\n")
     #f) ;; Return #f to stop loop
    
-   ;; ,help
-   ((string=? input ",help")
+   ;; /help
+   ((string=? input "/help")
     (display (string-append C-BOLD "Available commands:" C-RESET "\n"))
-    (display "  ,ask <query>   - One-shot question to AI (no RLM loop)\n")
-    (display "  ,eval <scheme> - Execute Scheme code locally\n")
-    (display "  ,help          - Show this help\n")
-    (display "  ,exit          - Quit GAIA\n")
+    (display "  /ask <query>   - One-shot question to AI (no RLM loop)\n")
+    (display "  /eval <scheme> - Execute Scheme code locally\n")
+    (display "  /models        - List available models and LoRA adapters\n")
+    (display "  /model <name>  - Select a base model or LoRA adapter folder to load\n")
+    (display "  /backend <name>- Select the backend to use (e.g. local, ollama)\n")
+    (display "  /base-model <name>- Select the foundation model used for training\n")
+    (display "  /train         - Manually trigger Fine Tuning (make learn) from dataset\n")
+    (display "  /help          - Show this help\n")
+    (display "  /exit          - Quit GAIA\n")
     (display "  <query>        - Start standard RLM investigation\n")
     #t)
 
-   ;; ,ask <query>
-   ((string-prefix? ",ask " input)
+   ;; /ask <query>
+   ((string-prefix? "/ask " input)
     (let ((query (substring input 5)))
       (display "[Direct Question] Asking AI...\n")
       (let* ((response (chat-with-rai session-id query (get-config 'model) "You are a helpful Guile Scheme expert."))
@@ -283,8 +289,8 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
         (newline))
       #t))
 
-   ;; ,eval <scheme>
-   ((string-prefix? ",eval " input)
+   ;; /eval <scheme>
+   ((string-prefix? "/eval " input)
     (let ((code (substring input 6)))
       (catch #t
         (lambda ()
@@ -293,6 +299,67 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
         (lambda (key . args) 
           (display (format #f "Error: ~a ~a\n" key args))))
       #t))
+
+   ;; /models
+   ((string=? input "/models")
+    (let ((models-alist (get-models)))
+       (display (string-append C-BOLD "Available models (from RAI Registry):\n" C-RESET))
+       (if (list? models-alist)
+           (for-each (lambda (pair)
+                       (let ((backend (car pair))
+                             (model-vec (cdr pair)))
+                         (display (string-append C-CYAN "  [" backend "]:\n" C-RESET))
+                         (if (vector? model-vec)
+                             (vector-for-each (lambda (i m) (display (string-append "    - " m "\n"))) model-vec)
+                             (for-each (lambda (m) (display (string-append "    - " m "\n"))) model-vec))))
+                     models-alist)
+           (display (string-append C-RED "  No models found or unexpected response format.\n" C-RESET))))
+    #t)
+
+   ;; /model
+   ((string=? input "/model")
+    (display (string-append C-BOLD "Current model: " C-RESET (get-config 'model) "\n"))
+    #t)
+
+   ;; /model <name>
+   ((string-prefix? "/model " input)
+    (let ((new-model (substring input 7)))
+       (set-config! 'model new-model)
+       (display (string-append C-GREEN "Model hot-swapped for session to: " C-RESET new-model "\n")))
+    #t)
+
+   ;; /backend
+   ((string=? input "/backend")
+    (display (string-append C-BOLD "Current backend: " C-RESET (get-config 'backend) "\n"))
+    #t)
+
+   ;; /backend <name>
+   ((string-prefix? "/backend " input)
+    (let ((new-backend (substring input 9)))
+       (set-config! 'backend new-backend)
+       (display (string-append C-GREEN "Backend hot-swapped for session to: " C-RESET new-backend "\n")))
+    #t)
+
+   ;; /base-model
+   ((string=? input "/base-model")
+    (display (string-append C-BOLD "Current base model for training: " C-RESET (get-config 'base-model) "\n"))
+    #t)
+
+   ;; /base-model <name>
+   ((string-prefix? "/base-model " input)
+    (let ((new-base (substring input 12)))
+       (set-config! 'base-model new-base)
+       (display (string-append C-GREEN "Base model for training hot-swapped to: " C-RESET new-base "\n")))
+    #t)
+   
+   ;; /train
+   ((string=? input "/train")
+    (display (string-append C-YELLOW "Triggering model training...\n" C-RESET))
+    (let ((current-base (get-config 'base-model)))
+      (setenv "GAIA_BASE_MODEL" current-base)
+      (system* "make" "learn")
+      (setenv "GAIA_BASE_MODEL" ""))
+    #t)
 
    ;; Standard RLM Loop
    (else
@@ -309,7 +376,7 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
                    (get-config 'backend)
                    (get-config 'rai-url)))
                    
-  (display "Type ',help' for commands or enter a task.\n")
+  (display "Type '/help' for commands or enter a task.\n")
   
   (let ((session-id (string-append "gaia-"
                                    (number->string (current-time))
@@ -319,7 +386,8 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
     (display (string-append "Session ID: " session-id "\n"))
     
     (let loop ()
-      (let ((input (readline (string-append "\n" C-BOLD C-GREEN "(GAIA) >" C-RESET " "))))
+      (newline)
+      (let ((input (readline (string-append "\x01" C-BOLD C-GREEN "\x02(GAIA) >\x01" C-RESET "\x02 "))))
         (cond
          ((eof-object? input) (newline))
          ((string=? input "") (loop))

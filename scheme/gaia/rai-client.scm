@@ -6,7 +6,7 @@
   #:use-module (ice-9 receive)
   #:use-module (gaia utils)
   #:use-module (gaia config)
-  #:export (chat-with-rai create-agent))
+  #:export (chat-with-rai create-agent get-models))
 
 (define (create-agent name model system-prompt)
   (let* ((host (get-config 'rai-url))
@@ -34,5 +34,23 @@
          (headers '((content-type . (application/json)))))
     (receive (response-header response-body)
         (http-post url #:body body #:headers headers)
-      (let ((json-response (json->scm (utf8->string response-body))))
+      (let* ((body-str (if (string? response-body) response-body (utf8->string response-body)))
+             (json-response (catch #t
+                                   (lambda () (json->scm body-str))
+                                   (lambda (key . args)
+                                     `(("error" . ,body-str))))))
         json-response))))
+
+(define (get-models)
+  "Fetches the list of available models and adapters from RAI server."
+  (let* ((host (get-config 'rai-url))
+         (backend (get-config 'backend))
+         (url (string-append host "/api/v1/models?backend=" backend)))
+    (receive (response-header response-body)
+        (http-get url)
+      (let* ((body-str (if (string? response-body) response-body (utf8->string response-body)))
+             (json-response (catch #t
+                                   (lambda () (json->scm body-str))
+                                   (lambda (key . args)
+                                     `(("error" . ,body-str))))))
+        (or (assoc-ref json-response "models") '())))))

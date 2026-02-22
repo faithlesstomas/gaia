@@ -31,11 +31,11 @@
 
   (let ((session-id (string-append "bench-" (number->string (random 10000))))
         (initial-prompt (format #f "There is a file named '~a' in the current directory. It contains a secret key that starts with 'GAIA_SECRET_KEY_'. Find it and return it using the FINAL() signal." HAYSTACK-FILE)))
-    
+
     ;; Run RLM Loop
     (let ((result (rlm-loop session-id initial-prompt 0)))
       (display (format #f "\n[BENCHMARK] RLM returned: ~a\n" result))
-      
+
       (if (string-contains result NEEDLE)
           (display "\n[BENCHMARK] SUCCESS! Found needle.\n")
           (display "\n[BENCHMARK] FAILURE. Needle not found in result.\n"))))

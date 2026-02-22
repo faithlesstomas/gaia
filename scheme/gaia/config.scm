@@ -1,23 +1,31 @@
 (define-module (gaia config)
   #:use-module (ice-9 match)
-  #:export (load-config get-config))
+  #:use-module (srfi srfi-1)
+  #:export (load-config get-config set-config!))
 
 (define %default-config
   `((rai-url . "http://localhost:8000")
     (model . "ministral-3:3b")
     (backend . "ollama")
+    (base-model . "gemma-3-4b")
     (framework . "pydantic_ai")
     (system-prompt . #f))) ;; Default system prompt is usually hardcoded in core, but can be overridden
 
 (define *config* (make-parameter %default-config))
 
+(define (set-config! key value)
+  "Updates the configuration value for a specific key."
+  (let ((current (*config*)))
+    (*config* (acons key value (alist-delete key current)))))
+
 (define (get-env-override key)
   "Maps config keys to environment variables and returns value if set."
   (let ((env-var (case key
-                   ((rai-url) "RAI_URL")
+                   ((rai-url) "GAIA_RAI_URL")
                    ((model) "GAIA_MODEL")
-                   ((backend) "RAI_BACKEND")
-                   ((framework) "RAI_FRAMEWORK")
+                   ((backend) "GAIA_BACKEND")
+                   ((base-model) "GAIA_BASE_MODEL")
+                   ((framework) "GAIA_FRAMEWORK")
                    ((system-prompt) "GAIA_SYSTEM_PROMPT")
                    (else #f))))
     (and env-var (getenv env-var))))

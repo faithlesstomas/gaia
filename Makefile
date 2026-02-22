@@ -1,5 +1,12 @@
-RAI_URL ?= http://localhost:8000
-BASE_MODEL ?= gemma-3-4b
+GAIA_RAI_URL ?= http://localhost:8000
+GAIA_MODEL ?= gemma-3-4b
+GAIA_BACKEND ?= ollama
+GAIA_BASE_MODEL ?= gemma-3-4b
+
+export GAIA_RAI_URL
+export GAIA_MODEL
+export GAIA_BACKEND
+export GAIA_BASE_MODEL
 
 .PHONY: run repl check test-units test-rlm benchmark dataset clean
 
@@ -30,15 +37,15 @@ benchmark:
 	BENCHMARK_SIZE_MB=10 $(GUIX_SHELL) guile -L scheme scripts/benchmark-needle.scm
 
 dataset:
-	$(GUIX_SHELL) guile -L scheme -c '(use-modules (gaia curator)) (curate-dataset "trajectories.jsonl" "dataset-success.jsonl" "dataset-failure.jsonl")' $(if $(RAI_URL), --push-to-rai $(RAI_URL))
+	$(GUIX_SHELL) guile -L scheme -c '(use-modules (gaia curator)) (curate-dataset "trajectories.jsonl" "dataset-success.jsonl" "dataset-failure.jsonl")' $(if $(GAIA_RAI_URL), --push-to-rai $(GAIA_RAI_URL))
 
 learn:
 	@echo "Curating and pushing to RAI..."
-	@$(MAKE) dataset RAI_URL=http://localhost:8000
+	@$(MAKE) dataset GAIA_RAI_URL=$(GAIA_RAI_URL)
 	@echo "Triggering training..."
-	@curl -X POST -H "Content-Type: application/json" -d '{"base_model": "$(BASE_MODEL)", "dataset_id": "dataset-success.jsonl"}' http://localhost:8000/train/start | jq
+	@curl -X POST -H "Content-Type: application/json" -d '{"base_model": "$(GAIA_BASE_MODEL)", "dataset_id": "dataset-success.jsonl"}' $(GAIA_RAI_URL)/train/start | jq
 	@echo "Check staus with:"
-	@echo "curl http://localhost:8000/train/status/{job_id}"
+	@echo "curl $(GAIA_RAI_URL)/train/status/{job_id}"
 
 
 clean:

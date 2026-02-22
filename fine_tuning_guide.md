@@ -16,10 +16,11 @@ QLoRA takes efficienty further by loading the **base model in 4-bit precision** 
 *   **Pros:** Allows fine-tuning 7B models on a single 12GB GPU (or even smaller).
 *   **Impact:** This is the standard for local LLM tuning today.
 
-### **Unsloth**
-[Unsloth](https://github.com/unslothai/unsloth) is a library that optimizes the backpropagation mechanics of LoRA/QLoRA.
-*   **Benefit:** Up to **2x faster training** and **60% less memory** usage than standard Hugging Face PEFT.
-*   **Verdict:** We highly recommend using Unsloth for GAIA fine-tuning.
+### **PyTorch & LoRA Inference Overhead (Performance Issues)**
+While the standard training stack (PyTorch + HuggingFace PEFT) with LoRA injection executes the *Proof of Concept* and trains the model brilliantly, inference (text generation) using this stack is drastically slow compared to compiled C++ stacks (e.g., Llama.cpp / Ollama) due to several reasons:
+1. **Autoregressive Loop in Python:** The overhead of invoking heavy functions within a Python loop for each generated token.
+2. **Compilation & Hardware (AMD ROCm):** Libraries like PyTorch have dynamic frameworks (TorchDynamo/SDPA) which can run asynchronously faster on GPUs. However, on smaller chips like RDNA3 APUs, these often lead to environment freezes and HIP MES errors.
+3. **No KV Cache:** To stabilize model operation (bypassing faults like *unspecified launch failure*), we are forced to disable dynamic cache tables (`use_cache=False`), which forces the model to iteratively recalculate sequences from the beginning for each token. This wastes 95% of processing power.
 
 ---
 
@@ -30,11 +31,12 @@ QLoRA takes efficienty further by loading the **base model in 4-bit precision** 
 | Component | Responsibility | Technology |
 |-----------|----------------|------------|
 | **GAIA** | **Data Generation**. Runs the RLM loop, encounters errors, creates `dataset-success.jsonl`. | Guile Scheme |
-| **RAI** | **Training & Inference**. Manages the GPU, loads Unsloth, runs the training loop. | Python (PyTorch/Unsloth) |
+| **RAI** | **Training & Validation**. Manages the GPU, runs the PyTorch training loop. | Python (PyTorch/Transformers) |
+| **IREE / Ollama** | **Production Inference**. Exported models should be compiled here. | MLIR / Llama.cpp |
 
-**Why not MLIR/IREE for training?**
-*   **Maturity:** MLIR/IREE is excellent for **inference** deployment (running the model fast). However, the ecosystem for **training** LLMs (autograd, optimizers, LoRA implementations) is experimental compared to the mature PyTorch/Unsloth stack.
-*   **Strategy:** Use PyTorch/Unsloth in RAI to *train* the model. Then, export the fine-tuned weights (merge LoRA) and compile them with IREE for *inference* if you want maximum performance.
+**Future Vector - MLIR/IREE instead of PyTorch for Execution**
+*   **Maturity:** Keeping in mind the PyTorch optimization issues described, the trained LoRA layer should be permanently merged (`merge_and_unload()`) into the base weights (e.g., in `.vmfb` or `.gguf` format), and the inference workload loaded onto the optimal MLIR/IREE compilation engine.
+*   **Strategy:** Use PyTorch strictly to *train* the model as an experimental refinement with the PEFT flag. Once the experiment is complete, compile it using external toolchains to achieve 10x higher speed and utilize KV Cache without crashes for the GAIA architecture.
 
 ---
 
@@ -125,3 +127,12 @@ Once trained, tell RAI to load the base model with the new adapter:
 model: "ministral-3b"
 adapter: "gaia-lora-adapter"
 ```
+
+---
+
+## 5. Future Research Paths (Note)
+
+For the next educational cycles of GAIA, exploring the idea of the **TRM (Tiny Recursive Model)** is worth considering.
+- According to the publication [https://arxiv.org/abs/2510.04871](https://arxiv.org/abs/2510.04871), recursive architectures offer the capability to drastically reduce VRAM requirements by recursively utilizing the same small, looped layered matrices.
+- Deploying a model compiled with IREE in tandem with TRM would provide a potentially phenomenal opportunity to implement a *hardware-accelerated agent capable of native background learning without PyTorch overheads*.
+- *Next Steps:* Add prototyping of a compilation mechanism for novel TRM graphs within the HuggingFace ecosystem to the roadmap.
