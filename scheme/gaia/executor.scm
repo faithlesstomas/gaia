@@ -3,7 +3,13 @@
   #:use-module (ice-9 rdelim)
   #:use-module (ice-9 format)
   #:use-module (ice-9 match)
-  #:export (guix-investigate))
+  #:use-module (gaia rlm-env)
+  #:export (guix-investigate rlm-execute))
+
+(define (rlm-execute env code-string)
+  "Executes code in the persistent RLM environment (fast, stateful, native).
+ENV is an rlm-env record. Returns ('ok result) or ('error type message)."
+  (rlm-eval! env code-string))
 
 (define BANNED-PRIMITIVES '(system system* delete-file rmdir rename-file chmod))
 

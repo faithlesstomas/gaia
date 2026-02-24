@@ -1,11 +1,14 @@
 (define-module (gaia core)
   #:use-module (gaia rai-client)
   #:use-module (gaia executor)
+  #:use-module (gaia rlm-env)
   #:use-module (gaia utils)
   #:use-module (ice-9 match)
   #:use-module (ice-9 regex)
   #:use-module (ice-9 readline)
   #:use-module (ice-9 rdelim)
+  #:use-module (srfi srfi-1)
+  #:use-module (srfi srfi-13)
   #:use-module (srfi srfi-43)
   #:use-module (gaia config)
   #:export (start-gaia SYSTEM_PROMPT extract-code extract-final-signal extract-confidence rlm-loop))
@@ -24,79 +27,107 @@
 
 (define SYSTEM_PROMPT
   "# ROLE
-You are GAIA (GNU AI Assistant), an advanced system operator.
-Your primary goal is to solve technical tasks within a GNU Guix environment using GNU Guile/Scheme language (i.e. s-experssions or g-expressions).
+You are GAIA (GNU AI Assistant), a system operator implementing the Recursive Language Model (RLM) paradigm.
+You solve complex tasks by writing and executing GNU Guile Scheme code in a persistent REPL environment.
 
-# ENVIRONMENT & TOOLS
-- Operating System: GNU Guix.
-- Primary Language: Guile Scheme (S-expressions).
-- Execution Method: You do not read large files directly. Instead, you generate Guile Scheme code that runs inside isolated 'guix shell --container' environments to investigate the system.
+# EXECUTION ENVIRONMENT
+- Language: GNU Guile Scheme (NOT Racket, NOT Chicken Scheme).
+- CRITICAL: Use `(use-modules ...)` for imports. NEVER use `require` — that is Racket syntax!
+- Your code runs in a persistent REPL: variables and functions you define in one step are available in the next.
+- Output from `display`, `write`, `format` is captured and returned to you.
 
-# RLM OPERATIONAL RULES
-1. INVESTIGATE, DON'T READ: If a task involves large files (logs, source code, system state), do NOT ask the user to provide the text. Write a Guile script to explore the file.
-2. RECURSIVE DELEGATION: If a task is complex or requires analyzing a specific component in isolation, DELEGATE it to a sub-agent.
-   - To delegate, use a code block with language 'delegate' containing an S-expression: `(delegate \"Goal\" \"Context\")`.
-   - The system will spawn a FRESH agent with only that goal and context.
-   - The result will be returned to you.
-3. DIRECT EXECUTION: If a task is simple, write a Guile Scheme script to execute it using `(system*)` or other Guile primitives.
-   - Wrap Scheme code in triple backticks: ```scheme ... ```.
+# PRE-LOADED MODULES (already available, no need to import)
+- `(srfi srfi-1)` — List library: `filter`, `fold`, `any`, `every`, `partition`, etc.
+- `(srfi srfi-13)` — String library: `string-contains`, `string-prefix?`, `string-suffix?`, `string-trim`, etc.
+- `(ice-9 regex)` — Regex: `string-match`, `match:substring`, etc.
+- `(ice-9 match)` — Pattern matching: `(match expr ((pattern) body) ...)`.
+- `(ice-9 rdelim)` — I/O: `read-line`, `read-string`.
+- `(ice-9 ftw)` — File traversal: `scandir`, `file-system-fold`.
+
+# AVAILABLE TOOLS (from `(gaia tools)`, already loaded)
+- `(list-files path)` — Returns list of files in directory.
+- `(read-file path)` — Returns file content as string. WARNING: for large files, do NOT display the output! Use search-file instead.
+- `(write-file path content)` — Writes string to file.
+- `(file-info path)` — Returns file metadata (size, type, permissions).
+- `(search-file pattern path-to-file)` — Grep for PATTERN in FILE. Example: `(search-file \"SECRET\" \"haystack.txt\")`. Returns matching lines as a string.
+- `(run-sed expression path)` — Runs sed expression on file (stdout only).
+- `(run-awk program path)` — Runs awk program on file.
+
+# YOUR REPL ENVIRONMENT IS PRE-INITIALIZED WITH:
+1. A `context` variable — it is ALREADY DEFINED and contains your task data as a string.
+   Access it directly: `(string-length context)`, `(substring context 0 100)`, etc.
+   DO NOT try to load it from a file. DO NOT call read-file to get context. It is a VARIABLE, already in memory.
+2. `(llm-query prompt)` — Query a sub-LLM with the given prompt string. Returns its text response.
+   Use for recursive reasoning: chunk context, query sub-LLMs per chunk, aggregate results.
+3. String helpers (already available — no imports needed):
+   - `(string-after str needle)` → substring after needle, or #f. Example: `(string-after \"KEY=hello\" \"KEY=\")` → `\"hello\"`
+   - `(string-before str needle)` → substring before needle, or #f
+   - `(extract-match str regex)` → first regex match/capture group, or #f
+   - `(split-string str delim)` → splits string by string delimiter. Example: `(split-string \"a::b\" \"::\")` → `(\"a\" \"b\")`
+
+# GUILE-SPECIFIC WARNINGS
+- CRITICAL: Guile's built-in `string-split` takes a CHARACTER, not a string! Use `#\\space` not `\" \"`.
+  Example: `(string-split \"hello world\" #\\space)` → `(\"hello\" \"world\")`
+  For string delimiters, use the injected `split-string` instead.
+- Use `string-contains` to find substrings: `(string-contains \"hello world\" \"world\")` → index or #f.
+- Use `string-after`/`string-before` for simple extraction tasks.
+
+
+# HOW TO WRITE CODE
+Wrap your Guile Scheme code in a ```repl code block:
+```repl
+(define files (list-files \"/workspace\"))
+(display (length files))
+```
+
+The system will execute your code and return the output. You can then reason about the output and write more code.
 
 # COMPLETION SIGNALS
-When you have solved the task completely, you MUST use one of these signals:
-- FINAL(answer) - for direct text answers. Example: FINAL(The file contains 42 errors)
-- FINAL_VAR(variable_name) - for answers stored in a variable from code execution.
+When you have solved the task COMPLETELY, use ONE of these signals:
+- `FINAL(answer)` — For direct text answers. Example: `FINAL(The file contains 42 errors)`
+- `FINAL_VAR(variable_name)` — For answers stored in a variable from code execution.
 
-After each step, rate your confidence that the task is fully complete on a scale of 0-100%:
-- CONFIDENCE(score) - Example: CONFIDENCE(95) if you're very confident the task is done
-- If CONFIDENCE >= 95%, the system will stop automatically
-- If CONFIDENCE < 95%, continue investigating
+After each step, rate your confidence:
+- `CONFIDENCE(score)` — 0-100%. If >= 95%, the system stops automatically.
 
-CRITICAL RULE: NEVER mix tool execution (```scheme or ```delegate) and FINAL()/FINAL_VAR() in the exact same response!
-You must output ONLY the code block, WAIT for the system to execute it, and then in the NEXT turn provide FINAL() based on the result.
-
-# AVAILABLE TOOLS (Safe Standard Library)
-The following functions are available in your environment from `(gaia tools)`. USE THEM instead of `system`.
-- `(list-files path)`: Returns list of files in directory.
-- `(read-file path)`: Returns content of file as string.
-- `(write-file path content)`: Writes string to file.
-- `(file-info path)`: Returns file metadata (size, type).
-- `(search-file pattern path)`: Grep equivalent.
-- `(run-sed expression path)`: Sed equivalent.
-- `(run-awk program path)`: Awk equivalent.
-- `(guile-syntax-check code-string)`: Validates Guile Scheme code syntax without evaluating.
-- `(git-status)`: Returns a concise git status of the workspace (-s -b).
-- `(git-diff [path])`: Returns git diff (optional filter by path).
-- `(git-log [n])`: Returns recent git history (oneline format, n commits).
-- `(guix-search query)`: Searches Guix packages.
-- `(guix-package-info pkg)`: Shows Guix package details.
-
-# GUILE SCHEME GUIDELINES
-- Use functional programming patterns.
-- Always include necessary modules.
-- Focus on safety and precision.
+# CRITICAL RULES
+1. NEVER put FINAL() or FINAL_VAR() in the same response as a ```repl code block!
+   Write code → WAIT for results → then provide FINAL() in NEXT response.
+   Note: CONFIDENCE() alongside code is OK and expected.
+2. Use the pre-loaded tools and modules. Do NOT try to import them again.
+3. Think step by step. Use `display` or `write` to inspect intermediate results.
+4. For large data: use `search-file` to find relevant lines. NEVER try to display entire large files.
 
 # EXAMPLE TASK FLOW
-User: \"Find errors in /var/log/syslog\"
-GAIA Thinking:
-1. File is large. I should delegate the analysis.
-GAIA Output:
-```delegate
-(delegate \"Find all 'Permission Denied' errors\" \"File: /var/log/syslog\")
+User: \"Count .scm files in scheme/gaia/\"
+Step 1 (GAIA writes code):
+```repl
+(define files (list-files \"scheme/gaia\"))
+(define scm-files (filter (lambda (f) (string-suffix? \".scm\" f)) files))
+(display (length scm-files))
 ```
-CONFIDENCE(30)
-
-GAIA (System): Returns \"Result: Found 5 errors...\"
-GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permission Denied' errors in /var/log/syslog) CONFIDENCE(100)\"
+Step 2 (System returns): \"8\"
+Step 3 (GAIA answers):
+The directory contains 8 .scm files.
+FINAL(8)
+CONFIDENCE(100)
 ")
 
 (define (extract-code response)
-  "Extracts Scheme code from the LLM response (markdown code block)."
+  "Extracts Scheme code from the LLM response (```repl or ```scheme code block)."
   (let ((str (if (string? response) response (scm->json response))))
-    (if (string-contains str "```scheme")
-        (let* ((start (+ (string-contains str "```scheme") 9))
-               (end (string-contains str "```" start)))
-          (substring str start end))
-        #f)))
+    (cond
+     ;; Prefer ```repl blocks (RLM style)
+     ((string-contains str "```repl")
+      (let* ((start (+ (string-contains str "```repl") 7))
+             (end (string-contains str "```" start)))
+        (if end (substring str start end) #f)))
+     ;; Fallback: ```scheme blocks
+     ((string-contains str "```scheme")
+      (let* ((start (+ (string-contains str "```scheme") 9))
+             (end (string-contains str "```" start)))
+        (if end (substring str start end) #f)))
+     (else #f))))
 
 (define (extract-delegation response)
   "Extracts delegation S-expression from the LLM response."
@@ -136,9 +167,9 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
   "Generates contextual feedback for errors."
   (case error-type
     ((syntax)
-     (string-append "Syntax Error in your Scheme code: " message "\nPlease check parentheses and syntax."))
+     (string-append "Syntax Error in your Scheme code: " message "\nPlease check parentheses and syntax. Remember: use (use-modules ...) NOT require."))
     ((permission)
-     (string-append "Security Violation: " message "\nYou must use only allowed primitives. Do not use 'system' or file modification commands."))
+     (string-append "Security Violation: " message "\nYou must use only allowed primitives. Use the pre-loaded tools from (gaia tools) instead."))
     ((runtime)
      (string-append "Runtime Error: " message "\nReview the logic and try debugging with display statements."))
     (else
@@ -147,128 +178,189 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
 (define MAX-RECURSION-DEPTH 15)
 (define CONFIDENCE-THRESHOLD 95)
 
-(define (rlm-loop session-id last-output depth)
-  (if (> depth MAX-RECURSION-DEPTH)
-      (begin
-        (display "\n[GAIA] Max recursion depth reached. Returning current state.\n")
-        last-output)
-      (begin
-        (display (string-append C-GREY "\n[GAIA] Thinking (Depth " (number->string depth) ")..." C-RESET "\n"))
-        (let* ((response (chat-with-rai session-id last-output (get-config 'model) SYSTEM_PROMPT))
-               (payload (assoc-ref response "payload"))
-               (response-text (if payload (assoc-ref payload "content") "Error: No payload in response")))
+(define (rlm-loop session-id last-output depth . opt-env)
+  "The core RLM loop. Maintains a persistent environment across iterations.
+If opt-env is provided, uses that environment; otherwise creates a new one."
+  (let ((env (if (null? opt-env)
+                 (let ((new-env (make-rlm-env)))
+                   ;; Inject llm-query: a closure that calls RAI
+                   (rlm-inject! new-env 'llm-query
+                     (lambda (prompt)
+                       (let* ((sub-session (string-append session-id "-sub-" (number->string (random 1000000000))))
+                              (response (chat-with-rai sub-session prompt (get-config 'model) SYSTEM_PROMPT))
+                              (payload (assoc-ref response "payload")))
+                         (if payload
+                             (assoc-ref payload "content")
+                             "Error: No response from sub-LLM"))))
+                   ;; Inject context variable
+                   (rlm-inject! new-env 'context last-output)
+                   new-env)
+                 (car opt-env))))
 
-          (display (string-append C-BLUE "\n[GAIA] Says: " C-RESET))
-          (display response-text)
-          (newline)
+    (rlm-loop-inner session-id last-output depth env 1)))
 
-          ;; Check for completion signals
-          (let ((final-sig (extract-final-signal response-text))
-                (conf-val (extract-confidence response-text)))
+;; --- Transcript helpers for multi-turn RLM loop ---
 
-            ;; Log interaction
-            (let ((log-entry `(("session_id" . ,session-id)
-                               ("input" . ,last-output)
-                               ("response" . ,response-text)
-                               ("timestamp" . ,(number->string (current-time)))
-                               ("confidence" . ,(if conf-val conf-val "null"))
-                               ("final_signal" . ,(if final-sig "true" "false")))))
-              (let ((port (open-file "trajectories.jsonl" "a")))
-                (display (scm->json log-entry) port)
-                (newline port)
-                (close-port port)))
+(define (truncate-for-transcript text)
+  "Truncate text to keep transcript compact. Keep first 300 chars + last 100 chars."
+  (let ((len (string-length text)))
+    (if (<= len 500)
+        text
+        (string-append (substring text 0 300)
+                       "\n... [truncated] ...\n"
+                       (substring text (- len 100) len)))))
 
-            ;; Decision Logic: Delegation > Code > FINAL > Confidence > Text
-            (let ((has-action (or (extract-delegation response-text) (extract-code response-text)))
-                  (has-final (or final-sig (and conf-val (>= conf-val CONFIDENCE-THRESHOLD)))))
-              (if (and has-action has-final)
-                  (begin
-                    (display (string-append C-RED "\n[GAIA] \u26a0 Halucination Detected: Mixed action and completion signal in one turn." C-RESET "\n"))
-                    (let ((feedback "Error: You provided both an execution block (```scheme or ```delegate) and a completion signal (FINAL or high CONFIDENCE) in a single response. This is not allowed. Please provide ONLY the execution block, wait for the result, and then provide the completion signal in the next turn."))
-                      (rlm-loop session-id feedback depth)))
-                  (cond
-                   ;; 1. Delegation (Action)
-                   ((extract-delegation response-text) =>
-                    (lambda (delegation)
-                       (match delegation
-                        (('delegate goal context)
-                         (display (string-append C-YELLOW "\n[GAIA] Delegating sub-task..." C-RESET "\n"))
-                         (let* ((sub-session-id (string-append session-id "-sub-" (number->string (random 1000))))
-                                (initial-input (string-append "GOAL: " goal "\nCONTEXT: " context))
-                                ;; Recursive call with NEW session ID
-                                (sub-result (rlm-loop sub-session-id initial-input (+ depth 1))))
+(define (format-transcript transcript)
+  "Format transcript entries as a compact execution log.
+   Entries are (role . text) pairs. Skip 'original-task' marker entries."
+  (let ((step-num 0))
+    (string-join
+     (filter-map
+      (lambda (entry)
+        (let ((role (car entry))
+              (text (cdr entry)))
+          (cond
+           ((string=? role "original-task") #f) ;; Skip marker
+           ((string=? role "user")
+            (set! step-num (+ step-num 1))
+            (string-append "[Step " (number->string step-num) " input] " text))
+           ((string=? role "assistant")
+            (string-append "[Step " (number->string step-num) " response] " (truncate-for-transcript text)))
+           (else #f))))
+      transcript)
+     "\n")))
 
-                           (display (string-append "\n[GAIA] Sub-task finished. Result: " sub-result "\n"))
-                           ;; Continue in CURRENT session with the result
-                           (rlm-loop session-id (string-append "Sub-agent execution finished. Result: " sub-result) depth)))
-                        (_
-                         (rlm-loop session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")" depth)))))
+(define (rlm-loop-inner session-id last-output depth env . opt-args)
+  ;; opt-args: step [transcript]
+  (let* ((step (if (null? opt-args) 1 (car opt-args)))
+         (transcript (if (or (null? opt-args) (null? (cdr opt-args)))
+                         '()
+                         (cadr opt-args)))
+         (prompt (if (null? transcript)
+                     last-output
+                     (let ((original-task (assoc-ref transcript "original-task"))
+                           (history-text (format-transcript transcript)))
+                       (string-append
+                        "=== ORIGINAL TASK ===\n"
+                        (if original-task original-task "Unknown task")
+                        "\n\n=== EXECUTION LOG (steps so far) ===\n"
+                        history-text
+                        "\n\n=== LATEST ===\n"
+                        last-output
+                        "\n\nContinue working on the original task. "
+                        "Write your next ```repl code block or provide FINAL(answer).")))))
+    (if (> depth MAX-RECURSION-DEPTH)
+        (begin
+          (display "\n[GAIA] Max recursion depth reached. Returning current state.\n")
+          last-output)
+        (begin
+          (display (string-append C-GREY "\n[GAIA] Step " (number->string step) " (Depth " (number->string depth) ")..." C-RESET "\n"))
+          (let* ((response (chat-with-rai session-id prompt (get-config 'model) SYSTEM_PROMPT))
+                 (payload (assoc-ref response "payload"))
+                 (response-text (if payload (assoc-ref payload "content") "Error: No payload in response")))
 
-                   ;; 2. Scheme Execution (Action)
-                   ((extract-code response-text) =>
-                    (lambda (code)
-                      (if (and code (> (string-length code) 0) (not (string=? code response-text)))
-                          (begin
-                            (display (string-append C-YELLOW "\n[GAIA] Executing Code..." C-RESET "\n"))
-                            (match (guix-investigate code)
-                              (('ok result)
-                               (display "\n[GAIA] Result: ")
-                               (display result)
-                               (newline)
+            (display (string-append C-BLUE "\n[GAIA] Says: " C-RESET))
+            (display response-text)
+            (newline)
 
-                               ;; Log execution (success)
-                               (let ((exec-log `(("session_id" . ,session-id)
-                                                 ("code" . ,code)
-                                                 ("result" . ,result)
-                                                 ("type" . "execution")
-                                                 ("status" . "success"))))
-                                   (let ((port (open-file "trajectories.jsonl" "a")))
+            (let ((final-sig (extract-final-signal response-text))
+                  (conf-val (extract-confidence response-text)))
+
+              ;; Log interaction
+              (let ((log-entry `(("session_id" . ,session-id)
+                                 ("input" . ,last-output)
+                                 ("response" . ,response-text)
+                                 ("timestamp" . ,(number->string (current-time)))
+                                 ("confidence" . ,(if conf-val conf-val "null"))
+                                 ("final_signal" . ,(if final-sig "true" "false")))))
+                (let ((port (open-file "trajectories.jsonl" "a")))
+                  (display (scm->json log-entry) port)
+                  (newline port)
+                  (close-port port)))
+
+              (let ((updated-transcript
+                     (append transcript
+                             (if (= step 1)
+                                 (list (cons "original-task" last-output)
+                                       (cons "assistant" (truncate-for-transcript response-text))
+                                       (cons "user" last-output))
+                                 (list (cons "user" last-output)
+                                       (cons "assistant" (truncate-for-transcript response-text)))))))
+
+                (let ((has-action (or (extract-delegation response-text) (extract-code response-text)))
+                      (has-final-signal (and final-sig #t)))
+                  (if (and has-action has-final-signal)
+                      (begin
+                        (display (string-append C-RED "\n[GAIA] ⚠ Mixed action and FINAL signal in one turn." C-RESET "\n"))
+                        (let ((feedback "Error: You provided both a ```repl code block and a FINAL() signal in the same response. Please provide ONLY the code block. After seeing the execution result, provide FINAL() in the NEXT response."))
+                          (rlm-loop-inner session-id feedback depth env (+ step 1) updated-transcript)))
+                      (cond
+                       ((extract-delegation response-text) =>
+                        (lambda (delegation)
+                          (match delegation
+                            (('delegate goal context-str)
+                             (display (string-append C-YELLOW "\n[GAIA] Delegating sub-task..." C-RESET "\n"))
+                             (let* ((sub-session-id (string-append session-id "-sub-" (number->string (random 1000000000))))
+                                    (initial-input (string-append "GOAL: " goal "\nCONTEXT: " context-str))
+                                    (sub-result (rlm-loop sub-session-id initial-input (+ depth 1))))
+                               (display (string-append "\n[GAIA] Sub-task finished. Result: " sub-result "\n"))
+                               (rlm-loop-inner session-id (string-append "Sub-agent execution finished. Result: " sub-result) depth env (+ step 1) updated-transcript)))
+                            (_
+                             (rlm-loop-inner session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")" depth env (+ step 1) updated-transcript)))))
+
+                       ((extract-code response-text) =>
+                        (lambda (code)
+                          (if (and code (> (string-length code) 0) (not (string=? code response-text)))
+                              (begin
+                                (display (string-append C-YELLOW "\n[GAIA] Executing Code in RLM Environment..." C-RESET "\n"))
+                                (match (rlm-execute env code)
+                                  (('ok result)
+                                   (display "\n[GAIA] Result: ")
+                                   (display result)
+                                   (newline)
+                                   (let ((exec-log `(("session_id" . ,session-id)
+                                                     ("code" . ,code)
+                                                     ("result" . ,result)
+                                                     ("type" . "execution")
+                                                     ("status" . "success"))))
+                                     (let ((port (open-file "trajectories.jsonl" "a")))
                                        (display (scm->json exec-log) port)
                                        (newline port)
                                        (close-port port)))
+                                   (rlm-loop-inner session-id (string-append "Code executed successfully. Result:\n" result) depth env (+ step 1) updated-transcript))
 
-                               ;; Recurse in SAME session with result
-                               (rlm-loop session-id (string-append "The code execution result was: " result) depth))
-
-                              (('error type msg)
-                               (let ((feedback (handle-error type msg depth)))
-                                 (display (string-append C-RED "\n[GAIA] Error: " feedback C-RESET "\n"))
-
-                                 ;; Log execution (error)
-                                 (let ((exec-log `(("session_id" . ,session-id)
-                                                   ("code" . ,code)
-                                                   ("result" . ,feedback)
-                                                   ("type" . "execution")
-                                                   ("status" . "error")
-                                                   ("error_type" . ,(symbol->string type)))))
-                                     (let ((port (open-file "trajectories.jsonl" "a")))
+                                  (('error type msg)
+                                   (let ((feedback (handle-error type msg depth)))
+                                     (display (string-append C-RED "\n[GAIA] Error: " feedback C-RESET "\n"))
+                                     (let ((exec-log `(("session_id" . ,session-id)
+                                                       ("code" . ,code)
+                                                       ("result" . ,feedback)
+                                                       ("type" . "execution")
+                                                       ("status" . "error")
+                                                       ("error_type" . ,(symbol->string type)))))
+                                       (let ((port (open-file "trajectories.jsonl" "a")))
                                          (display (scm->json exec-log) port)
                                          (newline port)
                                          (close-port port)))
+                                     (rlm-loop-inner session-id feedback depth env (+ step 1) updated-transcript)))))
+                              response-text)))
 
-                                 (rlm-loop session-id feedback depth)))))
+                       ((and final-sig (match final-sig (('final ans) ans) (('final-var var) var) (_ #f))) =>
+                        (lambda (answer)
+                          (display (string-append C-GREEN "\n[GAIA] ✓ FINAL signal detected." C-RESET "\n"))
+                          (if (equal? (car final-sig) 'final)
+                              (display (string-append C-BOLD "[GAIA] Answer: " C-RESET answer "\n"))
+                              (display (string-append C-BOLD "[GAIA] Answer stored in: " C-RESET answer "\n")))
+                          answer))
 
-                          ;; Invalid code block
-                          response-text)))
+                       ((and conf-val (>= conf-val CONFIDENCE-THRESHOLD))
+                        (display (string-append C-GREEN "\n[GAIA] ✓ High confidence (" (number->string conf-val) "%) - stopping." C-RESET "\n"))
+                        response-text)
 
-                   ;; 3. FINAL signal (Stop only if no action taken)
-                   ((and final-sig (match final-sig (('final ans) ans) (('final-var var) var) (_ #f))) =>
-                    (lambda (answer)
-                      (display (string-append C-GREEN "\n[GAIA] \u2713 FINAL signal detected." C-RESET "\n"))
-                      (if (equal? (car final-sig) 'final)
-                          (display (string-append C-BOLD "[GAIA] Answer: " C-RESET answer "\n"))
-                          (display (string-append C-BOLD "[GAIA] Answer stored in: " C-RESET answer "\n")))
-                      answer))
+                       (else
+                        (display (string-append C-RED "\n[GAIA] ⚠ No actionable output. Treating as final answer (unless low confidence)." C-RESET "\n"))
+                        response-text)))))))))))
 
-                   ;; 4. High Confidence (Stop only if no action taken)
-                   ((and conf-val (>= conf-val CONFIDENCE-THRESHOLD))
-                    (display (string-append C-GREEN "\n[GAIA] \u2713 High confidence (" (number->string conf-val) "%) - stopping." C-RESET "\n"))
-                    response-text)
-
-                   ;; 5. Fallback (Text only)
-                   (else
-                    (display (string-append C-RED "\n[GAIA] \u26a0 No actionable output. Treating as final answer (unless low confidence)." C-RESET "\n"))
-                    response-text)))))))))
 
 (define (handle-command input session-id)
   "Parses and executes meta-commands or delegates to RLM."
@@ -313,8 +405,8 @@ GAIA: \"The sub-agent found 5 errors. Summary: [details]. FINAL(Found 5 'Permiss
           (display (eval-string code))
           (newline))
         (lambda (key . args)
-          (display (format #f "Error: ~a ~a\n" key args))))
-      #t))
+          (display (format #f "Error: ~a ~a\n" key args)))))
+    #t)
 
    ;; /models
    ((string=? input "/models")

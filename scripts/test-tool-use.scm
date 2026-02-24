@@ -38,15 +38,31 @@
   (display "[BENCHMARK] Task: Find secret key in haystack.txt.\n")
 
   (let ((session-id (string-append "bench-" (number->string (current-time)) "-" (number->string (random 1000000000))))
-        (initial-prompt (format #f "There is a file named '~a' in the current directory. It contains a secret key that starts with 'GAIA_SECRET_KEY_'. Find it and return it using the FINAL() signal." HAYSTACK-FILE)))
+        (initial-prompt (format #f "There is a large file named '~a' in the current directory. It is ~aMB and contains a secret key hidden somewhere in the text. The key starts with 'GAIA_SECRET_KEY_'. Use search-file to find the line containing it, extract the key, and return it using FINAL()." HAYSTACK-FILE FILE-SIZE-MB)))
 
     ;; Run RLM Loop
     (let ((result (rlm-loop session-id initial-prompt 0)))
       (display (format #f "\n[BENCHMARK] RLM returned: ~a\n" result))
 
-      (if (string-contains result NEEDLE)
-          (display "\n[BENCHMARK] SUCCESS! Found needle.\n")
-          (display "\n[BENCHMARK] FAILURE. Needle not found in result.\n"))))
+      ;; Check if the result contains the needle
+      ;; Distinguish between proper FINAL() usage and accidental inclusion in prose
+      (let ((final-sig (extract-final-signal result)))
+        (cond
+         ;; Best case: FINAL() signal contains the needle
+         ((and final-sig
+               (match final-sig
+                 (('final ans) (string-contains ans NEEDLE))
+                 (('final-var var) (string-contains var NEEDLE))
+                 (_ #f)))
+          (display "\n[BENCHMARK] ✓ SUCCESS! Found needle via FINAL() signal.\n"))
+
+         ;; Acceptable: needle is somewhere in the raw output
+         ((string-contains result NEEDLE)
+          (display "\n[BENCHMARK] ⚠ PARTIAL SUCCESS: Needle found in output, but not via FINAL().\n"))
+
+         ;; Failure
+         (else
+          (display "\n[BENCHMARK] ✗ FAILURE. Needle not found in result.\n"))))))
 
   ;; Cleanup
   (if (file-exists? HAYSTACK-FILE)

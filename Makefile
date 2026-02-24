@@ -8,7 +8,7 @@ export GAIA_MODEL
 export GAIA_BACKEND
 export GAIA_BASE_MODEL
 
-.PHONY: run repl check test-units test-rlm benchmark dataset clean
+.PHONY: run repl check test-units test-rlm test-tool-use benchmark dataset clean
 
 GUIX_SHELL = guix shell -m guix.scm --
 
@@ -18,7 +18,7 @@ run:
 repl:
 	$(GUIX_SHELL) guile -L scheme
 
-check: test-units test-tools
+check: test-units test-tools test-rlm-env
 
 test-units:
 	@echo "Running core unit tests..."
@@ -32,13 +32,22 @@ test-tools:
 	@echo "Running tools unit tests..."
 	$(GUIX_SHELL) guile -L scheme scripts/test-tools.scm
 
+test-rlm-env:
+	@echo "Running RLM environment unit tests..."
+	$(GUIX_SHELL) guile -L scheme scripts/test-rlm-env.scm
+
 test-rlm:
-	@echo "Running RLM pipeline sanity check (deterministic)..."
+	@echo "Running RLM pipeline sanity check (requires RAI server)..."
 	$(GUIX_SHELL) guile -L scheme scripts/test-sanity.scm
 
+test-tool-use:
+	@echo "Running LLM tool-use test: search-file needle (requires RAI server)..."
+	BENCHMARK_SIZE_MB=1 $(GUIX_SHELL) guile -L scheme scripts/test-tool-use.scm
+
 benchmark:
-	@echo "Running Full S-NIAH Benchmark (10MB haystack)..."
-	BENCHMARK_SIZE_MB=10 $(GUIX_SHELL) guile -L scheme scripts/benchmark-needle.scm
+	@echo "Running S-NIAH Benchmark — RLM recursion via context chunking + llm_query..."
+	@echo "  Context size: $${BENCHMARK_SIZE_KB:-512}KB"
+	BENCHMARK_SIZE_KB=$${BENCHMARK_SIZE_KB:-512} $(GUIX_SHELL) guile -L scheme scripts/benchmark-niah.scm
 
 dataset:
 	$(GUIX_SHELL) guile -L scheme -c '(use-modules (gaia curator)) (curate-dataset "trajectories.jsonl" "dataset-success.jsonl" "dataset-failure.jsonl")' $(if $(GAIA_RAI_URL), --push-to-rai $(GAIA_RAI_URL))

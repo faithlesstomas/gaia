@@ -34,7 +34,7 @@
     quote quasiquote unquote unquote-splicing
 
     ;; Basic I/O (Stdout only)
-    display newline format
+    display newline format write read
 
     ;; Exceptions (Basic)
     catch throw error
@@ -76,6 +76,7 @@
     (module-use! m (resolve-interface '(ice-9 match)))
     (module-use! m (resolve-interface '(ice-9 regex)))
     (module-use! m (resolve-interface '(srfi srfi-1)))
+    (module-use! m (resolve-interface '(srfi srfi-13)))
     (module-use! m (resolve-interface '(gaia tools)))
     m))
 
