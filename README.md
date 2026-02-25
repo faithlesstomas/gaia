@@ -95,6 +95,18 @@ GAIA doesn't just work; it grows. Every interaction is stored in `trajectories.j
 * **Logger:** Captures prompts, generated code, and execution results.
 * **Curator:** Filters successful interactions into a high-quality dataset.
 * **Goal:** Fine-tune smaller, local models to match or exceed frontier model performance on Guix-specific tasks.
+* **Guide:** See [fine_tuning_guide.md](file:///home/tomasz/.gemini/antigravity/brain/596335a5-f6e9-4386-a118-9a9a169615f1/fine_tuning_guide.md) for instructions.
+
+## Benchmark Results (Phase 3)
+
+We tested GAIA's RLM core using a "Needle in a Haystack" task (finding a key in a 10MB text file).
+
+*   **Setup:** Ministral-3b model, local execution, 10MB haystack.
+*   **Result:** The RLM loop successfully orchestrated the investigation, attempting to write Scheme scripts to read the file.
+*   **Observation:** The infrastructure (Error Handling, Retry Logic, Completion Signals) worked perfectly.
+    *   Syntax errors from the model were caught and fed back.
+    *   The model attempted to self-correct based on feedback.
+*   **Limitation:** The small 3B model struggled to generate syntactically correct Guile Scheme for file I/O (often missing parentheses or modules), leading to a retry loop. This highlights the need for larger/better-tuned models for code generation, but validates the *system architecture*.
 
 ## License
 

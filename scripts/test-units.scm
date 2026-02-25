@@ -13,7 +13,7 @@
 
 (test-group "executor"
   (test-equal "simple calculation"
-    "4" ;; Execution output
+    '(ok "4") ;; Execution output
     (let ((result (guix-investigate "(display (+ 2 2))")))
        result)))
 

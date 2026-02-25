@@ -12,3 +12,12 @@ haystack.txt
 # Editor backups
 *~
 \#*\#
+.vscode/
+
+# ML outputs and checkpoints
+outputs/
+tmp/
+
+# Sensitive / credentials
+hf_token
+

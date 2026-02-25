@@ -3,7 +3,13 @@
   #:use-module (ice-9 rdelim)
   #:use-module (ice-9 format)
   #:use-module (ice-9 match)
-  #:export (guix-investigate))
+  #:use-module (gaia rlm-env)
+  #:export (guix-investigate rlm-execute))
+
+(define (rlm-execute env code-string)
+  "Executes code in the persistent RLM environment (fast, stateful, native).
+ENV is an rlm-env record. Returns ('ok result) or ('error type message)."
+  (rlm-eval! env code-string))
 
 (define BANNED-PRIMITIVES '(system system* delete-file rmdir rename-file chmod))
 
@@ -23,25 +29,43 @@
    (else #t)))
 
 (define (guix-investigate s-expression-code)
-  "Executes the given S-expression code inside a guix shell container."
+  "Executes the given S-expression code inside a guix shell container. Returns (ok result) or (error type message)."
   (let* ((wrapped-str (format #f "(begin ~a)" s-expression-code))
          ;; Parse locally to validate
-         (parsed-sexp (catch #t 
+         (parsed-sexp (catch #t
                              (lambda () (with-input-from-string wrapped-str read))
                              (lambda _ #f))))
-    
+
     (if (not parsed-sexp)
-        "Error: Could not parse code (Syntax Error)."
+        (list 'error 'syntax "Error: Could not parse code (Syntax Error).")
         (let ((safety-result (validate-safety parsed-sexp)))
           (if (string? safety-result)
-              safety-result ;; Return security error
+              (list 'error 'permission safety-result) ;; Return security error
               ;; Proceed with execution if safe
               (let* ((escaped-code (string-join (string-split wrapped-str #\') "'\\''"))
-                     (command (format #f "guix shell --container --share=./=/workspace guile coreutils grep -- guile -c '(chdir \"/workspace\") ~a' 2>&1" escaped-code))
+                     ;; We wrap the code to run inside our sandbox module
+                     ;; We assume /workspace maps to project root, so 'scheme' dir is at /workspace/scheme
+                     (container-command 
+                      (format #f 
+                             "(begin (add-to-load-path \"/workspace/scheme\") (use-modules (gaia sandbox)) (let ((res (eval-safe '~a))) (if (not (unspecified? res)) (write res))))"
+                              escaped-code))
+                     
+                     ;; Helper to shell-quote a string (wrap in single quotes, escape inner single quotes)
+                     (shell-quote (lambda (s) (string-append "'" (string-join (string-split s #\') "'\\''") "'")))
+                     
+                     ;; Level 1: Guile command runs code, redirects stderr to stdout
+                     (guile-cmd-inner (format #f "guile --no-auto-compile -c ~a 2>&1" (shell-quote container-command)))
+                     
+                     ;; Level 2: Bash command runs guile command
+                     ;; We explicitly use bash to handle the redirection
+                     (bash-cmd (format #f "bash -c ~a" (shell-quote guile-cmd-inner)))
+
+                     ;; Level 3: Guix Shell executes bash
+                     (command (format #f "guix shell --container --share=./=/workspace guile coreutils grep sed gawk bash git guix -- ~a" bash-cmd))
                      (port (open-input-pipe command))
                      (result (read-string port))
                      (exit-val (status:exit-val (close-pipe port))))
                 (if (eq? exit-val 0)
-                    result
-                    (string-append "Error: Execution failed with exit code " (number->string exit-val)
-                                   "\nOutput:\n" result))))))))
+                    (list 'ok result)
+                    (list 'error 'runtime (string-append "Error: Execution failed with exit code " (number->string exit-val)
+                                                         "\nOutput:\n" result)))))))))
