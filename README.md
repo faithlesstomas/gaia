@@ -1,24 +1,48 @@
-# GAIA: GNU AI Assistant
 
-**GAIA** (GNU AI Assistant) is a next-generation system operator designed for the GNU Guix ecosystem.
-It implements the **Recursive Language Model (RLM)** paradigm of inference strategy, allowing an AI agent to solve complex,
+# GNU AI Assistant (GAIA)
+
+**GAIA** is a local-First AI Assistant for scientific research in reproducible safe environment with REPL build in **GNU Guile**.
+It is designed specifically for researchers and engineers who require strict reproducibility, 
+mathematical rigor, safe execution and data privacy when integrating Large Language Models (LLMs) into their workflows.
+
+
+## Core Architecture & Why GNU Guile?
+
+While most AI tools are written in Python, Gaia utilizes **GNU Guile** (Scheme/Lisp). This is a deliberate architectural choice:
+* **Homoiconicity (Code is Data):** Scheme's macro system and homoiconic nature make it the ultimate language for AI-generated code. 
+  The LLM can generate ASTs (Abstract Syntax Trees) that are safely evaluated, transformed, and sandboxed.
+* **The GNU Guix Connection:** Guile is the foundation of GNU Guix. GAIA aims to leverage this to allow the LLM to spin up temporary, 
+  bit-reproducible containers, run physical simulations (e.g., N-body, molecular dynamics) in secure manner.
+
+## Key ideas
+
+GAIA implements the **Recursive Language Model (RLM)** paradigm of inference strategy, allowing an AI agent to solve complex,
 large-scale system tasks by programmatically investigating the environment rather than merely "reading" it.
+
 
 The RLM idea comes from this paper: https://arxiv.org/abs/2512.24601
 
-This implementation test's whether it make sense to implement RLM in functional and homoiconic language like Guile, a GNU Scheme derivative.
-Hopefully it will evolve in a general purpose AI Assistant useful in GNU Guix and/or Linux ecosystem.
-
-## The Philosophy: Intelligence as an Operator
+### The Philosophy of RLM
 
 Traditional AI assistants fail when faced with massive data (e.g., 1GB log files) due to context window limits.
-GAIA solves this by treating the LLM as a **planner** and the system as a **programmatic environment**.
+GAIA solves this by giving the LLM an access to **programmatic environment** a GUile REPL in which it can operate
+with this ideas in mind (and in system prompt as instructions):
 
 * **Don't Read, Investigate:** Instead of uploading files, GAIA generates Guile Scheme code to explore them locally.
 * **Recursive Decomposition:** Complex tasks are broken down into sub-tasks and handled by recursive agent calls.
+
+TODO: fix REPL 
+
 * **Functional Isolation:** Every investigative step runs in a bit-reproducible, isolated `guix shell --container`.
 
-## Architecture
+
+### Other ideas to investiagate and possibly implement:
+  - RelayLLM: https://arxiv.org/pdf/2601.05167
+  - FusionRoute: https://arxiv.org/pdf/2601.05106
+  - MLIR/IREE 
+
+
+## Architecture (TODO)
 
 GAIA acts as the "Hands" (Scheme/Guix) for a "Brain" (LLM) hosted by the **RAI Server**.
 
@@ -28,10 +52,11 @@ GAIA acts as the "Hands" (Scheme/Guix) for a "Brain" (LLM) hosted by the **RAI S
 
 ## Key Features
 
-* **RLM Toolkit:** Native Guile implementation of the Recursive Language Model paradigm.
+* **RLM Toolkit:** Native Guile implementation of the Recursive Language Model paradigm (in progress)
 * **Guix Sandboxing:** Securely run AI-generated scripts in ephemeral containers.
-* **Deterministic Replay:** Debug system behavior offline by replaying saved AI trajectories without API costs.
-* **Self-Improvement Loop:** Automatically log and curate "Success" vs "Failure" datasets for local fine-tuning (Gemma/Qwen).
+* **Deterministic Replay:** Debug system behavior offline by replaying saved AI trajectories without API costs. (TODO)
+* **Train / Fine-Tune / Self-Improvement Loop:** Automatically log and curate "Success" vs "Failure" datasets for local 
+  fine-tuning (training feature in progress)
 
 ## Getting Started
 
@@ -110,24 +135,32 @@ We tested GAIA's RLM core using a "Needle in a Haystack" task (finding a key in 
 
 ## License
 
-GAIA is part of the GNU ecosystem and is released under the **GPLv3+ License**.
+GAIA is part of the GNU ecosystem and is released under the **GPLv3+ License**. See [License](LICENSE) for details.
 
 ## Roadmap: Leveraging Homoiconicity (Code-as-Data)
 
-The choice of Guile Scheme (a homoiconic Lisp dialect) is not accidental. It allows GAIA to treat its own code as data, enabling features impossible in Python/Javascript architectures.
+The choice of Guile Scheme (a homoiconic Lisp dialect) is not accidental. It allows GAIA to treat its own code as data, 
+enabling features impossible in Python/Javascript architectures.
 
 *   [x] **Static Safety Validator:**
-    *   **Concept:** Parse LLM-generated code as an AST (Abstract Syntax Tree) before execution. recursively check for banned primitives (e.g., `system*`, `delete-file`) even in deeply nested expressions.
+    *   **Concept:** Parse LLM-generated code as an AST (Abstract Syntax Tree) before execution. 
+        recursively check for banned primitives (e.g., `system*`, `delete-file`) even in deeply nested expressions.
     *   **Status:** *Implemented* (see `validate-safety` in `executor.scm`).
 
 *   [ ] **Code Instrumentation & Auto-Logging:**
     *   **Concept:** Automatically rewrite user code to wrap function calls in error handlers or performance loggers without asking the LLM to do so.
 
 *   [ ] **G-Expressions ("Context Teleportation"):**
-    *   **Concept:** Use GNU Guix's G-expressions (`#~`) to serialize entire variable contexts and modules when spawning sub-agents, solving the "data transfer" problem in RLM.
+    *   **Concept:** Use GNU Guix's G-expressions (`#~`) to serialize entire variable contexts and modules when spawning sub-agents, 
+    solving the "data transfer" problem in RLM.
 
 *   [ ] **The Self-Modifying Agent:**
     *   **Concept:** Allow GAIA to "refactor" its own cognitive loop (`rlm-loop`) at runtime by treating the loop logic as a mutable list.
 
 *   [ ] **Persistent Thought Environment (REPL):**
     *   **Concept:** Maintain a long-running Guile REPL where the agent defines helper functions in Step 1 and reuses them in Step 10, mimicking human memory.
+
+
+
+---
+*Note: Gaia is currently under active development. If you are interested in supporting this digital commons project, please reach out.*
