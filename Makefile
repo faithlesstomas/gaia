@@ -1,11 +1,9 @@
-GAIA_RAI_URL ?= http://localhost:8000
-GAIA_MODEL ?= gemma3:12b
-GAIA_BACKEND ?= ollama
+GAIA_LLM_URL ?= http://localhost:4000
+GAIA_MODEL ?= gemma3:4b
 GAIA_BASE_MODEL ?= gemma-3-4b
 
-export GAIA_RAI_URL
+export GAIA_LLM_URL
 export GAIA_MODEL
-export GAIA_BACKEND
 export GAIA_BASE_MODEL
 
 .PHONY: run repl check test-units test-rlm test-tool-use benchmark dataset clean
@@ -37,11 +35,11 @@ test-rlm-env:
 	$(GUIX_SHELL) guile -L scheme scripts/test-rlm-env.scm
 
 test-rlm:
-	@echo "Running RLM pipeline sanity check (requires RAI server)..."
+	@echo "Running RLM pipeline sanity check (requires LLM server)..."
 	$(GUIX_SHELL) guile -L scheme scripts/test-sanity.scm
 
 test-tool-use:
-	@echo "Running LLM tool-use test: search-file needle (requires RAI server)..."
+	@echo "Running LLM tool-use test: search-file needle (requires LLM server)..."
 	BENCHMARK_SIZE_MB=1 $(GUIX_SHELL) guile -L scheme scripts/test-tool-use.scm
 
 benchmark:
@@ -50,15 +48,13 @@ benchmark:
 	BENCHMARK_SIZE_KB=$${BENCHMARK_SIZE_KB:-512} $(GUIX_SHELL) guile -L scheme scripts/benchmark-niah.scm
 
 dataset:
-	$(GUIX_SHELL) guile -L scheme -c '(use-modules (gaia curator)) (curate-dataset "trajectories.jsonl" "dataset-success.jsonl" "dataset-failure.jsonl")' $(if $(GAIA_RAI_URL), --push-to-rai $(GAIA_RAI_URL))
+	$(GUIX_SHELL) guile -L scheme -c '(use-modules (gaia curator)) (curate-dataset "trajectories.jsonl" "dataset-success.jsonl" "dataset-failure.jsonl")'
 
 learn:
-	@echo "Curating and pushing to RAI..."
-	@$(MAKE) dataset GAIA_RAI_URL=$(GAIA_RAI_URL)
-	@echo "Triggering training..."
-	@curl -X POST -H "Content-Type: application/json" -d '{"base_model": "$(GAIA_BASE_MODEL)", "dataset_id": "dataset-success.jsonl"}' $(GAIA_RAI_URL)/train/start | jq
-	@echo "Check staus with:"
-	@echo "curl $(GAIA_RAI_URL)/train/status/{job_id}"
+	@echo "Curating dataset locally..."
+	@$(MAKE) dataset
+	@echo "Triggering local training pipeline..."
+	@echo "TODO: Execute local python training script here... (e.g. uv run python scripts/train.py --dataset dataset-success.jsonl)"
 
 
 clean:

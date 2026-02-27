@@ -28,10 +28,9 @@
 (define (run-benchmark)
   ;; Load config from environment variables
   (load-config)
-  (display (format #f "[BENCHMARK] Config:\n  Model:   ~a\n  Backend: ~a\n  URL:     ~a\n"
+  (display (format #f "[BENCHMARK] Config:\n  Model:   ~a\n  URL:     ~a\n"
                    (get-config 'model)
-                   (get-config 'backend)
-                   (get-config 'rai-url)))
+                   (get-config 'llm-url)))
 
   (generate-haystack)
   (display "Starting RLM Benchmark (End-to-End via rlm-loop)...\n")

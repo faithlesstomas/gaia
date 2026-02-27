@@ -1,5 +1,5 @@
 (define-module (gaia core)
-  #:use-module (gaia rai-client)
+  #:use-module (gaia llm-client)
   #:use-module (gaia executor)
   #:use-module (gaia rlm-env)
   #:use-module (gaia utils)
@@ -183,11 +183,11 @@ CONFIDENCE(100)
 If opt-env is provided, uses that environment; otherwise creates a new one."
   (let ((env (if (null? opt-env)
                  (let ((new-env (make-rlm-env)))
-                   ;; Inject llm-query: a closure that calls RAI
+                   ;; Inject llm-query: a closure that calls LLM proxy
                    (rlm-inject! new-env 'llm-query
                      (lambda (prompt)
                        (let* ((sub-session (string-append session-id "-sub-" (number->string (random 1000000000))))
-                              (response (chat-with-rai sub-session prompt (get-config 'model) SYSTEM_PROMPT))
+                              (response (chat-with-llm sub-session prompt (get-config 'model) SYSTEM_PROMPT))
                               (payload (assoc-ref response "payload")))
                          (if payload
                              (assoc-ref payload "content")
@@ -255,7 +255,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
           last-output)
         (begin
           (display (string-append C-GREY "\n[GAIA] Step " (number->string step) " (Depth " (number->string depth) ")..." C-RESET "\n"))
-          (let* ((response (chat-with-rai session-id prompt (get-config 'model) SYSTEM_PROMPT))
+          (let* ((response (chat-with-llm session-id prompt (get-config 'model) SYSTEM_PROMPT))
                  (payload (assoc-ref response "payload"))
                  (response-text (if payload (assoc-ref payload "content") "Error: No payload in response")))
 
@@ -377,7 +377,6 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
     (display "  /eval <scheme> - Execute Scheme code locally\n")
     (display "  /models        - List available models and LoRA adapters\n")
     (display "  /model <name>  - Select a base model or LoRA adapter folder to load\n")
-    (display "  /backend <name>- Select the backend to use (e.g. local, ollama)\n")
     (display "  /base-model <name>- Select the foundation model used for training\n")
     (display "  /train         - Manually trigger Fine Tuning (make learn) from dataset\n")
     (display "  /help          - Show this help\n")
@@ -389,7 +388,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
    ((string-prefix? "/ask " input)
     (let ((query (substring input 5)))
       (display "[Direct Question] Asking AI...\n")
-      (let* ((response (chat-with-rai session-id query (get-config 'model) "You are a helpful Guile Scheme expert."))
+      (let* ((response (chat-with-llm session-id query (get-config 'model) "You are a helpful Guile Scheme expert."))
              (payload (assoc-ref response "payload"))
              (content (if payload (assoc-ref payload "content") "Error No Payload")))
         (display "\nAI: ")
@@ -410,17 +409,10 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
 
    ;; /models
    ((string=? input "/models")
-    (let ((models-alist (get-models)))
-       (display (string-append C-BOLD "Available models (from RAI Registry):\n" C-RESET))
-       (if (list? models-alist)
-           (for-each (lambda (pair)
-                       (let ((backend (car pair))
-                             (model-vec (cdr pair)))
-                         (display (string-append C-CYAN "  [" backend "]:\n" C-RESET))
-                         (if (vector? model-vec)
-                             (vector-for-each (lambda (i m) (display (string-append "    - " m "\n"))) model-vec)
-                             (for-each (lambda (m) (display (string-append "    - " m "\n"))) model-vec))))
-                     models-alist)
+    (let ((models-list (get-models)))
+       (display (string-append C-BOLD "Available models (from LLM Registry):\n" C-RESET))
+       (if (list? models-list)
+           (for-each (lambda (m) (display (string-append "  - " m "\n"))) models-list)
            (display (string-append C-RED "  No models found or unexpected response format.\n" C-RESET))))
     #t)
 
@@ -434,18 +426,6 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
     (let ((new-model (substring input 7)))
        (set-config! 'model new-model)
        (display (string-append C-GREEN "Model hot-swapped for session to: " C-RESET new-model "\n")))
-    #t)
-
-   ;; /backend
-   ((string=? input "/backend")
-    (display (string-append C-BOLD "Current backend: " C-RESET (get-config 'backend) "\n"))
-    #t)
-
-   ;; /backend <name>
-   ((string-prefix? "/backend " input)
-    (let ((new-backend (substring input 9)))
-       (set-config! 'backend new-backend)
-       (display (string-append C-GREEN "Backend hot-swapped for session to: " C-RESET new-backend "\n")))
     #t)
 
    ;; /base-model
@@ -479,10 +459,9 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
   (display (string-append C-BOLD C-GREEN "Initializing GAIA (GNU AI Assistant)..." C-RESET "\n"))
 
   (load-config)
-  (display (format #f "Config Loaded:\n  Model: ~a~a~a\n  Backend: ~a\n  URL: ~a\n"
+  (display (format #f "Config Loaded:\n  Model: ~a~a~a\n  URL: ~a\n"
                    C-CYAN (get-config 'model) C-RESET
-                   (get-config 'backend)
-                   (get-config 'rai-url)))
+                   (get-config 'llm-url)))
 
   (display "Type '/help' for commands or enter a task.\n")
 

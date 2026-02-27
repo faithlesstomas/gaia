@@ -14,7 +14,7 @@
 (use-modules (gaia core)
              (gaia config)
              (gaia rlm-env)
-             (gaia rai-client)
+             (gaia llm-client)
              (ice-9 format)
              (ice-9 match))
 
@@ -84,9 +84,8 @@ Step 3 — when found, return with FINAL(the_key)."))
 
 (define (run-benchmark)
   (load-config)
-  (display (format #f "[S-NIAH] Config:\n  Model:   ~a\n  Backend: ~a\n  Context: ~aKB\n  Needle:  ~a\n"
+  (display (format #f "[S-NIAH] Config:\n  Model:   ~a\n  Context: ~aKB\n  Needle:  ~a\n"
                    (get-config 'model)
-                   (get-config 'backend)
                    CONTEXT-SIZE-KB
                    NEEDLE))
 
@@ -106,7 +105,7 @@ Step 3 — when found, return with FINAL(the_key)."))
       (rlm-inject! env 'llm-query
         (lambda (prompt)
           (let* ((sub-session (string-append session-id "-sub-" (number->string (random 1000))))
-                 (response (chat-with-rai sub-session prompt (get-config 'model)
+                 (response (chat-with-llm sub-session prompt (get-config 'model)
                              "You are a text search tool. When given text, look for lines containing GAIA_SECRET_KEY_. If found, respond with ONLY the key (e.g. GAIA_SECRET_KEY_42X7). If not found, respond with exactly: NOT_FOUND"))
                  (payload (assoc-ref response "payload")))
             (if payload

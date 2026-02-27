@@ -3,16 +3,16 @@
 
 (use-modules (gaia core)
              (gaia executor)
-             (gaia rai-client)
+             (gaia llm-client)
              (ice-9 match))
 
 (display "[TEST] Starting RLM Delegation Test...\n")
 
-;; Mock for chat-with-rai to simulate specific responses
+;; Mock for chat-with-llm to simulate specific responses
 ;; We use a simple counter to return different responses based on the call count
 (define call-count 0)
 
-(define (mock-chat-with-rai session-id input model prompt)
+(define (mock-chat-with-llm session-id input model prompt)
   (set! call-count (+ call-count 1))
   (display (format #f "  DEBUG: Mock called. Session: ~a, Count: ~a\n" session-id call-count))
   
@@ -40,7 +40,7 @@
      `(("payload" . (("content" . "Stop")))))))
 
 ;; Override the real function with our mock
-(module-define! (resolve-module '(gaia core)) 'chat-with-rai mock-chat-with-rai)
+(module-define! (resolve-module '(gaia core)) 'chat-with-llm mock-chat-with-llm)
 
 ;; Run the test
 ;; We need to expose rlm-loop or just import it if it was exported.
