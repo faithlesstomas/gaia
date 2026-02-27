@@ -44,9 +44,9 @@ TODO: fix REPL
 
 ## Architecture (TODO)
 
-GAIA acts as the "Hands" (Scheme/Guix) for a "Brain" (LLM) hosted by the **RAI Server**.
+GAIA acts as the "Hands" (Scheme/Guix) for a "Brain" (LLM) hosted through an **OpenAI-compatible LLM Gateway**.
 
-1. **RAI (Python/FastAPI):** The Intelligence Gateway. Manages LLM providers (Gemini, GPT-5, Qwen) and system prompts.
+1. **LiteLLM / Proxy Server:** The Intelligence Gateway. Maps OpenAI-API calls to LLM providers (Gemini, Local Ollama, Anthropic) handling context window limits and routing.
 2. **GAIA (Guile Scheme):** The System Core. Handles the RLM loop, code parsing, and recursive logic.
 3. **GNU Guix:** The Execution Layer. Provides safe, isolated, and reproducible sandboxes for AI-generated code.
 
@@ -63,7 +63,7 @@ GAIA acts as the "Hands" (Scheme/Guix) for a "Brain" (LLM) hosted by the **RAI S
 ### Prerequisites
 
 * [GNU Guix](https://guix.gnu.org/)
-* A running [RAI Server](https://gitlab.com/tk-lab1/ai/rai)
+* An active OpenAI-compatible endpoint (like local `uv run litellm`)
 
 ### Installation
 
@@ -76,20 +76,13 @@ cd gaia
 
 ### Usage
 
-**1. Ensure RAI Server is Running:**
-GAIA acts as a client. Ensure the [RAI Server](https://gitlab.com/tk-lab1/ai/rai) is running locally or accessible via network.
+**1. Ensure LLM Proxy Server is Running:**
+GAIA acts as a client. Ensure an LLM proxy server (like LiteLLM) is running locally or accessible via network.
 ```bash
-# In a separate terminal (if running locally):
-git clone https://gitlab.com/tk-lab1/ai/rai
-cd rai
-python -m venv .venv
-sourve .venv/bin/activate
-python -m pip install -e .
-# Read RAI project README or or doc for details of installing different LLM providers/adapters and their dependencies,
-# eg. for local ollama you need to install ollama server as well.
-rai config # setup server configuration
-rai serve
-curl http://localhost:8000/health
+# In your GAIA folder (using 'uv' python environment manager):
+uv add litellm[proxy]
+# Create litellm_config.yaml with your preferred local or remote models
+uv run litellm --config litellm_config.yaml --port 4000
 ```
 
 **2. Start GAIA Agent (Interactive Mode):**
@@ -120,7 +113,7 @@ GAIA doesn't just work; it grows. Every interaction is stored in `trajectories.j
 * **Logger:** Captures prompts, generated code, and execution results.
 * **Curator:** Filters successful interactions into a high-quality dataset.
 * **Goal:** Fine-tune smaller, local models to match or exceed frontier model performance on Guix-specific tasks.
-* **Guide:** See [fine_tuning_guide.md](file:///home/tomasz/.gemini/antigravity/brain/596335a5-f6e9-4386-a118-9a9a169615f1/fine_tuning_guide.md) for instructions.
+* **Guide:** See [fine_tuning_guide.md](fine_tuning_guide.md) for instructions.
 
 ## Benchmark Results (Phase 3)
 
