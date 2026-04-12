@@ -21,3 +21,10 @@ tmp/
 # Sensitive / credentials
 hf_token
 
+# Temporary outputs and literature
+original_prompt_form_paper.md
+*.pdf
+.mr1_diff.txt
+response.md
+test-output.txt
+.litellm.pid
