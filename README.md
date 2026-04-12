@@ -42,7 +42,7 @@ TODO: fix REPL
   - MLIR/IREE 
 
 
-## Architecture (TODO)
+## Architecture
 
 GAIA acts as the "Hands" (Scheme/Guix) for a "Brain" (LLM) hosted through an **OpenAI-compatible LLM Gateway**.
 
@@ -79,8 +79,7 @@ cd gaia
 **1. Ensure LLM Proxy Server is Running:**
 GAIA acts as a client. Ensure an LLM proxy server (like LiteLLM) is running locally or accessible via network.
 ```bash
-# In your GAIA folder (using 'uv' python environment manager):
-uv add litellm[proxy]
+# GAIA uses 'uv' environment manager to fetch and run LiteLLM seamlessly:
 # Create litellm_config.yaml with your preferred local or remote models
 uv run litellm --config litellm_config.yaml --port 4000
 ```
@@ -93,13 +92,16 @@ make run
 **3. Run Verification Tests:**
 ```bash
 # Run Unit Tests
-make test-units
+make check
+
+# Run LLM Tool-Use Check
+make test-tool-use
 
 # Run RLM PoC (Sandbox verification)
 make test-rlm
 ```
 
-**3. Curate Data for Fine-tuning:**
+**4. Curate Data for Fine-tuning:**
 
 ```bash
 make dataset
