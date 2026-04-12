@@ -37,7 +37,7 @@ test-rlm-env:
 llm-server:
 	@echo "Starting LiteLLM server..."
 	uv run litellm --config litellm_config.yaml --port 4000 > .litellm.log 2>&1 & echo $$! > .litellm.pid
-	sleep 2
+	sleep 6
 
 llm-server-stop:
 	@echo "Stopping LiteLLM server..."

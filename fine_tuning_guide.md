@@ -1,19 +1,19 @@
 # GAIA Fine-Tuning Guide (Deep Supervision)
 
-This guide explains how to use GAIA's self-improvement loop to fine-tune local LLMs (like Ministral-3b, Gemma-2b) for better performance on GNU Guix tasks.
+This guide explains how to use GAIA's self-improvement loop to fine-tune local LLMs (like Ministral-3b, Gemma-4/3) for better performance on GNU Guix tasks.
 
 ## 1. Concepts: LoRA, QLoRA, and Unsloth
 
 To train LLMs locally on consumer hardware, we use efficient techniques:
 
 ### **LoRA (Low-Rank Adaptation)**
-Instead of retraining all 7 billion parameters (which requires massive VRAM), LoRA freezes the main model and trains only tiny "adapter" matrices inserted into the model layers.
+Instead of retraining all 7 billion or 4 billion parameters (which requires massive VRAM), LoRA freezes the main model and trains only tiny "adapter" matrices inserted into the model layers.
 *   **Pros:** Fast, low VRAM usage, checkpoint is small (~100MB).
 *   **Cons:** Slightly less flexible than full fine-tuning (but sufficient for most tasks).
 
 ### **QLoRA (Quantized LoRA)**
 QLoRA takes efficienty further by loading the **base model in 4-bit precision** (using NF4 format) while training the LoRA adapters in 16-bit.
-*   **Pros:** Allows fine-tuning 7B models on a single 12GB GPU (or even smaller).
+*   **Pros:** Allows fine-tuning 7B/4B models on a single 12GB GPU (or even smaller).
 *   **Impact:** This is the standard for local LLM tuning today.
 
 ### **PyTorch & LoRA Inference Overhead (Performance Issues)**
@@ -26,13 +26,13 @@ While the standard training stack (PyTorch + HuggingFace PEFT) with LoRA injecti
 
 ## 2. Architecture: Where to Train?
 
-### Recommendation: **Train in RAI (Python), Run in GAIA (Guile)**
+### Recommendation: **Train in Python Node, Run in GAIA (Guile) via LiteLLM**
 
 | Component | Responsibility | Technology |
 |-----------|----------------|------------|
 | **GAIA** | **Data Generation**. Runs the RLM loop, encounters errors, creates `dataset-success.jsonl`. | Guile Scheme |
-| **RAI** | **Training & Validation**. Manages the GPU, runs the PyTorch training loop. | Python (PyTorch/Transformers) |
-| **IREE / Ollama** | **Production Inference**. Exported models should be compiled here. | MLIR / Llama.cpp |
+| **Training Node** | **Training & Validation**. Manages the GPU, runs the PyTorch training loop. | Python (PyTorch/Transformers) |
+| **IREE / Ollama** | **Production Inference**. Exported models should be compiled here behind LiteLLM Proxy. | MLIR / Llama.cpp / LiteLLM |
 
 **Future Vector - MLIR/IREE instead of PyTorch for Execution**
 *   **Maturity:** Keeping in mind the PyTorch optimization issues described, the trained LoRA layer should be permanently merged (`merge_and_unload()`) into the base weights (e.g., in `.vmfb` or `.gguf` format), and the inference workload loaded onto the optimal MLIR/IREE compilation engine.
@@ -49,21 +49,21 @@ While the standard training stack (PyTorch + HuggingFace PEFT) with LoRA injecti
     *   **Success**: Sessions ending with `FINAL()` are saved to `dataset-success.jsonl`.
     *   **Failure**: Failed attempts are saved to `dataset-failure.jsonl`.
 
-## 4. How to Fine-Tune (via RAI)
+## 4. How to Fine-Tune (Python Module)
 
-We assume you will implement a training module in **RAI** located at `~/scratch/AI/rai`.
+We assume you will implement a training module in a **Python Environment** located at `~/scratch/AI/training`.
 
-### Step 1: Install Unsloth in RAI
+### Step 1: Install Unsloth in Environment
 
 ```bash
-cd ~/scratch/AI/rai
+cd ~/scratch/AI/training
 pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
 pip install --no-deps "xformers<0.0.26" trl peft accelerate bitsandbytes
 ```
 
 ### Step 2: Run Training (Conceptual Script)
 
-Create a script `train_gaia.py` in RAI:
+Create a script `train_gaia.py`:
 
 ```python
 from unsloth import FastLanguageModel
@@ -73,7 +73,7 @@ from datasets import load_dataset
 
 # 1. Load Model
 model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name = "mistralai/Ministral-3b-v0.1",
+    model_name = "google/gemma-2-4b",
     max_seq_length = 4096,
     dtype = None,
     load_in_4bit = True,
@@ -118,14 +118,17 @@ trainer.train()
 model.save_pretrained("gaia-lora-adapter")
 ```
 
-### Step 3: Load Adapter in GAIA
+### Step 3: Load Adapter in Ollama/LiteLLM
 
-Once trained, tell RAI to load the base model with the new adapter:
+Once trained, merge to GGUF and tell LiteLLM or Ollama to load the model with the new adapter:
 
-```bash
-# Example RAI config change
-model: "ministral-3b"
-adapter: "gaia-lora-adapter"
+```yaml
+# Example LiteLLM config change
+model_list:
+  - model_name: gemma4-finetuned
+    litellm_params:
+      model: ollama/gemma4-finetuned
+      api_base: http://localhost:11434
 ```
 
 ---

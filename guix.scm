@@ -5,6 +5,7 @@
              (gnu packages certs)
              (gnu packages nss)
              (gnu packages texinfo)
+             (gnu packages compression)
              (gnu packages base))
 
 (packages->manifest
@@ -13,4 +14,5 @@
        guile-gnutls
        nss-certs
        coreutils
-       texinfo))
+       texinfo
+       gzip))

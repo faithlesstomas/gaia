@@ -79,7 +79,7 @@
 
 (define (search-guile-manual pattern)
   "Searches the official Guile manual using the info command."
-  (run-cmd-with-output "sh" "-c" (string-append "info --output=- --subnodes guile 2>/dev/null | grep -i -C 5 '" pattern "' | head -n 50")))
+  (run-cmd-with-output "bash" "-c" (string-append "info --output=- --subnodes guile 2>/dev/null | grep -i -C 5 '" pattern "' | head -n 50")))
 
 (define (file-info path)
   "Returns 'stat' like info."
