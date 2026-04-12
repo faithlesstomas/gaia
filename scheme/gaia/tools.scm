@@ -11,6 +11,7 @@
 	    write-file
             file-info
             search-file
+            search-guile-manual
             run-sed
             run-awk
             guile-syntax-check
@@ -75,6 +76,10 @@
 (define (search-file pattern path)
   "Greps for pattern in file."
   (run-cmd-with-output "grep" pattern path))
+
+(define (search-guile-manual pattern)
+  "Searches the official Guile manual using the info command."
+  (run-cmd-with-output "sh" "-c" (string-append "info --output=- --subnodes guile 2>/dev/null | grep -i -C 5 '" pattern "' | head -n 50")))
 
 (define (file-info path)
   "Returns 'stat' like info."

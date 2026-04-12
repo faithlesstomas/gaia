@@ -50,6 +50,7 @@ You solve complex tasks by writing and executing GNU Guile Scheme code in a pers
 - `(write-file path content)` — Writes string to file.
 - `(file-info path)` — Returns file metadata (size, type, permissions).
 - `(search-file pattern path-to-file)` — Grep for PATTERN in FILE. Example: `(search-file \"SECRET\" \"haystack.txt\")`. Returns matching lines as a string.
+- `(search-guile-manual pattern)` — Search the official Guile documentation using info. Example: `(search-guile-manual \"format\")`
 - `(run-sed expression path)` — Runs sed expression on file (stdout only).
 - `(run-awk program path)` — Runs awk program on file.
 
@@ -65,19 +66,22 @@ You solve complex tasks by writing and executing GNU Guile Scheme code in a pers
    - `(extract-match str regex)` → first regex match/capture group, or #f
    - `(split-string str delim)` → splits string by string delimiter. Example: `(split-string \"a::b\" \"::\")` → `(\"a\" \"b\")`
 
-# GUILE-SPECIFIC WARNINGS
-- CRITICAL: Guile's built-in `string-split` takes a CHARACTER, not a string! Use `#\\space` not `\" \"`.
-  Example: `(string-split \"hello world\" #\\space)` → `(\"hello\" \"world\")`
-  For string delimiters, use the injected `split-string` instead.
-- Use `string-contains` to find substrings: `(string-contains \"hello world\" \"world\")` → index or #f.
-- Use `string-after`/`string-before` for simple extraction tasks.
-
+# GUILE-SPECIFIC WARNINGS & LIMITATIONS (READ CAREFULLY)
+- CRITICAL SCOPE RULE: NEVER place `(define ...)` inside expression contexts like `if`, `cond`, `while` or `dolist`. To create local scope, use `(let (...))` or `(let* (...))`. To reassign existing bindings, use `(set! var val)`.
+- FORMAT FUNCTION: In Guile, `(format ...)` MUST specify a destination port. To return a string, use `#f`. To print to stdout, use `#t`. Example: `(format #f \"Hello ~a\" name)`.
+- CHARACTERS: Guile character literals start with `#\\`. Use `#\\space`, `#\\newline`, `#\\.`, `#\\/`. Do not invent macros like `#/.`. Note that Guile's built-in `string-split` takes a CHARACTER! Example: `(string-split \"hello world\" #\\space)`.
+- SYNTAX ERRORS: If you get `Syntax Error: unexpected end of input while searching for: ~A ()`, you MISSED a closing parenthesis `)`. DO NOT rewrite the code from scratch – carefully match your parenthesis. 
+- FLAT CODE: Write simple, flat code blocks instead of deeply nested lists to minimize parenthesis mismatches. Let-loops and state accumulators work well.
+- CHEATSHEET: If you are repeatedly failing checks, read the common gotchas via `(read-file \"docs/guile-gotchas.md\")`.
 
 # HOW TO WRITE CODE
 Wrap your Guile Scheme code in a ```repl code block:
 ```repl
-(define files (list-files \"/workspace\"))
-(display (length files))
+(let loop ((files (list-files \"/workspace\"))
+           (count 0))
+  (if (null? files)
+      (display count)
+      (loop (cdr files) (+ count 1))))
 ```
 
 The system will execute your code and return the output. You can then reason about the output and write more code.
@@ -187,7 +191,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                    (rlm-inject! new-env 'llm-query
                      (lambda (prompt)
                        (let* ((sub-session (string-append session-id "-sub-" (number->string (random 1000000000))))
-                              (response (chat-with-llm sub-session prompt (get-config 'model) SYSTEM_PROMPT))
+                              (response (chat-with-llm sub-session prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT)))
                               (payload (assoc-ref response "payload")))
                          (if payload
                              (assoc-ref payload "content")
@@ -255,9 +259,14 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
           last-output)
         (begin
           (display (string-append C-GREY "\n[GAIA] Step " (number->string step) " (Depth " (number->string depth) ")..." C-RESET "\n"))
-          (let* ((response (chat-with-llm session-id prompt (get-config 'model) SYSTEM_PROMPT))
+          (let* ((response (chat-with-llm session-id prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT)))
                  (payload (assoc-ref response "payload"))
-                 (response-text (if payload (assoc-ref payload "content") "Error: No payload in response")))
+                 (response-text (if payload
+                                    (assoc-ref payload "content")
+                                    (let ((err (assoc-ref response "error")))
+                                      (if err
+                                          (string-append "Error from LLM API: " (if (string? err) err (format #f "~a" err)))
+                                          "Error: No payload in response")))))
 
             (display (string-append C-BLUE "\n[GAIA] Says: " C-RESET))
             (display response-text)
