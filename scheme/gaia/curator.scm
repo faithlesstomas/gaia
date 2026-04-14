@@ -91,15 +91,15 @@
       (display (format #f "Curated: ~a successful sessions, ~a failed sessions.\n"
                        success-count failure-count))
       
-      ;; Check for push-to-rai flag (simple check for now)
+      ;; Check for push-to-llm flag (simple check for now)
       (let ((args (command-line)))
         (cond
-          ((member "--push-to-rai" args) =>
+          ((member "--push-to-llm" args) =>
            (lambda (tail)
              (if (null? (cdr tail))
-                 (display "Error: --push-to-rai requires a URL argument.\n")
+                 (display "Error: --push-to-llm requires a URL argument.\n")
                  (let ((url (cadr tail)))
-                   (display (format #f "Pushing dataset to RAI at ~a...\n" url))
+                   (display (format #f "Pushing dataset to LLM at ~a...\n" url))
                    ;; Use curl for simplicity
                    (let ((status (system* "curl" "-X" "POST" 
                                           "-F" (string-append "file=@" output-success) 

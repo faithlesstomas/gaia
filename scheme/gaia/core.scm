@@ -1,5 +1,5 @@
 (define-module (gaia core)
-  #:use-module (gaia rai-client)
+  #:use-module (gaia llm-client)
   #:use-module (gaia executor)
   #:use-module (gaia rlm-env)
   #:use-module (gaia utils)
@@ -50,6 +50,7 @@ You solve complex tasks by writing and executing GNU Guile Scheme code in a pers
 - `(write-file path content)` — Writes string to file.
 - `(file-info path)` — Returns file metadata (size, type, permissions).
 - `(search-file pattern path-to-file)` — Grep for PATTERN in FILE. Example: `(search-file \"SECRET\" \"haystack.txt\")`. Returns matching lines as a string.
+- `(search-guile-manual pattern)` — Search the official Guile documentation using info. Example: `(search-guile-manual \"format\")`
 - `(run-sed expression path)` — Runs sed expression on file (stdout only).
 - `(run-awk program path)` — Runs awk program on file.
 
@@ -65,19 +66,22 @@ You solve complex tasks by writing and executing GNU Guile Scheme code in a pers
    - `(extract-match str regex)` → first regex match/capture group, or #f
    - `(split-string str delim)` → splits string by string delimiter. Example: `(split-string \"a::b\" \"::\")` → `(\"a\" \"b\")`
 
-# GUILE-SPECIFIC WARNINGS
-- CRITICAL: Guile's built-in `string-split` takes a CHARACTER, not a string! Use `#\\space` not `\" \"`.
-  Example: `(string-split \"hello world\" #\\space)` → `(\"hello\" \"world\")`
-  For string delimiters, use the injected `split-string` instead.
-- Use `string-contains` to find substrings: `(string-contains \"hello world\" \"world\")` → index or #f.
-- Use `string-after`/`string-before` for simple extraction tasks.
-
+# GUILE-SPECIFIC WARNINGS & LIMITATIONS (READ CAREFULLY)
+- CRITICAL SCOPE RULE: NEVER place `(define ...)` inside expression contexts like `if`, `cond`, `while` or `dolist`. To create local scope, use `(let (...))` or `(let* (...))`. To reassign existing bindings, use `(set! var val)`.
+- FORMAT FUNCTION: In Guile, `(format ...)` MUST specify a destination port. To return a string, use `#f`. To print to stdout, use `#t`. Example: `(format #f \"Hello ~a\" name)`.
+- CHARACTERS: Guile character literals start with `#\\`. Use `#\\space`, `#\\newline`, `#\\.`, `#\\/`. Do not invent macros like `#/.`. Note that Guile's built-in `string-split` takes a CHARACTER! Example: `(string-split \"hello world\" #\\space)`.
+- SYNTAX ERRORS: If you get `Syntax Error: unexpected end of input while searching for: ~A ()`, you MISSED a closing parenthesis `)`. DO NOT rewrite the code from scratch – carefully match your parenthesis. 
+- FLAT CODE: Write simple, flat code blocks instead of deeply nested lists to minimize parenthesis mismatches. Let-loops and state accumulators work well.
+- CHEATSHEET: If you are repeatedly failing checks, read the common gotchas via `(read-file \"docs/guile-gotchas.md\")`.
 
 # HOW TO WRITE CODE
 Wrap your Guile Scheme code in a ```repl code block:
 ```repl
-(define files (list-files \"/workspace\"))
-(display (length files))
+(let loop ((files (list-files \"/workspace\"))
+           (count 0))
+  (if (null? files)
+      (display count)
+      (loop (cdr files) (+ count 1))))
 ```
 
 The system will execute your code and return the output. You can then reason about the output and write more code.
@@ -183,11 +187,11 @@ CONFIDENCE(100)
 If opt-env is provided, uses that environment; otherwise creates a new one."
   (let ((env (if (null? opt-env)
                  (let ((new-env (make-rlm-env)))
-                   ;; Inject llm-query: a closure that calls RAI
+                   ;; Inject llm-query: a closure that calls LLM proxy
                    (rlm-inject! new-env 'llm-query
                      (lambda (prompt)
                        (let* ((sub-session (string-append session-id "-sub-" (number->string (random 1000000000))))
-                              (response (chat-with-rai sub-session prompt (get-config 'model) SYSTEM_PROMPT))
+                              (response (chat-with-llm sub-session prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT)))
                               (payload (assoc-ref response "payload")))
                          (if payload
                              (assoc-ref payload "content")
@@ -255,9 +259,14 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
           last-output)
         (begin
           (display (string-append C-GREY "\n[GAIA] Step " (number->string step) " (Depth " (number->string depth) ")..." C-RESET "\n"))
-          (let* ((response (chat-with-rai session-id prompt (get-config 'model) SYSTEM_PROMPT))
+          (let* ((response (chat-with-llm session-id prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT)))
                  (payload (assoc-ref response "payload"))
-                 (response-text (if payload (assoc-ref payload "content") "Error: No payload in response")))
+                 (response-text (if payload
+                                    (assoc-ref payload "content")
+                                    (let ((err (assoc-ref response "error")))
+                                      (if err
+                                          (string-append "Error from LLM API: " (if (string? err) err (format #f "~a" err)))
+                                          "Error: No payload in response")))))
 
             (display (string-append C-BLUE "\n[GAIA] Says: " C-RESET))
             (display response-text)
@@ -377,7 +386,6 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
     (display "  /eval <scheme> - Execute Scheme code locally\n")
     (display "  /models        - List available models and LoRA adapters\n")
     (display "  /model <name>  - Select a base model or LoRA adapter folder to load\n")
-    (display "  /backend <name>- Select the backend to use (e.g. local, ollama)\n")
     (display "  /base-model <name>- Select the foundation model used for training\n")
     (display "  /train         - Manually trigger Fine Tuning (make learn) from dataset\n")
     (display "  /help          - Show this help\n")
@@ -389,7 +397,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
    ((string-prefix? "/ask " input)
     (let ((query (substring input 5)))
       (display "[Direct Question] Asking AI...\n")
-      (let* ((response (chat-with-rai session-id query (get-config 'model) "You are a helpful Guile Scheme expert."))
+      (let* ((response (chat-with-llm session-id query (get-config 'model) "You are a helpful Guile Scheme expert."))
              (payload (assoc-ref response "payload"))
              (content (if payload (assoc-ref payload "content") "Error No Payload")))
         (display "\nAI: ")
@@ -410,17 +418,10 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
 
    ;; /models
    ((string=? input "/models")
-    (let ((models-alist (get-models)))
-       (display (string-append C-BOLD "Available models (from RAI Registry):\n" C-RESET))
-       (if (list? models-alist)
-           (for-each (lambda (pair)
-                       (let ((backend (car pair))
-                             (model-vec (cdr pair)))
-                         (display (string-append C-CYAN "  [" backend "]:\n" C-RESET))
-                         (if (vector? model-vec)
-                             (vector-for-each (lambda (i m) (display (string-append "    - " m "\n"))) model-vec)
-                             (for-each (lambda (m) (display (string-append "    - " m "\n"))) model-vec))))
-                     models-alist)
+    (let ((models-list (get-models)))
+       (display (string-append C-BOLD "Available models (from LLM Registry):\n" C-RESET))
+       (if (list? models-list)
+           (for-each (lambda (m) (display (string-append "  - " m "\n"))) models-list)
            (display (string-append C-RED "  No models found or unexpected response format.\n" C-RESET))))
     #t)
 
@@ -434,18 +435,6 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
     (let ((new-model (substring input 7)))
        (set-config! 'model new-model)
        (display (string-append C-GREEN "Model hot-swapped for session to: " C-RESET new-model "\n")))
-    #t)
-
-   ;; /backend
-   ((string=? input "/backend")
-    (display (string-append C-BOLD "Current backend: " C-RESET (get-config 'backend) "\n"))
-    #t)
-
-   ;; /backend <name>
-   ((string-prefix? "/backend " input)
-    (let ((new-backend (substring input 9)))
-       (set-config! 'backend new-backend)
-       (display (string-append C-GREEN "Backend hot-swapped for session to: " C-RESET new-backend "\n")))
     #t)
 
    ;; /base-model
@@ -479,10 +468,9 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
   (display (string-append C-BOLD C-GREEN "Initializing GAIA (GNU AI Assistant)..." C-RESET "\n"))
 
   (load-config)
-  (display (format #f "Config Loaded:\n  Model: ~a~a~a\n  Backend: ~a\n  URL: ~a\n"
+  (display (format #f "Config Loaded:\n  Model: ~a~a~a\n  URL: ~a\n"
                    C-CYAN (get-config 'model) C-RESET
-                   (get-config 'backend)
-                   (get-config 'rai-url)))
+                   (get-config 'llm-url)))
 
   (display "Type '/help' for commands or enter a task.\n")
 

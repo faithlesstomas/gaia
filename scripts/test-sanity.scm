@@ -9,7 +9,7 @@
 ;;
 ;; This is a DETERMINISTIC sanity check of the full RLM pipeline.
 ;; It does NOT test model quality — it tests that the mechanism works:
-;;   1. Connection to RAI API
+;;   1. Connection to LLM API
 ;;   2. System prompt is respected
 ;;   3. Model generates a Scheme code block
 ;;   4. Executor runs code in container
@@ -28,10 +28,9 @@
 
 (define (run-sanity)
   (load-config)
-  (display (format #f "[SANITY] Config:\n  Model:   ~a\n  Backend: ~a\n  URL:     ~a\n"
+  (display (format #f "[SANITY] Config:\n  Model:   ~a\n  URL:     ~a\n"
                    (get-config 'model)
-                   (get-config 'backend)
-                   (get-config 'rai-url)))
+                   (get-config 'llm-url)))
 
   (let* ((expected (count-scm-files TASK-DIR))
          (session-id (string-append "sanity-"

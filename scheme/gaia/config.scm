@@ -4,11 +4,9 @@
   #:export (load-config get-config set-config!))
 
 (define %default-config
-  `((rai-url . "http://localhost:8000")
-    (model . "ministral-3:3b")
-    (backend . "ollama")
+  `((llm-url . "http://localhost:4000")
+    (model . "gemma3:4b")
     (base-model . "gemma-3-4b")
-    (framework . "pydantic_ai")
     (system-prompt . #f))) ;; Default system prompt is usually hardcoded in core, but can be overridden
 
 (define *config* (make-parameter %default-config))
@@ -21,11 +19,9 @@
 (define (get-env-override key)
   "Maps config keys to environment variables and returns value if set."
   (let ((env-var (case key
-                   ((rai-url) "GAIA_RAI_URL")
+                   ((llm-url) "GAIA_LLM_URL")
                    ((model) "GAIA_MODEL")
-                   ((backend) "GAIA_BACKEND")
                    ((base-model) "GAIA_BASE_MODEL")
-                   ((framework) "GAIA_FRAMEWORK")
                    ((system-prompt) "GAIA_SYSTEM_PROMPT")
                    (else #f))))
     (and env-var (getenv env-var))))

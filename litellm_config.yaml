@@ -1,0 +1,19 @@
+model_list:
+  - model_name: gemma4:e4b
+    litellm_params:
+      model: ollama/gemma4:e4b
+      api_base: http://localhost:11434
+  - model_name: gemma3:4b
+    litellm_params:
+      model: ollama/gemma3:4b
+      api_base: http://localhost:11434
+  - model_name: gemini-2.5-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+  - model_name: claude-3-7-sonnet
+    litellm_params:
+      model: anthropic/claude-3-7-sonnet-20250219
+
+litellm_settings:
+  drop_params: true
+  set_verbose: true

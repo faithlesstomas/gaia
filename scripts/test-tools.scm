@@ -86,4 +86,9 @@
   (let ((res (run-safe-code '(guix-search "guile"))))
     (string? res)))
 
+;; 13. Test search-guile-manual
+(test-assert "search-guile-manual"
+  (let ((res (run-safe-code '(search-guile-manual "format"))))
+    (and (string? res) (> (string-length res) 10))))
+
 (test-end "gaia-tools")

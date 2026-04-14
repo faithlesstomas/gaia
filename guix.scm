@@ -4,6 +4,8 @@
              (gnu packages tls)
              (gnu packages certs)
              (gnu packages nss)
+             (gnu packages texinfo)
+             (gnu packages compression)
              (gnu packages base))
 
 (packages->manifest
@@ -11,4 +13,6 @@
        guile-json-4
        guile-gnutls
        nss-certs
-       coreutils))
+       coreutils
+       texinfo
+       gzip))
