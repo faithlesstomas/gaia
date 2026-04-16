@@ -92,9 +92,6 @@ Wrap your Guile Scheme code in a ```repl code block:
 
 The system will execute your code and return the output. You can then reason about the output and write more code.
 
-# THINKING & REASONING MODE
-You may use native `<|think|>` tags (or `<thought>...</thought>`) to decouple your internal reasoning and planning from your output. The system will capture this monologue for debugging. Feel free to use `<channel|>` tags if required by your base model.
-
 # COMPLETION SIGNALS
 When you have solved the task COMPLETELY, use ONE of these signals:
 - `FINAL(answer)` — For direct text answers. Example: `FINAL(The file contains 42 errors)`
@@ -291,18 +288,10 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                                           "Error: No payload in response"))))
                  (reasoning-text (if payload (assoc-ref payload "reasoning") "")))
 
-            ;; Guard against empty responses from the model
-            (if (string=? response-text "")
-                (begin
-                  (display (string-append C-RED "\n[GAIA] Empty response from model. Retrying..." C-RESET "\n"))
-                  (rlm-loop-inner session-id
-                    "Your previous response was empty. Please write a ```repl code block to continue working on the task, or provide FINAL(answer) if you have the answer."
-                    depth env (+ step 1) transcript))
-
             (let ((final-sig (extract-final-signal response-text))
                   (conf-val (extract-confidence response-text)))
 
-              ;; Log interaction
+              ;; Log interaction FIRST so reasoning trace is captured
               (let ((log-entry `(("session_id" . ,session-id)
                                  ("prompt" . ,prompt)
                                  ("input" . ,last-output)
@@ -316,7 +305,15 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                   (newline port)
                   (close-port port)))
 
-              (let ((updated-transcript
+              ;; Guard against empty responses from the model
+              (if (string=? response-text "")
+                  (begin
+                    (display (string-append C-RED "\n[GAIA] Empty response from model. Retrying..." C-RESET "\n"))
+                    (rlm-loop-inner session-id
+                      "Your previous response was empty. Please write a ```repl code block to continue working on the task, or provide FINAL(answer) if you have the answer."
+                      depth env (+ step 1) transcript))
+
+                  (let ((updated-transcript
                      (append transcript
                              (if (= step 1)
                                  (list (cons "original-task" last-output)
