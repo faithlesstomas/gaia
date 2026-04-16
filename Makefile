@@ -6,11 +6,11 @@ export GAIA_LLM_URL
 export GAIA_MODEL
 export GAIA_BASE_MODEL
 
-.PHONY: run repl check test-units test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop
+.PHONY: run repl check test-units test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop clean-trajectories monitor
 
 GUIX_SHELL = guix shell -m guix.scm --
 
-run: llm-server
+run: llm-server clean-trajectories
 	$(GUIX_SHELL) guile -L scheme scripts/run-gaia.scm
 
 repl:
@@ -83,3 +83,6 @@ clean:
 
 clean-trajectories:
 	rm -f trajectories.jsonl
+
+monitor:
+	$(GUIX_SHELL) guile -L scheme scripts/gaia-monitor.scm
