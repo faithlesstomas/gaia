@@ -253,6 +253,28 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
       transcript)
      "\n")))
 
+(define (strip-blocks text)
+  "Strips markdown code blocks and thought blocks from text."
+  (let loop ((t text))
+    (let ((start (string-contains t "<thought>"))
+          (end (string-contains t "</thought>")))
+      (if (and start end (> end start))
+          (loop (string-append (substring t 0 start) (substring t (+ end 10))))
+          (let loop2 ((t t))
+            (let ((c-start (string-contains t "```")))
+              (if c-start
+                  (let ((c-end (string-contains t "```" (+ c-start 3))))
+                    (if c-end
+                        (loop2 (string-append (substring t 0 c-start) (substring t (+ c-end 3))))
+                        t))
+                  (string-trim-both t))))))))
+
+(define (markdown->ansi text)
+  "Converts simple markdown to ANSI sequences."
+  (let* ((t (regexp-substitute/global #f "\\*\\*([^*]+)\\*\\*" text 'pre C-BOLD 1 C-RESET 'post))
+         (t (regexp-substitute/global #f "`([^`]+)`" t 'pre C-CYAN 1 C-RESET 'post)))
+    t))
+
 (define (rlm-loop-inner session-id last-output depth env . opt-args)
   ;; opt-args: step [transcript]
   (let* ((step (if (null? opt-args) 1 (car opt-args)))
@@ -322,6 +344,13 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                                  (list (cons "user" last-output)
                                        (cons "assistant" (truncate-for-transcript response-text)))))))
 
+                (when (and reasoning-text (> (string-length reasoning-text) 0))
+                  (display (string-append C-GREY "[GAIA] Thinking asynchronously... (See monitor)" C-RESET "\n")))
+
+                (let ((prose (strip-blocks response-text)))
+                  (when (> (string-length prose) 0)
+                    (display (string-append C-BLUE "\n[GAIA] Analysis: " C-RESET (markdown->ansi prose) "\n"))))
+
                 (let ((has-action (or (extract-delegation response-text) (extract-code response-text)))
                       (has-final-signal (and final-sig #t)))
                   (if (and has-action has-final-signal)
@@ -347,12 +376,10 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                         (lambda (code)
                           (if (and code (> (string-length code) 0) (not (string=? code response-text)))
                               (begin
-                                (display (string-append C-YELLOW "\n[GAIA] Executing Code in RLM Environment..." C-RESET "\n"))
+                                (display (string-append C-BOLD C-CYAN "\n[GAIA] Executing Scheme Code:\n" C-RESET code "\n"))
                                 (match (rlm-execute env code)
                                   (('ok result)
-                                   (display "\n[GAIA] Result: ")
-                                   (display result)
-                                   (newline)
+                                   (display (string-append C-GREEN "\n[REPL] Success:\n" C-RESET result "\n"))
                                    (let ((exec-log `(("session_id" . ,session-id)
                                                      ("code" . ,code)
                                                      ("result" . ,result)
@@ -366,7 +393,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
 
                                   (('error type msg)
                                    (let ((feedback (handle-error type msg depth)))
-                                     (display (string-append C-RED "\n[GAIA] Error: " feedback C-RESET "\n"))
+                                     (display (string-append C-RED "\n[REPL] Runtime Error:\n" C-RESET feedback "\n"))
                                      (let ((exec-log `(("session_id" . ,session-id)
                                                        ("code" . ,code)
                                                        ("result" . ,feedback)
@@ -384,7 +411,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                         (lambda (answer)
                           (display (string-append C-GREEN "\n[GAIA] ✓ FINAL signal detected." C-RESET "\n"))
                           (if (equal? (car final-sig) 'final)
-                              (display (string-append C-BOLD "[GAIA] Answer: " C-RESET answer "\n"))
+                              (display (string-append C-BOLD "[GAIA] Final Answer: " C-RESET (markdown->ansi answer) "\n"))
                               (display (string-append C-BOLD "[GAIA] Answer stored in: " C-RESET answer "\n")))
                           answer))
 
