@@ -109,6 +109,7 @@ After each step, rate your confidence:
 # MACRO-RECURSION & DELEGATION (CRITICAL FOR COMPLEX TASKS)
 If a task requires processing large files (logs), broad searches, or complex decoupled reasoning, you MUST DELEGATE it to a sub-agent.
 - Use a code block with language 'delegate' containing an S-expression: `(delegate \"Goal\" \"Context\")`.
+- WARNING: `delegate` IS NOT A SCHEME FUNCTION! DO NOT write it inside your ```repl blocks! It is a distinct markdown block used directly in your text response.
 - The system will spawn a FRESH, isolated agent and wait for its completion.
 - The sub-agent will return its processed summarization back to your loop.
 
