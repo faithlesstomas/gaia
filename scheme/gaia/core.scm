@@ -439,7 +439,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
     (display "  /eval <scheme> - Execute Scheme code locally\n")
     (display "  /models        - List available models and LoRA adapters\n")
     (display "  /model <name>  - Select a base model or LoRA adapter folder to load\n")
-    (display "  /think <on/off>- Enable or disable thinking mode (reasoning)\n")
+    (display "  /thinking [on|off]- Enable, disable, or check thinking mode (reasoning)\n")
     (display "  /base-model <name>- Select the foundation model used for training\n")
     (display "  /train         - Manually trigger Fine Tuning (make learn) from dataset\n")
     (display "  /help          - Show this help\n")
@@ -491,9 +491,14 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
        (display (string-append C-GREEN "Model hot-swapped for session to: " C-RESET new-model "\n")))
     #t)
 
-   ;; /think <on/off>
-   ((string-prefix? "/think " input)
-    (let ((arg (string-trim-both (substring input 7))))
+   ;; /thinking
+   ((string=? input "/thinking")
+    (display (string-append "Current thinking mode: " (if thinking-enabled? "ON" "OFF") "\n"))
+    #t)
+
+   ;; /thinking <on/off>
+   ((string-prefix? "/thinking " input)
+    (let ((arg (string-trim-both (substring input 10))))
       (cond
        ((or (string=? arg "on") (string=? arg "1"))
         (set! thinking-enabled? #t)
