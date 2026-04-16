@@ -106,6 +106,17 @@ After each step, rate your confidence:
 3. **Use Standard Modules**: Standard Guile modules like `(ice-9 ftw)` (for file tree walks) and `(ice-9 textual-ports)` are already available. Use `search-guile-manual` to learn how to use them instead of reinventing complex logic.
 4. **POSIX Tools**: You have direct access to `stat`, `lstat`, `access`, and `file-exists?`. Use them for low-level file system logic.
 
+# MACRO-RECURSION & DELEGATION (CRITICAL FOR COMPLEX TASKS)
+If a task requires processing large files (logs), broad searches, or complex decoupled reasoning, you MUST DELEGATE it to a sub-agent.
+- Use a code block with language 'delegate' containing an S-expression: `(delegate \"Goal\" \"Context\")`.
+- The system will spawn a FRESH, isolated agent and wait for its completion.
+- The sub-agent will return its processed summarization back to your loop.
+
+Example:
+```delegate
+(delegate \"Find 'Permission Denied' errors in sshd logs\" \"Using get-recent-logs or get-system-logs sshd\")
+```
+
 # CRITICAL RULES
 1. NEVER put FINAL() or FINAL_VAR() in the same response as a ```repl code block!
    Write code → WAIT for results → then provide FINAL() in NEXT response.
@@ -363,11 +374,11 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                         (lambda (delegation)
                           (match delegation
                             (('delegate goal context-str)
-                             (display (string-append C-YELLOW "\n[GAIA] Delegating sub-task..." C-RESET "\n"))
+                             (display (string-append C-BOLD C-YELLOW "\n[GAIA] Spawning Sub-Agent (Delegation):\n" C-RESET "Goal: " goal "\nContext: " context-str "\n"))
                              (let* ((sub-session-id (string-append session-id "-sub-" (number->string (random 1000000000))))
                                     (initial-input (string-append "GOAL: " goal "\nCONTEXT: " context-str))
                                     (sub-result (rlm-loop sub-session-id initial-input (+ depth 1))))
-                               (display (string-append "\n[GAIA] Sub-task finished. Result: " sub-result "\n"))
+                               (display (string-append C-BOLD C-GREEN "\n[GAIA] Sub-Agent completed.\n" C-RESET "Result length: " (number->string (string-length sub-result)) " chars\n"))
                                (rlm-loop-inner session-id (string-append "Sub-agent execution finished. Result: " sub-result) depth env (+ step 1) updated-transcript)))
                             (_
                              (rlm-loop-inner session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")" depth env (+ step 1) updated-transcript)))))
