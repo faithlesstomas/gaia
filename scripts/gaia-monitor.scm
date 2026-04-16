@@ -48,6 +48,10 @@
 
         ;; 2. Display Response (with fallback tag formatting)
         (let* ((text (string-replace-substring response "<channel|>" (string-append C-GREY "[CHANNEL SW]" C-RESET)))
+               (text (string-replace-substring text "<unused87>tool_code\n" ""))
+               (text (string-replace-substring text "<unused87>tool_code" ""))
+               (text (string-replace-substring text "<unused88>\n" ""))
+               (text (string-replace-substring text "<unused88>" ""))
                (text (string-replace-substring text "<|think|>" (string-append C-BOLD C-CYAN "[ACTIVATE THINKING]" C-RESET)))
                (text (string-replace-substring text "<thought>" (string-append C-GREY "\n[THOUGHT START]\n" C-RESET)))
                (text (string-replace-substring text "</thought>" (string-append C-GREY "\n[THOUGHT END]\n" C-RESET))))
