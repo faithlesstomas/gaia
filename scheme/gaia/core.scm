@@ -31,8 +31,8 @@ You are GAIA (GNU AI Assistant), a system operator implementing the Recursive La
 You solve complex tasks by writing and executing GNU Guile Scheme code in a persistent REPL environment.
 
 # EXECUTION ENVIRONMENT
-- Language: GNU Guile Scheme (NOT Racket, NOT Chicken Scheme).
-- CRITICAL: Use `(use-modules ...)` for imports. NEVER use `require` — that is Racket syntax!
+- Language: GNU Guile Scheme.
+- CRITICAL: Use `(use-modules ...)` for imports.
 - Your code runs in a persistent REPL: variables and functions you define in one step are available in the next.
 - Output from `display`, `write`, `format` is captured and returned to you.
 
@@ -91,6 +91,9 @@ Wrap your Guile Scheme code in a ```repl code block:
 ```
 
 The system will execute your code and return the output. You can then reason about the output and write more code.
+
+# THINKING & REASONING MODE
+You may use native `<|think|>` tags (or `<thought>...</thought>`) to decouple your internal reasoning and planning from your output. The system will capture this monologue for debugging. Feel free to use `<channel|>` tags if required by your base model.
 
 # COMPLETION SIGNALS
 When you have solved the task COMPLETELY, use ONE of these signals:
@@ -168,10 +171,16 @@ CONFIDENCE(100)
      (else #f))))
 
 (define (extract-confidence response)
-  "Extracts CONFIDENCE(score) from LLM response. Returns number 0-100 or #f."
+  "Extracts CONFIDENCE(score) or <confidence>score</confidence> from LLM response. Returns number 0-100 or #f."
   (let ((str (if (string? response) response (scm->json response))))
     (cond
      ((string-match "CONFIDENCE\\(([0-9]+)\\)" str) =>
+      (lambda (m)
+        (let ((score (string->number (match:substring m 1))))
+          (if (and score (>= score 0) (<= score 100))
+              score
+              #f))))
+     ((string-match "<confidence>([0-9]+)</confidence>" str) =>
       (lambda (m)
         (let ((score (string->number (match:substring m 1))))
           (if (and score (>= score 0) (<= score 100))
@@ -193,6 +202,7 @@ CONFIDENCE(100)
 
 (define MAX-RECURSION-DEPTH 15)
 (define CONFIDENCE-THRESHOLD 95)
+(define thinking-enabled? #f) ;; Default thinking off
 
 (define (rlm-loop session-id last-output depth . opt-env)
   "The core RLM loop. Maintains a persistent environment across iterations.
@@ -271,26 +281,33 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
           last-output)
         (begin
           (display (string-append C-GREY "\n[GAIA] Step " (number->string step) " (Depth " (number->string depth) ")..." C-RESET "\n"))
-          (let* ((response (chat-with-llm session-id prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT)))
+          (let* ((response (chat-with-llm session-id prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT) #:think thinking-enabled?))
                  (payload (assoc-ref response "payload"))
                  (response-text (if payload
                                     (assoc-ref payload "content")
                                     (let ((err (assoc-ref response "error")))
                                       (if err
                                           (string-append "Error from LLM API: " (if (string? err) err (format #f "~a" err)))
-                                          "Error: No payload in response")))))
+                                          "Error: No payload in response"))))
+                 (reasoning-text (if payload (assoc-ref payload "reasoning") "")))
 
-            (display (string-append C-BLUE "\n[GAIA] Says: " C-RESET))
-            (display response-text)
-            (newline)
+            ;; Guard against empty responses from the model
+            (if (string=? response-text "")
+                (begin
+                  (display (string-append C-RED "\n[GAIA] Empty response from model. Retrying..." C-RESET "\n"))
+                  (rlm-loop-inner session-id
+                    "Your previous response was empty. Please write a ```repl code block to continue working on the task, or provide FINAL(answer) if you have the answer."
+                    depth env (+ step 1) transcript))
 
             (let ((final-sig (extract-final-signal response-text))
                   (conf-val (extract-confidence response-text)))
 
               ;; Log interaction
               (let ((log-entry `(("session_id" . ,session-id)
+                                 ("prompt" . ,prompt)
                                  ("input" . ,last-output)
                                  ("response" . ,response-text)
+                                 ("reasoning" . ,reasoning-text)
                                  ("timestamp" . ,(number->string (current-time)))
                                  ("confidence" . ,(if conf-val conf-val "null"))
                                  ("final_signal" . ,(if final-sig "true" "false")))))
@@ -380,7 +397,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
 
                        (else
                         (display (string-append C-RED "\n[GAIA] ⚠ No actionable output. Treating as final answer (unless low confidence)." C-RESET "\n"))
-                        response-text)))))))))))
+                        response-text))))))))))))  ;; extra paren for empty-response guard
 
 
 (define (handle-command input session-id)
@@ -398,6 +415,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
     (display "  /eval <scheme> - Execute Scheme code locally\n")
     (display "  /models        - List available models and LoRA adapters\n")
     (display "  /model <name>  - Select a base model or LoRA adapter folder to load\n")
+    (display "  /think <on/off>- Enable or disable thinking mode (reasoning)\n")
     (display "  /base-model <name>- Select the foundation model used for training\n")
     (display "  /train         - Manually trigger Fine Tuning (make learn) from dataset\n")
     (display "  /help          - Show this help\n")
@@ -448,6 +466,20 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
        (set-config! 'model new-model)
        (display (string-append C-GREEN "Model hot-swapped for session to: " C-RESET new-model "\n")))
     #t)
+
+   ;; /think <on/off>
+   ((string-prefix? "/think " input)
+    (let ((arg (string-trim-both (substring input 7))))
+      (cond
+       ((or (string=? arg "on") (string=? arg "1"))
+        (set! thinking-enabled? #t)
+        (display (string-append C-CYAN "Thinking mode ENABLED." C-RESET "\n")))
+       ((or (string=? arg "off") (string=? arg "0"))
+        (set! thinking-enabled? #f)
+        (display (string-append C-YELLOW "Thinking mode DISABLED." C-RESET "\n")))
+       (else
+        (display (string-append "Current thinking mode: " (if thinking-enabled? "ON" "OFF") "\n"))))
+      #t))
 
    ;; /base-model
    ((string=? input "/base-model")

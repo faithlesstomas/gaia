@@ -1,8 +1,14 @@
 model_list:
   - model_name: gemma4:e4b
     litellm_params:
-      model: ollama/gemma4:e4b
-      api_base: http://localhost:11434
+      model: openai/gemma4:e4b
+      api_base: http://localhost:11434/v1
+      api_key: not-needed
+  - model_name: gemma4:e2b
+    litellm_params:
+      model: openai/gemma4:e2b
+      api_base: http://localhost:11434/v1
+      api_key: not-needed
   - model_name: gemma3:4b
     litellm_params:
       model: ollama/gemma3:4b
@@ -15,5 +21,5 @@ model_list:
       model: anthropic/claude-3-7-sonnet-20250219
 
 litellm_settings:
-  drop_params: true
+  drop_params: false
   set_verbose: true
