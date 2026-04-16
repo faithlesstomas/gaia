@@ -171,12 +171,25 @@ CONFIDENCE(100)
 (define (extract-final-signal response)
   "Extracts FINAL() or FINAL_VAR() signal from LLM response."
   (let ((str (if (string? response) response (scm->json response))))
-    (cond
-     ((string-match "FINAL\\(([^)]+)\\)" str) =>
-      (lambda (m) (list 'final (match:substring m 1))))
-     ((string-match "FINAL_VAR\\(([^)]+)\\)" str) =>
-      (lambda (m) (list 'final-var (match:substring m 1))))
-     (else #f))))
+    (let ((final-idx (string-contains str "FINAL(")))
+      (if final-idx
+          (let* ((start (+ final-idx 6))
+                 (conf-idx (string-contains str "CONFIDENCE(" start))
+                 (search-space (substring str start (if conf-idx conf-idx (string-length str))))
+                 (end-local (string-rindex search-space #\))))
+            (if end-local
+                (list 'final (string-trim-both (substring search-space 0 end-local)))
+                #f))
+          (let ((fvar-idx (string-contains str "FINAL_VAR(")))
+            (if fvar-idx
+                (let* ((start (+ fvar-idx 10))
+                       (conf-idx (string-contains str "CONFIDENCE(" start))
+                       (search-space (substring str start (if conf-idx conf-idx (string-length str))))
+                       (end-local (string-rindex search-space #\))))
+                  (if end-local
+                      (list 'final-var (string-trim-both (substring search-space 0 end-local)))
+                      #f))
+                #f))))))
 
 (define (extract-confidence response)
   "Extracts CONFIDENCE(score) or <confidence>score</confidence> from LLM response. Returns number 0-100 or #f."
@@ -265,7 +278,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
      "\n")))
 
 (define (strip-blocks text)
-  "Strips markdown code blocks and thought blocks from text."
+  "Strips markdown code blocks, thought blocks, and internal tokens from text."
   (let loop ((t text))
     (let ((start (string-contains t "<thought>"))
           (end (string-contains t "</thought>")))
@@ -278,7 +291,11 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                     (if c-end
                         (loop2 (string-append (substring t 0 c-start) (substring t (+ c-end 3))))
                         t))
-                  (string-trim-both t))))))))
+                  (let* ((t (regexp-substitute/global #f "<channel\\|>" t 'pre "" 'post))
+                         (t (regexp-substitute/global #f "<unused87>tool_code" t 'pre "" 'post))
+                         (t (regexp-substitute/global #f "<unused88>" t 'pre "" 'post))
+                         (t (regexp-substitute/global #f "<\\|think\\|>" t 'pre "" 'post)))
+                    (string-trim-both t)))))))))
 
 (define (markdown->ansi text)
   "Converts simple markdown to ANSI sequences."
