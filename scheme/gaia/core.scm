@@ -328,7 +328,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
           (display "\n[GAIA] Max recursion depth reached. Returning current state.\n")
           last-output)
         (begin
-          (display (string-append C-GREY "\n[GAIA] Step " (number->string step) " (Depth " (number->string depth) ")..." C-RESET "\n"))
+          (display (string-append C-GREY "\n[GAIA] Agent Depth " (number->string depth) " (Step " (number->string step) ")..." C-RESET "\n"))
           (let* ((response (chat-with-llm session-id prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT) #:think thinking-enabled?))
                  (payload (assoc-ref response "payload"))
                  (response-text (if payload
