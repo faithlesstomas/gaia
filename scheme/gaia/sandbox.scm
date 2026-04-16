@@ -39,6 +39,12 @@
     ;; Exceptions (Basic)
     catch throw error
 
+    ;; File System Operations (POSIX-like)
+    stat lstat
+    stat:type stat:size stat:mode stat:mtime stat:atime stat:ctime
+    file-exists?
+    dirname basename
+
     ;; Ports (String only - for now)
     open-input-string open-output-string get-output-string
     call-with-input-string call-with-output-string

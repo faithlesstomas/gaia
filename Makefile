@@ -10,7 +10,7 @@ export GAIA_BASE_MODEL
 
 GUIX_SHELL = guix shell -m guix.scm --
 
-run:
+run: llm-server
 	$(GUIX_SHELL) guile -L scheme scripts/run-gaia.scm
 
 repl:
@@ -35,9 +35,13 @@ test-rlm-env:
 	$(GUIX_SHELL) guile -L scheme scripts/test-rlm-env.scm
 
 llm-server:
-	@echo "Starting LiteLLM server..."
-	uv run litellm --config litellm_config.yaml --port 4000 > .litellm.log 2>&1 & echo $$! > .litellm.pid
-	sleep 6
+	@if nc -z localhost 4000 2>/dev/null; then \
+		echo "LiteLLM server is already running on port 4000."; \
+	else \
+		echo "Starting LiteLLM server..."; \
+		uv run litellm --config litellm_config.yaml --port 4000 > .litellm.log 2>&1 & echo $$! > .litellm.pid; \
+		sleep 6; \
+	fi
 
 llm-server-stop:
 	@echo "Stopping LiteLLM server..."
