@@ -39,9 +39,18 @@ TODO: fix REPL
 ### Other ideas to investiagate and possibly implement:
   - RelayLLM: https://arxiv.org/pdf/2601.05167
   - FusionRoute: https://arxiv.org/pdf/2601.05106
-  - MLIR/IREE 
-
-
+  - Tiny Recursive Model (TRM): https://arxiv.org/abs/2510.04871 
+    - sourcecode: https://github.com/SamsungSAILMontreal/TinyRecursiveModels
+  - MLIR-based AI Compilers (for self-hosted, fast and hardware-specific execution of AI tasks) including LLMs
+    - MLIR: https://mlir.llvm.org/
+    - IREE: https://iree.dev/
+    - TVM: https://tvm.apache.org/
+    - torch-mlir: https://github.com/pytorch/torch-mlir
+    - dragonfly: https://github.com/dragonfly-ai/dragonfly
+    - MLIR-AIE: 
+      - https://docs.amd.com/en/latest/hardware/mlir/mlir-aie.html
+      - https://github.com/Xilinx/mlir-aie
+    
 ## Architecture
 
 GAIA acts as the "Hands" (Scheme/Guix) for a "Brain" (LLM) hosted through an **OpenAI-compatible LLM Gateway**.

@@ -121,22 +121,67 @@ Example: (rlm-inject! env 'llm-query my-query-function)"
                      " chars. Use search-file or process the data in smaller chunks.]")
       str))
 
+(define (analyze-parentheses code-string)
+  "Counts opening and closing parentheses, ignoring strings and comments, and returns a helpful hint if there's a mismatch."
+  (let loop ((chars (string->list code-string))
+             (in-string? #f)
+             (in-comment? #f)
+             (escape? #f)
+             (open-parens 0)
+             (close-parens 0))
+    (if (null? chars)
+        (cond
+         ((> open-parens close-parens)
+          (format #f "Syntax Error Hint: You have ~a opening '(' but only ~a closing ')'. You are missing ~a closing parentheses!"
+                  open-parens close-parens (- open-parens close-parens)))
+         ((< open-parens close-parens)
+          (format #f "Syntax Error Hint: You have ~a opening '(' and ~a closing ')'. You have ~a extra closing parentheses!"
+                  open-parens close-parens (- close-parens open-parens)))
+         (else #f))
+        (let ((c (car chars))
+              (rest (cdr chars)))
+          (cond
+           (escape? (loop rest in-string? in-comment? #f open-parens close-parens))
+           (in-comment?
+            (if (char=? c #\newline)
+                (loop rest in-string? #f #f open-parens close-parens)
+                (loop rest in-string? #t #f open-parens close-parens)))
+           (in-string?
+            (cond
+             ((char=? c #\\) (loop rest in-string? in-comment? #t open-parens close-parens))
+             ((char=? c #\") (loop rest #f in-comment? #f open-parens close-parens))
+             (else (loop rest in-string? in-comment? #f open-parens close-parens))))
+           (else
+            (cond
+             ((char=? c #\;) (loop rest in-string? #t #f open-parens close-parens))
+             ((char=? c #\") (loop rest #t in-comment? #f open-parens close-parens))
+             ((char=? c #\() (loop rest in-string? in-comment? #f (+ open-parens 1) close-parens))
+             ((char=? c #\)) (loop rest in-string? in-comment? #f open-parens (+ close-parens 1)))
+             (else (loop rest in-string? in-comment? #f open-parens close-parens)))))))))
+
 (define (rlm-eval! env code-string)
   "Evaluates CODE-STRING in the persistent RLM module.
 Returns ('ok result-string) on success or ('error type message) on failure.
 State is preserved between calls — variables defined in one call are
 visible in subsequent calls. Output is truncated to avoid context flooding."
-  (let* ((wrapped (string-append "(begin " code-string ")"))
-         ;; Parse the code first
-         (parsed (catch #t
-                   (lambda () (with-input-from-string wrapped read))
-                   (lambda (key . args)
-                     (cons 'parse-error
-                           (format #f "Syntax Error: ~a ~a" key args))))))
+  (let* ((max-lines-str (getenv "GAIA_REPL_MAX_LINES"))
+         (max-lines (if max-lines-str (string->number max-lines-str) #f))
+         (num-lines (+ 1 (string-count code-string #\newline))))
+    (if (and max-lines (> num-lines max-lines))
+        (list 'error 'permission 
+              (format #f "ENVIRONMENT ERROR: Your code block is ~a lines long, which exceeds the limit of ~a lines. Please break your solution into smaller steps in the REPL using variables." num-lines max-lines))
+        (let* ((wrapped (string-append "(begin " code-string ")"))
+               ;; Parse the code first
+               (parsed (catch #t
+                         (lambda () (with-input-from-string wrapped read))
+                         (lambda (key . args)
+                           (cons 'parse-error
+                                 (format #f "Syntax Error: ~a ~a" key args))))))
 
-    (if (and (pair? parsed) (eq? (car parsed) 'parse-error))
-        ;; Parse failure
-        (list 'error 'syntax (cdr parsed))
+          (if (and (pair? parsed) (eq? (car parsed) 'parse-error))
+              ;; Parse failure
+              (let ((hint (analyze-parentheses code-string)))
+                (list 'error 'syntax (if hint (string-append (cdr parsed) "\n" hint) (cdr parsed))))
 
         ;; Safety check: scan for banned primitives
         (let ((safety (validate-rlm-safety parsed)))
@@ -163,11 +208,11 @@ visible in subsequent calls. Output is truncated to avoid context flooding."
                                (truncate-output
                                  (format #f "Runtime Error: ~a ~a" key args)))))))
 
-                ;; Record history
-                (set-rlm-env-history! env
-                  (append (rlm-env-history env)
-                          (list (cons code-string result))))
-                result))))))
+                      ;; Record history
+                      (set-rlm-env-history! env
+                        (append (rlm-env-history env)
+                                (list (cons code-string result))))
+                      result))))))))
 
 (define BANNED-PRIMITIVES
   '(system system* delete-file rmdir rename-file chmod

@@ -5,9 +5,11 @@
 
 # Datasets and logs
 trajectories.jsonl
+trajectories-*.jsonl
+trajectories.jsonl.bak
 dataset-*.jsonl
 haystack.txt
-
+.last_trajectory
 
 # Editor backups
 *~

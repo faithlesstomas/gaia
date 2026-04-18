@@ -49,15 +49,16 @@ You solve complex tasks by writing and executing GNU Guile Scheme code in a pers
 - `(read-file path)` — Returns file content as string. WARNING: for large files, do NOT display the output! Use search-file instead.
 - `(write-file path content)` — Writes string to file.
 - `(file-info path)` — Returns file metadata (size, type, permissions).
-- `(search-file pattern path-to-file)` — Grep for PATTERN in FILE. Example: `(search-file \"SECRET\" \"haystack.txt\")`. Returns matching lines as a string.
+- `(search-file pattern path-to-file)` — Grep for PATTERN in FILE. Example: `(search-file \"SECRET\" \"haystack.txt\")`.
+  Returns matching lines as a string.
 - `(search-guile-manual pattern)` — Search the official Guile documentation using info. Example: `(search-guile-manual \"format\")`
 - `(run-sed expression path)` — Runs sed expression on file (stdout only).
 - `(run-awk program path)` — Runs awk program on file.
 - `(list-boots)` — Lists history of system boots. Use to find boot-ids.
-- `(get-boot-logs boot-id lines)` — Get logs for specific boot (use empty string \"\" for current).
-- `(get-system-logs service lines [since] [until])` — Logs for service (e.g. \"sshd\"). Time format: \"2026-04-14 06:00:00\".
-- `(get-recent-logs lines [priority])` — General logs. Priority: \"emerg\", \"err\", \"warning\", \"info\", etc.
-- `(get-kernel-logs lines [since])` — Kernel logs (dmesg style).
+- `(get-boot-logs [boot-id] [lines])` — Get logs for specific boot (default: current boot, 100 lines).
+- `(get-system-logs service [lines] [since] [until])` — Logs for service (e.g. \"sshd\"). Time format: \"YYYY-MM-DD HH:MM:SS\".
+- `(get-recent-logs [lines] [priority])` — General logs. Priority: \"emerg\", \"err\", \"warning\", \"info\".
+- `(get-kernel-logs [lines] [since])` — Kernel logs (dmesg style).
 - LIMIT: All log tools are capped at 500 lines per call.
 
 # YOUR REPL ENVIRONMENT IS PRE-INITIALIZED WITH:
@@ -73,11 +74,17 @@ You solve complex tasks by writing and executing GNU Guile Scheme code in a pers
    - `(split-string str delim)` → splits string by string delimiter. Example: `(split-string \"a::b\" \"::\")` → `(\"a\" \"b\")`
 
 # GUILE-SPECIFIC WARNINGS & LIMITATIONS (READ CAREFULLY)
-- CRITICAL SCOPE RULE: NEVER place `(define ...)` inside expression contexts like `if`, `cond`, `while` or `dolist`. To create local scope, use `(let (...))` or `(let* (...))`. To reassign existing bindings, use `(set! var val)`.
-- FORMAT FUNCTION: In Guile, `(format ...)` MUST specify a destination port. To return a string, use `#f`. To print to stdout, use `#t`. Example: `(format #f \"Hello ~a\" name)`.
-- CHARACTERS: Guile character literals start with `#\\`. Use `#\\space`, `#\\newline`, `#\\.`, `#\\/`. Do not invent macros like `#/.`. Note that Guile's built-in `string-split` takes a CHARACTER! Example: `(string-split \"hello world\" #\\space)`.
-- SYNTAX ERRORS: If you get `Syntax Error: unexpected end of input while searching for: ~A ()`, you MISSED a closing parenthesis `)`. DO NOT rewrite the code from scratch – carefully match your parenthesis. 
-- FLAT CODE: Write simple, flat code blocks instead of deeply nested lists to minimize parenthesis mismatches. Let-loops and state accumulators work well.
+- CRITICAL SCOPE RULE: NEVER place `(define ...)` inside expression contexts like `if`, `cond`, `while` or `dolist`.
+  To create local scope, use `(let (...))` or `(let* (...))`. To reassign existing bindings, use `(set! var val)`.
+- FORMAT FUNCTION: In Guile, `(format ...)` MUST specify a destination port. To return a string, use `#f`.
+  To print to stdout, use `#t`. Example: `(format #f \"Hello ~a\" name)`.
+- CHARACTERS: Guile character literals start with `#\\`. Use `#\\space`, `#\\newline`, `#\\.`, `#\\/`.
+  Do not invent macros like `#/.`. Note that Guile's built-in `string-split` takes a CHARACTER!
+  Example: `(string-split \"hello world\" #\\space)`.
+- SYNTAX ERRORS: If you get `Syntax Error: unexpected end of input while searching for: ~A ()`, you MISSED a closing parenthesis `)`.
+  DO NOT rewrite the code from scratch – carefully match your parenthesis.
+- FLAT CODE: Write simple, flat code blocks instead of deeply nested lists to minimize parenthesis mismatches.
+  Let-loops and state accumulators work well.
 - CHEATSHEET: If you are repeatedly failing checks, read the common gotchas via `(read-file \"docs/guile-gotchas.md\")`.
 
 # HOW TO WRITE CODE
@@ -101,19 +108,26 @@ After each step, rate your confidence:
 - `CONFIDENCE(score)` — 0-100%. If >= 95%, the system stops automatically.
 
 # RESEARCH & DEBUGGING PROTOCOL
-1. **Search Before You Leap**: If you are unsure about a function signature, return type, or which module to use, your FIRST step must be to use `(search-guile-manual \"pattern\")`.
-2. **Handle Errors with Research**: If you encounter an `unbound-variable` error, DO NOT guess the name. Search the manual for the variable or feature you need to find the correct naming or the required module.
-3. **Use Standard Modules**: Standard Guile modules like `(ice-9 ftw)` (for file tree walks) and `(ice-9 textual-ports)` are already available. Use `search-guile-manual` to learn how to use them instead of reinventing complex logic.
+1. **Search Before You Leap**: If you are unsure about a function signature, return type, or which module to use,
+   your FIRST step must be to use `(search-guile-manual \"pattern\")`.
+2. **Handle Errors with Research**: If you encounter an `unbound-variable` error, DO NOT guess the name.
+   Search the manual for the variable or feature you need to find the correct naming or the required module.
+3. **Use Standard Modules**: Standard Guile modules like `(ice-9 ftw)` (for file tree walks) and `(ice-9 textual-ports)` are already available.
+   Use `search-guile-manual` to learn how to use them instead of reinventing complex logic.
 4. **POSIX Tools**: You have direct access to `stat`, `lstat`, `access`, and `file-exists?`. Use them for low-level file system logic.
 
 # MACRO-RECURSION & DELEGATION (CRITICAL FOR COMPLEX TASKS)
 If a task requires processing large files (logs), broad searches, or complex decoupled reasoning, you MUST DELEGATE it to a sub-agent.
 - Use a code block with language 'delegate' containing an S-expression: `(delegate \"Goal\" \"Context\")`.
 - WARNING: `delegate` IS NOT A SCHEME FUNCTION! DO NOT write it inside your ```repl blocks! It is a distinct markdown block used directly in your text response.
+- CRITICAL: The `delegate` block is parsed textually. It CANNOT access your Scheme variables! 
+  If you have downloaded data into variables (like `logs`) and want an LLM to synthesize them, DO NOT use `delegate`. 
+  Instead, construct a prompt string inside your code and use `(llm-query your-prompt)`.
+  Example for in-memory data synthesis: `(display (llm-query (string-append \"Analyze: \" logs)))`
 - The system will spawn a FRESH, isolated agent and wait for its completion.
 - The sub-agent will return its processed summarization back to your loop.
 
-Example:
+Example of standard delegation (no Scheme variables):
 ```delegate
 (delegate \"Find 'Permission Denied' errors in sshd logs\" \"Using get-recent-logs or get-system-logs sshd\")
 ```
@@ -125,6 +139,13 @@ Example:
 2. Use the pre-loaded tools and modules. Do NOT try to import them again.
 3. Think step by step. Use `display` or `write` to inspect intermediate results.
 4. For large data: use `search-file` to find relevant lines. NEVER try to display entire large files.
+5. KEEP IT SHORT: Write short REPL commands. The environment may enforce a strict max line limit (e.g., 15 lines).
+   Store intermediate results in global variables using `(define var ...)` and process them in the next step.
+   Do not write massive monolithic scripts!
+6. SINGLE BLOCK: Only the LAST ```repl code block in your response will be executed.
+   If you self-correct your thinking, make sure your final, intended code is in the last ```repl block.
+7. NO TRIVIAL DELEGATION: NEVER use `delegate` for summarizing, formatting, or translating text.
+   You are fully capable of writing in the user's language. ONLY delegate for deep, isolated technical investigations.
 
 # EXAMPLE TASK FLOW
 User: \"Count .scm files in scheme/gaia/\"
@@ -141,20 +162,31 @@ FINAL(8)
 CONFIDENCE(100)
 ")
 
+(define (string-contains-last str pattern)
+  (let loop ((start 0)
+             (last-idx #f))
+    (let ((idx (string-contains str pattern start)))
+      (if idx
+          (loop (+ idx (string-length pattern)) idx)
+          last-idx))))
+
 (define (extract-code response)
-  "Extracts Scheme code from the LLM response (```repl or ```scheme code block)."
+  "Extracts Scheme code from the LLM response (```repl or ```scheme code block).
+Prefers the LAST code block to support LLM self-correction patterns."
   (let ((str (if (string? response) response (scm->json response))))
     (cond
      ;; Prefer ```repl blocks (RLM style)
-     ((string-contains str "```repl")
-      (let* ((start (+ (string-contains str "```repl") 7))
-             (end (string-contains str "```" start)))
-        (if end (substring str start end) #f)))
+     ((string-contains-last str "```repl")
+      => (lambda (idx)
+           (let* ((start (+ idx 7))
+                  (end (string-contains str "```" start)))
+             (if end (substring str start end) #f))))
      ;; Fallback: ```scheme blocks
-     ((string-contains str "```scheme")
-      (let* ((start (+ (string-contains str "```scheme") 9))
-             (end (string-contains str "```" start)))
-        (if end (substring str start end) #f)))
+     ((string-contains-last str "```scheme")
+      => (lambda (idx)
+           (let* ((start (+ idx 9))
+                  (end (string-contains str "```" start)))
+             (if end (substring str start end) #f))))
      (else #f))))
 
 (define (extract-delegation response)
@@ -351,7 +383,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                                  ("timestamp" . ,(number->string (current-time)))
                                  ("confidence" . ,(if conf-val conf-val "null"))
                                  ("final_signal" . ,(if final-sig "true" "false")))))
-                (let ((port (open-file "trajectories.jsonl" "a")))
+                (let ((port (open-file (or (getenv "GAIA_TRAJECTORIES_FILE") "trajectories.jsonl") "a")))
                   (display (scm->json log-entry) port)
                   (newline port)
                   (close-port port)))
@@ -360,9 +392,17 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
               (if (string=? response-text "")
                   (begin
                     (display (string-append C-RED "\n[GAIA] Empty response from model. Retrying..." C-RESET "\n"))
-                    (rlm-loop-inner session-id
-                      "Your previous response was empty. Please write a ```repl code block to continue working on the task, or provide FINAL(answer) if you have the answer."
-                      depth env (+ step 1) transcript))
+                    (let ((retry-transcript
+                           (if (= step 1)
+                               (list (cons "original-task" last-output)
+                                     (cons "user" last-output)
+                                     (cons "assistant" "(empty response)"))
+                               (append transcript
+                                       (list (cons "user" last-output)
+                                             (cons "assistant" "(empty response)"))))))
+                      (rlm-loop-inner session-id
+                        "Your previous response was empty. Please write a ```repl code block to continue working on the task, or provide FINAL(answer) if you have the answer."
+                        depth env (+ step 1) retry-transcript)))
 
                   (let ((updated-transcript
                      (append transcript
@@ -414,7 +454,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                                                      ("result" . ,result)
                                                      ("type" . "execution")
                                                      ("status" . "success"))))
-                                     (let ((port (open-file "trajectories.jsonl" "a")))
+                                     (let ((port (open-file (or (getenv "GAIA_TRAJECTORIES_FILE") "trajectories.jsonl") "a")))
                                        (display (scm->json exec-log) port)
                                        (newline port)
                                        (close-port port)))
@@ -429,7 +469,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                                                        ("type" . "execution")
                                                        ("status" . "error")
                                                        ("error_type" . ,(symbol->string type)))))
-                                       (let ((port (open-file "trajectories.jsonl" "a")))
+                                       (let ((port (open-file (or (getenv "GAIA_TRAJECTORIES_FILE") "trajectories.jsonl") "a")))
                                          (display (scm->json exec-log) port)
                                          (newline port)
                                          (close-port port)))

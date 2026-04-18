@@ -10,8 +10,11 @@ export GAIA_BASE_MODEL
 
 GUIX_SHELL = guix shell -m guix.scm --
 
-run: llm-server clean-trajectories
-	$(GUIX_SHELL) guile -L scheme scripts/run-gaia.scm
+run: llm-server
+	@TRAJ="trajectories-$$(date +%Y%m%d%H%M%S).jsonl"; \
+	echo $$TRAJ > .last_trajectory; \
+	echo "Starting GAIA. Trajectory will be saved to: $$TRAJ"; \
+	GAIA_TRAJECTORIES_FILE="$$TRAJ" $(GUIX_SHELL) guile -L scheme scripts/run-gaia.scm
 
 repl:
 	$(GUIX_SHELL) guile -L scheme
@@ -69,7 +72,9 @@ benchmark:
 	BENCHMARK_SIZE_KB=$${BENCHMARK_SIZE_KB:-512} $(GUIX_SHELL) guile -L scheme scripts/benchmark-niah.scm
 
 dataset:
-	$(GUIX_SHELL) guile -L scheme -c '(use-modules (gaia curator)) (curate-dataset "trajectories.jsonl" "dataset-success.jsonl" "dataset-failure.jsonl")'
+	@FILE=$${FILE:-$$(cat .last_trajectory 2>/dev/null || ls -t trajectories-*.jsonl 2>/dev/null | head -n1 || echo "trajectories.jsonl")}; \
+	echo "Curating dataset from: $$FILE"; \
+	$(GUIX_SHELL) guile -L scheme -c "(use-modules (gaia curator)) (curate-dataset \"$$FILE\" \"dataset-success.jsonl\" \"dataset-failure.jsonl\")"
 
 learn:
 	@echo "Curating dataset locally..."
@@ -85,4 +90,6 @@ clean-trajectories:
 	rm -f trajectories.jsonl
 
 monitor:
-	$(GUIX_SHELL) guile -L scheme scripts/gaia-monitor.scm
+	@FILE=$${FILE:-$$(cat .last_trajectory 2>/dev/null || ls -t trajectories-*.jsonl 2>/dev/null | head -n1 || echo "trajectories.jsonl")}; \
+	echo "Monitoring GAIA Trajectory: $$FILE"; \
+	$(GUIX_SHELL) guile -L scheme scripts/gaia-monitor.scm $$FILE

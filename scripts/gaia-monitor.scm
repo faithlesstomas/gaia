@@ -105,4 +105,11 @@
                         (display (string-append C-RED "Parse Error: " (format #f "~a" key) C-RESET "\n"))))
                     (loop)))))))))
 
-(tail-log "trajectories.jsonl")
+(define (get-log-path)
+  (let ((args (command-line)))
+    ;; args[0] is the script name, args[1] would be the first real arg
+    (if (> (length args) 1)
+        (list-ref args 1)
+        "trajectories.jsonl")))
+
+(tail-log (get-log-path))

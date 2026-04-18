@@ -131,28 +131,35 @@
 
 ;; --- System Logs Tools (journalctl) ---
 
-(define* (get-system-logs service-name lines #:optional (since "") (until ""))
+(define* (get-system-logs service-name #:optional (arg1 100) (arg2 "") (arg3 ""))
   "Retrieves system logs for a specific service using journalctl.
-   Lines limit: 500."
-  (let* ((n-lines (if (> lines 500) 500 lines))
+   Lines limit: 500. Usage: (get-system-logs \"sshd\" [lines] [since] [until])"
+  (let* ((lines (if (number? arg1) arg1 100))
+         (since (if (string? arg1) arg1 (if (string? arg2) arg2 "")))
+         (until (if (string? arg1) (if (string? arg2) arg2 "") (if (string? arg3) arg3 "")))
+         (n-lines (if (> lines 500) 500 lines))
          (args (list "-u" service-name "-n" (number->string n-lines) "--no-pager")))
     (let* ((args (if (not (string-null? since)) (append args (list "--since" since)) args))
            (args (if (not (string-null? until)) (append args (list "--until" until)) args)))
       (apply run-cmd-with-output "journalctl" args))))
 
-(define* (get-recent-logs lines #:optional (priority ""))
+(define* (get-recent-logs #:optional (arg1 100) (arg2 ""))
   "Retrieves recent logs, optionally filtered by priority.
    Priority can be: emerg, alert, crit, err, warning, notice, info, debug.
-   Lines limit: 500."
-  (let* ((n-lines (if (> lines 500) 500 lines))
+   Lines limit: 500. Usage: (get-recent-logs [lines] [priority])"
+  (let* ((lines (if (number? arg1) arg1 100))
+         (priority (if (string? arg1) arg1 (if (string? arg2) arg2 "")))
+         (n-lines (if (> lines 500) 500 lines))
          (args (list "-n" (number->string n-lines) "--no-pager")))
     (let ((args (if (not (string-null? priority)) (append args (list "-p" priority)) args)))
       (apply run-cmd-with-output "journalctl" args))))
 
-(define (get-boot-logs boot-id lines)
+(define* (get-boot-logs #:optional (arg1 "") (arg2 100))
   "Retrieves logs for a specific boot ID (pass empty string for current boot).
-   Lines limit: 500."
-  (let ((n-lines (if (> lines 500) 500 lines)))
+   Lines limit: 500. Usage: (get-boot-logs [boot-id] [lines])"
+  (let* ((boot-id (if (string? arg1) arg1 ""))
+         (lines (if (number? arg1) arg1 (if (number? arg2) arg2 100)))
+         (n-lines (if (> lines 500) 500 lines)))
     (if (string-null? boot-id)
         (run-cmd-with-output "journalctl" "-b" "-n" (number->string n-lines) "--no-pager")
         (run-cmd-with-output "journalctl" "-b" boot-id "-n" (number->string n-lines) "--no-pager"))))
@@ -161,10 +168,12 @@
   "Lists available boots history."
   (run-cmd-with-output "journalctl" "--list-boots" "--no-pager"))
 
-(define* (get-kernel-logs lines #:optional (since ""))
+(define* (get-kernel-logs #:optional (arg1 100) (arg2 ""))
   "Retrieves kernel logs (dmesg style from journal).
-   Lines limit: 500."
-  (let* ((n-lines (if (> lines 500) 500 lines))
+   Lines limit: 500. Usage: (get-kernel-logs [lines] [since])"
+  (let* ((lines (if (number? arg1) arg1 100))
+         (since (if (string? arg1) arg1 (if (string? arg2) arg2 "")))
+         (n-lines (if (> lines 500) 500 lines))
          (args (list "-k" "-n" (number->string n-lines) "--no-pager")))
     (let ((args (if (not (string-null? since)) (append args (list "--since" since)) args)))
       (apply run-cmd-with-output "journalctl" args))))
