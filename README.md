@@ -1,7 +1,7 @@
 
 # GNU AI Assistant (GAIA)
 
-**GAIA** is a local-First AI Assistant for scientific research in reproducible safe environment with REPL build in **GNU Guile**.
+**GAIA** is a local-First AI Assistant for any task in reproducible safe environment with REPL build in **GNU Guile**.
 It is designed specifically for researchers and engineers who require strict reproducibility, 
 mathematical rigor, safe execution and data privacy when integrating Large Language Models (LLMs) into their workflows.
 
@@ -30,42 +30,24 @@ with this ideas in mind (and in system prompt as instructions):
 
 * **Don't Read, Investigate:** Instead of uploading files, GAIA generates Guile Scheme code to explore them locally.
 * **Recursive Decomposition:** Complex tasks are broken down into sub-tasks and handled by recursive agent calls.
-
-TODO: fix REPL 
-
-* **Functional Isolation:** Every investigative step runs in a bit-reproducible, isolated `guix shell --container`.
-
-
-### Other ideas to investiagate and possibly implement:
-  - RelayLLM: https://arxiv.org/pdf/2601.05167
-  - FusionRoute: https://arxiv.org/pdf/2601.05106
-  - Tiny Recursive Model (TRM): https://arxiv.org/abs/2510.04871 
-    - sourcecode: https://github.com/SamsungSAILMontreal/TinyRecursiveModels
-  - MLIR-based AI Compilers (for self-hosted, fast and hardware-specific execution of AI tasks) including LLMs
-    - MLIR: https://mlir.llvm.org/
-    - IREE: https://iree.dev/
-    - TVM: https://tvm.apache.org/
-    - torch-mlir: https://github.com/pytorch/torch-mlir
-    - dragonfly: https://github.com/dragonfly-ai/dragonfly
-    - MLIR-AIE: 
-      - https://docs.amd.com/en/latest/hardware/mlir/mlir-aie.html
-      - https://github.com/Xilinx/mlir-aie
-    
+* **Functional Isolation:** Investigative steps run in sandboxed environments with AST-level safety validation.
 ## Architecture
 
 GAIA acts as the "Hands" (Scheme/Guix) for a "Brain" (LLM) hosted through an **OpenAI-compatible LLM Gateway**.
 
-1. **LiteLLM / Proxy Server:** The Intelligence Gateway. Maps OpenAI-API calls to LLM providers (Gemini, Local Ollama, Anthropic) handling context window limits and routing.
+1. **LiteLLM / Proxy Server:** The Intelligence Gateway. Maps OpenAI-API calls to LLM providers 
+   (Gemini, Local Ollama, Anthropic) handling context window limits and routing.
 2. **GAIA (Guile Scheme):** The System Core. Handles the RLM loop, code parsing, and recursive logic.
 3. **GNU Guix:** The Execution Layer. Provides safe, isolated, and reproducible sandboxes for AI-generated code.
 
 ## Key Features
 
-* **RLM Toolkit:** Native Guile implementation of the Recursive Language Model paradigm (in progress)
-* **Guix Sandboxing:** Securely run AI-generated scripts in ephemeral containers.
-* **Deterministic Replay:** Debug system behavior offline by replaying saved AI trajectories without API costs. (TODO)
-* **Train / Fine-Tune / Self-Improvement Loop:** Automatically log and curate "Success" vs "Failure" datasets for local 
-  fine-tuning (training feature in progress)
+* **RLM Toolkit:** Native Guile implementation of the Recursive Language Model paradigm with persistent REPL.
+* **Safety Validation:** AST-level recursive scan of LLM-generated code for banned primitives before execution.
+* **Multi-Model Support:** Hot-swappable LLM backends via LiteLLM (Gemma, Ollama, Gemini, Anthropic).
+* **Thinking Mode:** Native reasoning support for models with `<|think|>` tags (Gemma 4).
+* **Self-Improvement Loop:** Trajectory logging → dataset curation → fine-tuning pipeline.
+* **Live Monitoring:** Real-time trajectory viewer for debugging agent reasoning.
 
 ## Getting Started
 
@@ -131,40 +113,26 @@ GAIA doesn't just work; it grows. Every interaction is stored in `trajectories.j
 We tested GAIA's RLM core using a "Needle in a Haystack" task (finding a key in a 10MB text file).
 
 *   **Setup:** Ministral-3b model, local execution, 10MB haystack.
-*   **Result:** The RLM loop successfully orchestrated the investigation, attempting to write Scheme scripts to read the file.
+*   **Result:** The RLM loop successfully orchestrated the investigation, 
+    attempting to write Scheme scripts to read the file.
 *   **Observation:** The infrastructure (Error Handling, Retry Logic, Completion Signals) worked perfectly.
     *   Syntax errors from the model were caught and fed back.
     *   The model attempted to self-correct based on feedback.
-*   **Limitation:** The small 3B model struggled to generate syntactically correct Guile Scheme for file I/O (often missing parentheses or modules), leading to a retry loop. This highlights the need for larger/better-tuned models for code generation, but validates the *system architecture*.
+*   **Limitation:** The small 3B model struggled to generate syntactically correct Guile Scheme 
+    for file I/O (often missing parentheses or modules), leading to a retry loop. 
+    This highlights the need for larger/better-tuned models for code generation, but validates the *system architecture*.
 
 ## License
 
-GAIA is part of the GNU ecosystem and is released under the **GPLv3+ License**. See [License](LICENSE) for details.
+GAIA is part of the GNU ecosystem and is released under the **GPLv3+ License**. See [LICENSE](LICENSE) for details.
 
-## Roadmap: Leveraging Homoiconicity (Code-as-Data)
+## Roadmap
 
-The choice of Guile Scheme (a homoiconic Lisp dialect) is not accidental. It allows GAIA to treat its own code as data, 
-enabling features impossible in Python/Javascript architectures.
-
-*   [x] **Static Safety Validator:**
-    *   **Concept:** Parse LLM-generated code as an AST (Abstract Syntax Tree) before execution. 
-        recursively check for banned primitives (e.g., `system*`, `delete-file`) even in deeply nested expressions.
-    *   **Status:** *Implemented* (see `validate-safety` in `executor.scm`).
-
-*   [ ] **Code Instrumentation & Auto-Logging:**
-    *   **Concept:** Automatically rewrite user code to wrap function calls in error handlers or performance loggers without asking the LLM to do so.
-
-*   [ ] **G-Expressions ("Context Teleportation"):**
-    *   **Concept:** Use GNU Guix's G-expressions (`#~`) to serialize entire variable contexts and modules when spawning sub-agents, 
-    solving the "data transfer" problem in RLM.
-
-*   [ ] **The Self-Modifying Agent:**
-    *   **Concept:** Allow GAIA to "refactor" its own cognitive loop (`rlm-loop`) at runtime by treating the loop logic as a mutable list.
-
-*   [ ] **Persistent Thought Environment (REPL):**
-    *   **Concept:** Maintain a long-running Guile REPL where the agent defines helper functions in Step 1 and reuses them in Step 10, mimicking human memory.
-
-
+See **[ROADMAP.md](ROADMAP.md)** for the full development plan, including:
+- Phase 1: RLM core improvements & homoiconicity (code-as-data)
+- Phase 2: Headless architecture & terminal UX
+- Phase 3: Continuous learning (fine-tuning & data pipeline)
+- Phase 4: Long-term vision (Web UI, Guix containers, MLIR/IREE)
 
 ---
-*Note: Gaia is currently under active development. If you are interested in supporting this digital commons project, please reach out.*
+*GAIA is under active development. If you are interested in supporting this digital commons project, please reach out.*
