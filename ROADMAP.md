@@ -178,6 +178,19 @@ as outlined in [training_spec.md](training_spec.md) and [fine_tuning_guide.md](f
   See: [MLIR](https://mlir.llvm.org/), [IREE](https://iree.dev/),
   [TVM](https://tvm.apache.org/).
 
+- [ ] **RelayLLM (Token-Level Collaboration)** — Implement strategic expert calling.
+  - **Concept**: SLM acts as a controller, generating tokens and calling a "Teacher" LLM only for difficult reasoning steps via a `<call>` command.
+  - **GAIA Relevance**: Perfect for Phase 3/4. Allows a local 3B model (Gemma/Ministral) to handle simple Scheme logic and only "relay" to a 7B/Gemini model for complex AST transformations.
+  - **Plan**: 
+    1. Update `curator.scm` to identify "pivot points" where models fail/succeed.
+    2. Train SLM using GRPO (Group Relative Policy Optimization) to seek help.
+    3. Modify `llm-client.scm` to handle streaming relay-tokens.
+
+- [ ] **FusionRoute (Multi-Expert Routing)** — Robust token-level ensemble.
+  - **Concept**: Lightweight router selects the best specialized expert per token and adds a "complementary logit" to stabilize/correct output.
+  - **GAIA Relevance**: Useful for routing between specialized domain experts (e.g., Guix Packaging, Linux Kernel, Scheme Logic).
+  - **Plan**: Implement a routing layer in the Headless Server (Phase 2) that manages multiple LiteLLM endpoints as experts.
+
 ---
 
 ## References
