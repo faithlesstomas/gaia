@@ -120,8 +120,8 @@ After each step, rate your confidence:
 If a task requires processing large files (logs), broad searches, or complex decoupled reasoning, you MUST DELEGATE it to a sub-agent.
 - Use a code block with language 'delegate' containing an S-expression: `(delegate \"Goal\" \"Context\")`.
 - WARNING: `delegate` IS NOT A SCHEME FUNCTION! DO NOT write it inside your ```repl blocks! It is a distinct markdown block used directly in your text response.
-- CRITICAL: The `delegate` block is parsed textually. It CANNOT access your Scheme variables! 
-  If you have downloaded data into variables (like `logs`) and want an LLM to synthesize them, DO NOT use `delegate`. 
+- CRITICAL: The `delegate` block is parsed textually. It CANNOT access your Scheme variables!
+  If you have downloaded data into variables (like `logs`) and want an LLM to synthesize them, DO NOT use `delegate`.
   Instead, construct a prompt string inside your code and use `(llm-query your-prompt)`.
   Example for in-memory data synthesis: `(display (llm-query (string-append \"Analyze: \" logs)))`
 - The system will spawn a FRESH, isolated agent and wait for its completion.
@@ -258,7 +258,7 @@ Prefers the LAST code block to support LLM self-correction patterns."
 (define CONFIDENCE-THRESHOLD 95)
 (define thinking-enabled? #f) ;; Default thinking off
 
-(define (rlm-loop session-id last-output depth . opt-env)
+(define (rlm-loop session-id last-output depth history . opt-env)
   "The core RLM loop. Maintains a persistent environment across iterations.
 If opt-env is provided, uses that environment; otherwise creates a new one."
   (let ((env (if (null? opt-env)
@@ -267,7 +267,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                    (rlm-inject! new-env 'llm-query
                      (lambda (prompt)
                        (let* ((sub-session (string-append session-id "-sub-" (number->string (random 1000000000))))
-                              (response (chat-with-llm sub-session prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT)))
+                              (response (chat-with-llm sub-session prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT) #:history history))
                               (payload (assoc-ref response "payload")))
                          (if payload
                              (assoc-ref payload "content")
@@ -277,7 +277,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                    new-env)
                  (car opt-env))))
 
-    (rlm-loop-inner session-id last-output depth env 1)))
+    (rlm-loop-inner session-id last-output depth env history 1)))
 
 ;; --- Transcript helpers for multi-turn RLM loop ---
 
@@ -336,7 +336,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
          (t (regexp-substitute/global #f "`([^`]+)`" t 'pre C-CYAN 1 C-RESET 'post)))
     t))
 
-(define (rlm-loop-inner session-id last-output depth env . opt-args)
+(define (rlm-loop-inner session-id last-output depth env history . opt-args)
   ;; opt-args: step [transcript]
   (let* ((step (if (null? opt-args) 1 (car opt-args)))
          (transcript (if (or (null? opt-args) (null? (cdr opt-args)))
@@ -361,7 +361,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
           last-output)
         (begin
           (display (string-append C-GREY "\n[GAIA] Agent Depth " (number->string depth) " (Step " (number->string step) ")..." C-RESET "\n"))
-          (let* ((response (chat-with-llm session-id prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT) #:think thinking-enabled?))
+          (let* ((response (chat-with-llm session-id prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT) #:think thinking-enabled? #:history history))
                  (payload (assoc-ref response "payload"))
                  (response-text (if payload
                                     (assoc-ref payload "content")
@@ -402,7 +402,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                                              (cons "assistant" "(empty response)"))))))
                       (rlm-loop-inner session-id
                         "Your previous response was empty. Please write a ```repl code block to continue working on the task, or provide FINAL(answer) if you have the answer."
-                        depth env (+ step 1) retry-transcript)))
+                        depth env history (+ step 1) retry-transcript)))
 
                   (let ((updated-transcript
                      (append transcript
@@ -426,7 +426,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                       (begin
                         (display (string-append C-RED "\n[GAIA] ⚠ Mixed action and FINAL signal in one turn." C-RESET "\n"))
                         (let ((feedback "Error: You provided both a ```repl code block and a FINAL() signal in the same response. Please provide ONLY the code block. After seeing the execution result, provide FINAL() in the NEXT response."))
-                          (rlm-loop-inner session-id feedback depth env (+ step 1) updated-transcript)))
+                          (rlm-loop-inner session-id feedback depth env history (+ step 1) updated-transcript)))
                       (cond
                        ((extract-delegation response-text) =>
                         (lambda (delegation)
@@ -435,11 +435,11 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                              (display (string-append C-BOLD C-YELLOW "\n[GAIA] Spawning Sub-Agent (Delegation):\n" C-RESET "Goal: " goal "\nContext: " context-str "\n"))
                              (let* ((sub-session-id (string-append session-id "-sub-" (number->string (random 1000000000))))
                                     (initial-input (string-append "GOAL: " goal "\nCONTEXT: " context-str))
-                                    (sub-result (rlm-loop sub-session-id initial-input (+ depth 1))))
+                                    (sub-result (rlm-loop sub-session-id initial-input (+ depth 1) history)))
                                (display (string-append C-BOLD C-GREEN "\n[GAIA] Sub-Agent completed.\n" C-RESET "Result length: " (number->string (string-length sub-result)) " chars\n"))
-                               (rlm-loop-inner session-id (string-append "Sub-agent execution finished. Result: " sub-result) depth env (+ step 1) updated-transcript)))
+                               (rlm-loop-inner session-id (string-append "Sub-agent execution finished. Result: " sub-result) depth env history (+ step 1) updated-transcript)))
                             (_
-                             (rlm-loop-inner session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")" depth env (+ step 1) updated-transcript)))))
+                             (rlm-loop-inner session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")" depth env history (+ step 1) updated-transcript)))))
 
                        ((extract-code response-text) =>
                         (lambda (code)
@@ -458,7 +458,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                                        (display (scm->json exec-log) port)
                                        (newline port)
                                        (close-port port)))
-                                   (rlm-loop-inner session-id (string-append "Code executed successfully. Result:\n" result) depth env (+ step 1) updated-transcript))
+                                   (rlm-loop-inner session-id (string-append "Code executed successfully. Result:\n" result) depth env history (+ step 1) updated-transcript))
 
                                   (('error type msg)
                                    (let ((feedback (handle-error type msg depth)))
@@ -473,7 +473,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                                          (display (scm->json exec-log) port)
                                          (newline port)
                                          (close-port port)))
-                                     (rlm-loop-inner session-id feedback depth env (+ step 1) updated-transcript)))))
+                                     (rlm-loop-inner session-id feedback depth env history (+ step 1) updated-transcript)))))
                               response-text)))
 
                        ((and final-sig (match final-sig (('final ans) ans) (('final-var var) var) (_ #f))) =>
@@ -490,16 +490,16 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
 
                        (else
                         (display (string-append C-RED "\n[GAIA] ⚠ No actionable output. Treating as final answer (unless low confidence)." C-RESET "\n"))
-                        response-text))))))))))))  ;; extra paren for empty-response guard
+                        response-text))))))))))))
 
-
-(define (handle-command input session-id)
-  "Parses and executes meta-commands or delegates to RLM."
+(define (handle-command input session-id history)
+  "Parses and executes meta-commands or delegates to RLM.
+Returns updated (history . should-continue?)"
   (cond
    ;; /exit
    ((string=? input "/exit")
     (display "Bye.\n")
-    #f) ;; Return #f to stop loop
+    (cons history #f))
 
    ;; /help
    ((string=? input "/help")
@@ -511,22 +511,30 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
     (display "  /thinking [on|off]- Enable, disable, or check thinking mode (reasoning)\n")
     (display "  /base-model <name>- Select the foundation model used for training\n")
     (display "  /train         - Manually trigger Fine Tuning (make learn) from dataset\n")
+    (display "  /clear         - Clear conversation history\n")
     (display "  /help          - Show this help\n")
     (display "  /exit          - Quit GAIA\n")
     (display "  <query>        - Start standard RLM investigation\n")
-    #t)
+    (cons history #t))
+
+   ;; /clear
+   ((string=? input "/clear")
+    (display (string-append C-YELLOW "Conversation history cleared." C-RESET "\n"))
+    (cons '() #t))
 
    ;; /ask <query>
    ((string-prefix? "/ask " input)
     (let ((query (substring input 5)))
       (display "[Direct Question] Asking AI...\n")
-      (let* ((response (chat-with-llm session-id query (get-config 'model) "You are a helpful Guile Scheme expert."))
+      (let* ((response (chat-with-llm session-id query (get-config 'model) "You are a helpful Guile Scheme expert." #:history history))
              (payload (assoc-ref response "payload"))
              (content (if payload (assoc-ref payload "content") "Error No Payload")))
         (display "\nAI: ")
         (display content)
-        (newline))
-      #t))
+        (newline)
+        (cons (append history (list `(("role" . "user") ("content" . ,query))
+                                    `(("role" . "assistant") ("content" . ,content))))
+              #t))))
 
    ;; /eval <scheme>
    ((string-prefix? "/eval " input)
@@ -536,8 +544,8 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
           (display (eval-string code))
           (newline))
         (lambda (key . args)
-          (display (format #f "Error: ~a ~a\n" key args)))))
-    #t)
+          (display (format #f "Error: ~a ~a\n" key args))))
+      (cons history #t)))
 
    ;; /models
    ((string=? input "/models")
@@ -546,24 +554,24 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
        (if (list? models-list)
            (for-each (lambda (m) (display (string-append "  - " m "\n"))) models-list)
            (display (string-append C-RED "  No models found or unexpected response format.\n" C-RESET))))
-    #t)
+    (cons history #t))
 
    ;; /model
    ((string=? input "/model")
     (display (string-append C-BOLD "Current model: " C-RESET (get-config 'model) "\n"))
-    #t)
+    (cons history #t))
 
    ;; /model <name>
    ((string-prefix? "/model " input)
     (let ((new-model (substring input 7)))
        (set-config! 'model new-model)
        (display (string-append C-GREEN "Model hot-swapped for session to: " C-RESET new-model "\n")))
-    #t)
+    (cons history #t))
 
    ;; /thinking
    ((string=? input "/thinking")
     (display (string-append "Current thinking mode: " (if thinking-enabled? "ON" "OFF") "\n"))
-    #t)
+    (cons history #t))
 
    ;; /thinking <on/off>
    ((string-prefix? "/thinking " input)
@@ -577,19 +585,19 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
         (display (string-append C-YELLOW "Thinking mode DISABLED." C-RESET "\n")))
        (else
         (display (string-append "Current thinking mode: " (if thinking-enabled? "ON" "OFF") "\n"))))
-      #t))
+      (cons history #t)))
 
    ;; /base-model
    ((string=? input "/base-model")
     (display (string-append C-BOLD "Current base model for training: " C-RESET (get-config 'base-model) "\n"))
-    #t)
+    (cons history #t))
 
    ;; /base-model <name>
    ((string-prefix? "/base-model " input)
     (let ((new-base (substring input 12)))
        (set-config! 'base-model new-base)
        (display (string-append C-GREEN "Base model for training hot-swapped to: " C-RESET new-base "\n")))
-    #t)
+    (cons history #t))
 
    ;; /train
    ((string=? input "/train")
@@ -598,12 +606,14 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
       (setenv "GAIA_BASE_MODEL" current-base)
       (system* "make" "learn")
       (setenv "GAIA_BASE_MODEL" ""))
-    #t)
+    (cons history #t))
 
    ;; Standard RLM Loop
    (else
-    (rlm-loop session-id input 0)
-    #t)))
+    (let ((answer (rlm-loop session-id input 0 history)))
+      (cons (append history (list `(("role" . "user") ("content" . ,input))
+                                  `(("role" . "assistant") ("content" . ,answer))))
+            #t)))))
 
 (define (start-gaia . args)
   (activate-readline)
@@ -623,14 +633,17 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
 
     (display (string-append "Session ID: " session-id "\n"))
 
-    (let loop ()
+    (let loop ((chat-history '()))
       (newline)
       (let ((input (readline (string-append "\x01" C-BOLD C-GREEN "\x02(GAIA) >\x01" C-RESET "\x02 "))))
         (cond
          ((eof-object? input) (newline))
-         ((string=? input "") (loop))
+         ((string=? input "") (loop chat-history))
          (else
           (add-history input) ;; Add to readline history
-          (if (handle-command input session-id)
-              (loop)
-              #t)))))))
+          (let* ((result (handle-command input session-id chat-history))
+                 (new-history (car result))
+                 (continue? (cdr result)))
+            (if continue?
+                (loop new-history)
+                #t))))))))

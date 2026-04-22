@@ -1,6 +1,6 @@
 GAIA_LLM_URL ?= http://localhost:4000
-GAIA_MODEL ?= gemma4:e4b
-GAIA_BASE_MODEL ?= gemma4:e4b
+GAIA_MODEL ?= gemma4:e2b
+GAIA_BASE_MODEL ?= gemma4:e2b
 
 export GAIA_LLM_URL
 export GAIA_MODEL
@@ -24,6 +24,8 @@ check: test-units test-tools test-rlm-env
 test-units:
 	@echo "Running core unit tests..."
 	$(GUIX_SHELL) guile -L scheme scripts/test-units.scm
+	@echo "Running history and meta-command tests..."
+	$(GUIX_SHELL) guile -L scheme scripts/test-history.scm
 	@echo "Running signal extraction tests..."
 	$(GUIX_SHELL) guile -L scheme scripts/test-final-signal.scm
 	@echo "Running error handling tests..."

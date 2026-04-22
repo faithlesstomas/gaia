@@ -40,6 +40,9 @@ Core infrastructure that is already built and working.
 - [x] **Parenthesis Analyzer** — Syntax error hints for mismatched parens
 - [x] **Last-block Extraction** — Prefers last code block in LLM response (self-correction support)
 - [x] **Auto LiteLLM Server** — `make run` auto-starts LiteLLM if not running
+- [x] **Chat History (Conversation Continuity)** — Maintained a sliding window of
+  `(user, query) → (assistant, FINAL_answer)` pairs across CLI interactions.
+  New queries receive context from previous exchanges. Added `/clear` command.
 
 ---
 
@@ -49,11 +52,6 @@ Hardening the agentic loop to handle the "parenthesis blindness" of smaller mode
 and leveraging Lisp's code-as-data nature.
 
 ### Conversation & Context
-
-- [ ] **Chat History (Conversation Continuity)** — Maintain a sliding window of condensed
-  `(user, query) → (assistant, FINAL_answer)` pairs across CLI interactions.
-  Each new `<query>` receives context from previous exchanges. Add `/clear` command to reset.
-  *(Priority: HIGH — daily-use impact)*
 
 - [ ] **Context Pruning** — If the model makes 3+ consecutive syntax/logic errors,
   prune failed attempts from the transcript and replace with a compact summary

@@ -44,7 +44,7 @@
     (display (format #f "[SANITY] Expected count: ~a\n" expected))
     (display "[SANITY] Starting RLM pipeline sanity check...\n")
 
-    (let ((result (rlm-loop session-id prompt 0)))
+    (let ((result (rlm-loop session-id prompt 0 '())))
       (display (format #f "\n[SANITY] RLM returned: ~a\n" result))
 
       (if (string-contains result (number->string expected))

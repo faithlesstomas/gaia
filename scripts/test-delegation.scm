@@ -12,7 +12,7 @@
 ;; We use a simple counter to return different responses based on the call count
 (define call-count 0)
 
-(define (mock-chat-with-llm session-id input model prompt)
+(define* (mock-chat-with-llm session-id input model prompt #:key (think #f) (history '()))
   (set! call-count (+ call-count 1))
   (display (format #f "  DEBUG: Mock called. Session: ~a, Count: ~a\n" session-id call-count))
   
@@ -39,8 +39,11 @@
     (else
      `(("payload" . (("content" . "Stop")))))))
 
-;; Override the real function with our mock
-(module-define! (resolve-module '(gaia core)) 'chat-with-llm mock-chat-with-llm)
+;; Override the real function with our mock in both modules that might have bound it
+(let ((m-core (resolve-module '(gaia core)))
+      (m-llm (resolve-module '(gaia llm-client))))
+  (module-set! m-core 'chat-with-llm mock-chat-with-llm)
+  (module-set! m-llm 'chat-with-llm mock-chat-with-llm))
 
 ;; Run the test
 ;; We need to expose rlm-loop or just import it if it was exported.
@@ -49,6 +52,6 @@
 ;; Actually, to properly test rlm-loop which is internal, we should probably temporarily export it or use (@@ (gaia core) rlm-loop).
 
 (display "[TEST] Invoking rlm-loop...\n")
-((@@ (gaia core) rlm-loop) "test-session-1" "Start Task" 0)
+((@@ (gaia core) rlm-loop) "test-session-1" "Start Task" 0 '())
 
 (display "[TEST] Finished.\n")

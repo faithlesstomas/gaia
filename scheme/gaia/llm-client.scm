@@ -9,12 +9,14 @@
   #:use-module (gaia config)
   #:export (chat-with-llm get-models))
 
-(define* (chat-with-llm session-id input model system-prompt #:key (think #f))
+(define* (chat-with-llm session-id input model system-prompt #:key (think #f) (history '()))
   (let* ((host (get-config 'llm-url))
          (url (string-append host "/v1/chat/completions"))
+         (messages-list (append (list `(("role" . "system") ("content" . ,system-prompt)))
+                                history
+                                (list `(("role" . "user") ("content" . ,input)))))
          (body (scm->json `(("model" . ,model)
-                            ("messages" . ,(vector `(("role" . "system") ("content" . ,system-prompt))
-                                                   `(("role" . "user") ("content" . ,input))))
+                            ("messages" . ,(list->vector messages-list))
                             ("think" . ,think)
                             ("stream" . #f))))
          (headers '((content-type . (application/json)))))
