@@ -30,7 +30,7 @@
 
 (define (session-success? steps)
   ;; A session is successful if ANY step has final_signal = "true"
-  (any (lambda (step) 
+  (any (lambda (step)
          (string=? (or (assoc-ref step "final_signal") "false") "true"))
        steps))
 
@@ -40,12 +40,12 @@
   (let ((conversations '()))
     ;; System prompt is implicit in the model, but we can add it if needed.
     ;; For now, we map Input -> Human, Response -> GPT
-    
+
     (define (ensure-string val)
       (cond ((string? val) val)
             ((not val) "")
             (else (format #f "~a" val))))
-            
+
     (define (build-conv steps acc)
       (if (null? steps)
           acc
@@ -53,10 +53,10 @@
                  (input (ensure-string (assoc-ref step "input")))
                  (response (ensure-string (assoc-ref step "response"))))
             (build-conv (cdr steps)
-                        (append acc 
+                        (append acc
                                 (list `(("from" . "human") ("value" . ,input))
                                       `(("from" . "gpt") ("value" . ,response))))))))
-    
+
     `(("conversations" . ,(list->vector (build-conv steps '()))))))
 
 (define (curate-dataset input-file output-success output-failure)
@@ -66,13 +66,13 @@
          (sessions (group-by-session records))
          (success-count 0)
          (failure-count 0))
-    
+
     (display (format #f "Found ~a unique sessions.\n" (hash-count (const #t) sessions)))
 
     (let ((succ-port (open-file output-success "w"))
           (fail-port (open-file output-failure "w")))
-      
-      (hash-for-each 
+
+      (hash-for-each
        (lambda (sid steps)
          (if (session-success? steps)
              (begin
@@ -84,13 +84,13 @@
                (display (scm->json (format-chatml-session steps)) fail-port)
                (newline fail-port))))
        sessions)
-      
+
       (close-port succ-port)
       (close-port fail-port)
-      
+
       (display (format #f "Curated: ~a successful sessions, ~a failed sessions.\n"
                        success-count failure-count))
-      
+
       ;; Check for push-to-llm flag (simple check for now)
       (let ((args (command-line)))
         (cond
@@ -101,10 +101,9 @@
                  (let ((url (cadr tail)))
                    (display (format #f "Pushing dataset to LLM at ~a...\n" url))
                    ;; Use curl for simplicity
-                   (let ((status (system* "curl" "-X" "POST" 
-                                          "-F" (string-append "file=@" output-success) 
+                   (let ((status (system* "curl" "-X" "POST"
+                                          "-F" (string-append "file=@" output-success)
                                           (string-append url "/train/dataset"))))
                      (if (zero? status)
                          (display "Dataset pushed successfully.\n")
                          (display "Failed to push dataset.\n"))))))))))))
-
