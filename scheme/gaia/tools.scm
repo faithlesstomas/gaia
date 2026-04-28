@@ -186,10 +186,8 @@
 The container is isolated from the host system, without network access,
 and only the current workspace is mapped as /workspace.
 Available tools are limited to coreutils, bash, findutils, grep, sed, and gawk."
-  (let* ((workspace-path (getcwd))
-         (guix-cmd (string-append 
-                    "guix shell --container "
-                    "--share=" workspace-path "=/workspace "
-                    "coreutils bash findutils grep sed gawk -- bash -c "
-                    (object->string cmd))))
-    (run-cmd-with-output guix-cmd)))
+  (let* ((workspace-path (getcwd)))
+    (run-cmd-with-output "guix" "shell" "--container"
+                         (string-append "--share=" workspace-path "=/workspace")
+                         "coreutils" "bash" "findutils" "grep" "sed" "gawk"
+                         "--" "bash" "-c" cmd)))
