@@ -25,7 +25,8 @@
             get-recent-logs
             get-boot-logs
             list-boots
-            get-kernel-logs))
+            get-kernel-logs
+            run-in-sandbox))
 
 (define (guile-syntax-check code-string)
   "Checks if the Guile Scheme code string has valid syntax (matched parentheses, valid expressions) without evaluating it."
@@ -177,3 +178,18 @@
          (args (list "-k" "-n" (number->string n-lines) "--no-pager")))
     (let ((args (if (not (string-null? since)) (append args (list "--since" since)) args)))
       (apply run-cmd-with-output "journalctl" args))))
+
+;; --- Sandbox Tool ---
+
+(define (run-in-sandbox cmd)
+  "Executes a shell command inside an ephemeral Guix container.
+The container is isolated from the host system, without network access,
+and only the current workspace is mapped as /workspace.
+Available tools are limited to coreutils, bash, findutils, grep, sed, and gawk."
+  (let* ((workspace-path (getcwd))
+         (guix-cmd (string-append 
+                    "guix shell --container "
+                    "--share=" workspace-path "=/workspace "
+                    "coreutils bash findutils grep sed gawk -- bash -c "
+                    (object->string cmd))))
+    (run-cmd-with-output guix-cmd)))

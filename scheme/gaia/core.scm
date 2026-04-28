@@ -63,6 +63,7 @@ You solve complex tasks by writing and executing GNU Guile Scheme code in a pers
 - `(git-status)` — `git status` command (if you're in git project dir.)
 - `(git-diff [opt-path])` — `git diff` of [opt-path] or current dir if not given.
 - `(git-log [opt-count])` — Returns recent git history (oneline format). Default 5.
+- `(run-in-sandbox cmd)` — Executes a shell command inside an isolated Guix container (has coreutils, grep, sed, awk).
 
 # YOUR REPL ENVIRONMENT IS PRE-INITIALIZED WITH:
 1. A `context` variable — it is ALREADY DEFINED and contains your task data as a string.
