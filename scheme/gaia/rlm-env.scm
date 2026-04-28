@@ -168,8 +168,9 @@ visible in subsequent calls. Output is truncated to avoid context flooding."
          (max-lines (if max-lines-str (string->number max-lines-str) #f))
          (num-lines (+ 1 (string-count code-string #\newline))))
     (if (and max-lines (> num-lines max-lines))
-        (list 'error 'permission 
-              (format #f "ENVIRONMENT ERROR: Your code block is ~a lines long, which exceeds the limit of ~a lines. Please break your solution into smaller steps in the REPL using variables." num-lines max-lines))
+        (list 'error 'permission
+              (format #f "ENVIRONMENT ERROR: Your code block is ~a lines long, which exceeds the limit of ~a lines. \
+Please break your solution into smaller steps in the REPL using variables." num-lines max-lines))
         (let* ((wrapped (string-append "(begin " code-string ")"))
                ;; Parse the code first
                (parsed (catch #t

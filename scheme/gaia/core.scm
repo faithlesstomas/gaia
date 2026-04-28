@@ -60,6 +60,9 @@ You solve complex tasks by writing and executing GNU Guile Scheme code in a pers
 - `(get-recent-logs [lines] [priority])` — General logs. Priority: \"emerg\", \"err\", \"warning\", \"info\".
 - `(get-kernel-logs [lines] [since])` — Kernel logs (dmesg style).
 - LIMIT: All log tools are capped at 500 lines per call.
+- `(git-status)` — `git status` command (if you're in git project dir.)
+- `(git-diff [opt-path])` — `git diff` of [opt-path] or current dir if not given.
+- `(git-log [opt-count])` — Returns recent git history (oneline format). Default 5.
 
 # YOUR REPL ENVIRONMENT IS PRE-INITIALIZED WITH:
 1. A `context` variable — it is ALREADY DEFINED and contains your task data as a string.
@@ -361,7 +364,9 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
           last-output)
         (begin
           (display (string-append C-GREY "\n[GAIA] Agent Depth " (number->string depth) " (Step " (number->string step) ")..." C-RESET "\n"))
-          (let* ((response (chat-with-llm session-id prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT) #:think thinking-enabled? #:history history))
+          (let* ((response (chat-with-llm session-id prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT)
+                                          #:think thinking-enabled?
+                                          #:history history))
                  (payload (assoc-ref response "payload"))
                  (response-text (if payload
                                     (assoc-ref payload "content")
@@ -401,7 +406,8 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                                        (list (cons "user" last-output)
                                              (cons "assistant" "(empty response)"))))))
                       (rlm-loop-inner session-id
-                        "Your previous response was empty. Please write a ```repl code block to continue working on the task, or provide FINAL(answer) if you have the answer."
+                                      "Your previous response was empty. Please write a ```repl code block to continue working on the task, \
+or provide FINAL(answer) if you have the answer."
                         depth env history (+ step 1) retry-transcript)))
 
                   (let ((updated-transcript
@@ -425,7 +431,8 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                   (if (and has-action has-final-signal)
                       (begin
                         (display (string-append C-RED "\n[GAIA] ⚠ Mixed action and FINAL signal in one turn." C-RESET "\n"))
-                        (let ((feedback "Error: You provided both a ```repl code block and a FINAL() signal in the same response. Please provide ONLY the code block. After seeing the execution result, provide FINAL() in the NEXT response."))
+                        (let ((feedback "Error: You provided both a ```repl code block and a FINAL() signal in the same response. \
+Please provide ONLY the code block. After seeing the execution result, provide FINAL() in the NEXT response."))
                           (rlm-loop-inner session-id feedback depth env history (+ step 1) updated-transcript)))
                       (cond
                        ((extract-delegation response-text) =>
@@ -436,10 +443,13 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                              (let* ((sub-session-id (string-append session-id "-sub-" (number->string (random 1000000000))))
                                     (initial-input (string-append "GOAL: " goal "\nCONTEXT: " context-str))
                                     (sub-result (rlm-loop sub-session-id initial-input (+ depth 1) history)))
-                               (display (string-append C-BOLD C-GREEN "\n[GAIA] Sub-Agent completed.\n" C-RESET "Result length: " (number->string (string-length sub-result)) " chars\n"))
-                               (rlm-loop-inner session-id (string-append "Sub-agent execution finished. Result: " sub-result) depth env history (+ step 1) updated-transcript)))
+                               (display (string-append C-BOLD C-GREEN "\n[GAIA] Sub-Agent completed.\n" C-RESET "Result length: "
+                                                       (number->string (string-length sub-result)) " chars\n"))
+                               (rlm-loop-inner session-id (string-append "Sub-agent execution finished. Result: " sub-result)
+                                               depth env history (+ step 1) updated-transcript)))
                             (_
-                             (rlm-loop-inner session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")" depth env history (+ step 1) updated-transcript)))))
+                             (rlm-loop-inner session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")"
+                                             depth env history (+ step 1) updated-transcript)))))
 
                        ((extract-code response-text) =>
                         (lambda (code)
@@ -458,7 +468,8 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                                        (display (scm->json exec-log) port)
                                        (newline port)
                                        (close-port port)))
-                                   (rlm-loop-inner session-id (string-append "Code executed successfully. Result:\n" result) depth env history (+ step 1) updated-transcript))
+                                   (rlm-loop-inner session-id (string-append "Code executed successfully. Result:\n" result)
+                                                   depth env history (+ step 1) updated-transcript))
 
                                   (('error type msg)
                                    (let ((feedback (handle-error type msg depth)))

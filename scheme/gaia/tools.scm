@@ -9,7 +9,7 @@
   #:use-module (srfi srfi-19)
   #:export (list-files
             read-file
-	    write-file
+            write-file
             file-info
             search-file
             search-guile-manual
@@ -41,7 +41,7 @@
       (format #f "Syntax Error: ~a ~a" key args))))
 
 ;; Helper: Validates path is within workspace (simple check)
-;; In container /workspace is root, so mostly everything is safe, 
+;; In container /workspace is root, so mostly everything is safe,
 ;; but prevent ../ escapes if needed.
 (define (safe-path? path)
   (not (string-contains path "..")))
@@ -66,11 +66,11 @@
   "Writes content to a file."
      (if (not (safe-path? path))
       (error "Invalid path" path)
-      (begin 
+      (begin
         (call-with-output-file path
             (lambda (port)
               (display content port)))
-	(string-append "Written " (number->string (string-length content)) " bytes to " path))))
+        (string-append "Written " (number->string (string-length content)) " bytes to " path))))
 
 
 (define (run-cmd-with-output cmd . args)
@@ -90,7 +90,7 @@
 (define (file-info path)
   "Returns 'stat' like info."
   (let ((st (stat path)))
-    (format #f "Size: ~a\nType: ~a\nPerms: ~o" 
+    (format #f "Size: ~a\nType: ~a\nPerms: ~o"
             (stat:size st) (stat:type st) (stat:mode st))))
 
 (define (run-sed expression path)
