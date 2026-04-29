@@ -1,21 +1,25 @@
 #!/bin/sh
 # GAIA Launcher
 # Usage: ./bin/gaia [options]
-# Environment variables:
-#   GAIA_MODEL      - Model name (default: ministral-3b)
-#   RAI_BACKEND     - Backend type (default: ollama)
-#   RAI_URL         - RAI Server URL (default: http://localhost:8000)
 
-# Ensure script is run from project root or adjust paths
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 PROJECT_ROOT=$(dirname "$SCRIPT_DIR")
 
 cd "$PROJECT_ROOT" || exit 1
 
-echo "Starting GAIA..."
-echo "  Model: ${GAIA_MODEL:-ministral-3b}"
-echo "  Backend: ${RAI_BACKEND:-ollama}"
-echo "  URL: ${RAI_URL:-http://localhost:8000}"
+# 1. Ensure LLM server is running
+make llm-server
 
-# Execute via Guix Shell
-exec guix shell -m guix.scm -- guile -L scheme -e '(@@ (gaia core) start-gaia)' -- "$@"
+# 2. Setup Trajectory
+TRAJ="trajectories-$(date +%Y%m%d%H%M%S).jsonl"
+echo "$TRAJ" > .last_trajectory
+export GAIA_TRAJECTORIES_FILE="$TRAJ"
+
+echo "Starting GAIA. Trajectory will be saved to: $TRAJ"
+
+# 3. Setup Guix Environment and Execute Guile directly
+# We use --search-paths and eval to load the environment into the current shell.
+# Then we 'exec guile' directly. This prevents 'guix shell' from acting as a 
+# parent process that intercepts and dies on SIGINT (Ctrl-C), leaving Guile orphaned.
+eval "$(guix shell -m guix.scm --search-paths)"
+exec guile -L scheme scripts/run-gaia.scm "$@"

@@ -25,6 +25,17 @@
 (define C-CYAN "\x1b[36m")
 (define C-GREY "\x1b[90m")
 
+;; Flag-based interrupt: signal handler sets flag, checked at safe points
+(define *interrupted* #f)
+
+(define (check-interrupt!)
+  "Check if user pressed Ctrl-C and throw if so.
+  Uses a flag because throw from async signal handlers is unreliable
+  during blocking C code (e.g. http-post)."
+  (when *interrupted*
+    (set! *interrupted* #f)
+    (throw 'user-interrupt)))
+
 (define SYSTEM_PROMPT
   "# ROLE
 You are GAIA (GNU AI Assistant), a system operator implementing the Recursive Language Model (RLM) paradigm.
@@ -355,15 +366,28 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                         last-output
                         "\n\nContinue working on the original task. "
                         "Write your next ```repl code block or provide FINAL(answer).")))))
+    (check-interrupt!)  ;; Bail out immediately if Ctrl-C was pressed
     (if (> depth MAX-RECURSION-DEPTH)
         (begin
           (display "\n[GAIA] Max recursion depth reached. Returning current state.\n")
           last-output)
         (begin
           (display (string-append C-GREY "\n[GAIA] Agent Depth " (number->string depth) " (Step " (number->string step) ")..." C-RESET "\n"))
-          (let* ((response (chat-with-llm session-id prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT)
-                                          #:think thinking-enabled?
-                                          #:history history))
+          (let* ((response (catch #t
+                            (lambda ()
+                              (chat-with-llm session-id prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT)
+                                             #:think thinking-enabled?
+                                             #:history history))
+                            (lambda (key . args)
+                              ;; Direct user-interrupt from signal handler — propagate immediately
+                              (when (eq? key 'user-interrupt) (apply throw key args))
+                              ;; System error (EINTR) during HTTP — check if caused by Ctrl+C
+                              (when *interrupted*
+                                (set! *interrupted* #f)
+                                (throw 'user-interrupt))
+                              ;; Otherwise propagate original error
+                              (apply throw key args))))
+                 (_ (check-interrupt!))  ;; Check flag after successful return too
                  (payload (assoc-ref response "payload"))
                  (response-text (if payload
                                     (assoc-ref payload "content")
@@ -423,16 +447,10 @@ or provide FINAL(answer) if you have the answer."
                   (when (> (string-length prose) 0)
                     (display (string-append C-BLUE "\n[GAIA] Analysis: " C-RESET (markdown->ansi prose) "\n"))))
 
-                (let ((has-action (or (extract-delegation response-text) (extract-code response-text)))
-                      (has-final-signal (and final-sig #t)))
-                  (if (and has-action has-final-signal)
-                      (begin
-                        (display (string-append C-RED "\n[GAIA] ⚠ Mixed action and FINAL signal in one turn." C-RESET "\n"))
-                        (let ((feedback "Error: You provided both a ```repl code block and a FINAL() signal in the same response. \
-Please provide ONLY the code block. After seeing the execution result, provide FINAL() in the NEXT response."))
-                          (rlm-loop-inner session-id feedback depth env history (+ step 1) updated-transcript)))
-                      (cond
-                       ((extract-delegation response-text) =>
+                (let ((action-code (extract-code response-text))
+                      (action-delegate (extract-delegation response-text)))
+                  (cond
+                       (action-delegate =>
                         (lambda (delegation)
                           (match delegation
                             (('delegate goal context-str)
@@ -442,13 +460,19 @@ Please provide ONLY the code block. After seeing the execution result, provide F
                                     (sub-result (rlm-loop sub-session-id initial-input (+ depth 1) history)))
                                (display (string-append C-BOLD C-GREEN "\n[GAIA] Sub-Agent completed.\n" C-RESET "Result length: "
                                                        (number->string (string-length sub-result)) " chars\n"))
-                               (rlm-loop-inner session-id (string-append "Sub-agent execution finished. Result: " sub-result)
-                                               depth env history (+ step 1) updated-transcript)))
+                               (if final-sig
+                                   (begin
+                                     (display (string-append C-GREEN "\n[GAIA] ✓ FINAL signal detected after sub-agent execution." C-RESET "\n"))
+                                     (let ((answer (match final-sig (('final ans) ans) (('final-var var) var) (_ "Sub-agent executed successfully"))))
+                                       (display (string-append C-BOLD "[GAIA] Final Answer: " C-RESET (markdown->ansi answer) "\n"))
+                                       answer))
+                                   (rlm-loop-inner session-id (string-append "Sub-agent execution finished. Result: " sub-result)
+                                                   depth env history (+ step 1) updated-transcript))))
                             (_
                              (rlm-loop-inner session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")"
                                              depth env history (+ step 1) updated-transcript)))))
 
-                       ((extract-code response-text) =>
+                       (action-code =>
                         (lambda (code)
                           (if (and code (> (string-length code) 0) (not (string=? code response-text)))
                               (begin
@@ -465,8 +489,14 @@ Please provide ONLY the code block. After seeing the execution result, provide F
                                        (display (scm->json exec-log) port)
                                        (newline port)
                                        (close-port port)))
-                                   (rlm-loop-inner session-id (string-append "Code executed successfully. Result:\n" result)
-                                                   depth env history (+ step 1) updated-transcript))
+                                   (if final-sig
+                                       (begin
+                                         (display (string-append C-GREEN "\n[GAIA] ✓ FINAL signal detected after successful code execution." C-RESET "\n"))
+                                         (let ((answer (match final-sig (('final ans) ans) (('final-var var) var) (_ "Code executed successfully"))))
+                                           (display (string-append C-BOLD "[GAIA] Final Answer: " C-RESET (markdown->ansi answer) "\n"))
+                                           answer))
+                                       (rlm-loop-inner session-id (string-append "Code executed successfully. Result:\n" result)
+                                                       depth env history (+ step 1) updated-transcript)))
 
                                   (('error type msg)
                                    (let ((feedback (handle-error type msg depth)))
@@ -498,7 +528,7 @@ Please provide ONLY the code block. After seeing the execution result, provide F
 
                        (else
                         (display (string-append C-RED "\n[GAIA] ⚠ No actionable output. Treating as final answer (unless low confidence)." C-RESET "\n"))
-                        response-text))))))))))))
+                        response-text)))))))))))
 
 (define (handle-command input session-id history env)
   "Parses and executes meta-commands or delegates to RLM.
@@ -559,12 +589,11 @@ Returns (list updated-history updated-env should-continue?)"
    ;; /eval <scheme>
    ((string-prefix? "/eval " input)
     (let ((code (substring input 6)))
-      (catch #t
-        (lambda ()
-          (display (eval-string code))
-          (newline))
-        (lambda (key . args)
-          (display (format #f "Error: ~a ~a\n" key args))))
+      (match (rlm-execute env code)
+        (('ok result)
+         (display (string-append C-GREEN "[REPL] Success:\n" C-RESET result "\n")))
+        (('error type msg)
+         (display (string-append C-RED "[REPL] Error (" (symbol->string type) "):\n" C-RESET msg "\n"))))
       (list history env #t)))
 
    ;; /models
@@ -639,6 +668,15 @@ Returns (list updated-history updated-env should-continue?)"
   (activate-readline)
   (display (string-append C-BOLD C-GREEN "Initializing GAIA (GNU AI Assistant)..." C-RESET "\n"))
 
+  ;; Handle Ctrl-C: set flag AND throw.
+  ;; Flag alone doesn't work because Guile's C I/O retries on EINTR,
+  ;; so http-post stays blocked. Throw breaks out of C code.
+  ;; Flag is backup for safe-point checks when throw gets lost.
+  (sigaction SIGINT (lambda (sig)
+                      (set! *interrupted* #t)
+                      (display (string-append C-RED "\n[GAIA] Interrupt received. Returning to prompt..." C-RESET "\n"))
+                      (throw 'user-interrupt)))
+
   (load-config)
   (display (format #f "Config Loaded:\n  Model: ~a~a~a\n  URL: ~a\n"
                    C-CYAN (get-config 'model) C-RESET
@@ -656,16 +694,22 @@ Returns (list updated-history updated-env should-continue?)"
     (let loop ((chat-history '())
                (global-env (make-rlm-env)))
       (newline)
-      (let ((input (readline (string-append "\x01" C-BOLD C-GREEN "\x02(GAIA) >\x01" C-RESET "\x02 "))))
-        (cond
-         ((eof-object? input) (newline))
-         ((string=? input "") (loop chat-history global-env))
-         (else
-          (add-history input) ;; Add to readline history
-          (let* ((result (handle-command input session-id chat-history global-env))
-                 (new-history (car result))
-                 (new-env (cadr result))
-                 (continue? (caddr result)))
-            (if continue?
-                (loop new-history new-env)
-                #t))))))))
+      (catch 'user-interrupt
+        (lambda ()
+          (let ((input (readline (string-append "\x01" C-BOLD C-GREEN "\x02(GAIA) >\x01" C-RESET "\x02 "))))
+            (cond
+             ((eof-object? input) (newline))
+             ((string=? input "") (loop chat-history global-env))
+             (else
+              (add-history input) ;; Add to readline history
+              (let* ((result (handle-command input session-id chat-history global-env))
+                     (new-history (car result))
+                     (new-env (cadr result))
+                     (continue? (caddr result)))
+                (if continue?
+                    (loop new-history new-env)
+                    #t))))))
+        (lambda _
+          (set! *interrupted* #f)  ;; Reset flag
+          (display (string-append C-YELLOW "\n[GAIA] Task interrupted by user. State preserved." C-RESET "\n"))
+          (loop chat-history global-env))))))

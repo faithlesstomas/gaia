@@ -11,10 +11,9 @@ export GAIA_BASE_MODEL
 GUIX_SHELL = guix shell -m guix.scm --
 
 run: llm-server
-	@TRAJ="trajectories-$$(date +%Y%m%d%H%M%S).jsonl"; \
-	echo $$TRAJ > .last_trajectory; \
-	echo "Starting GAIA. Trajectory will be saved to: $$TRAJ"; \
-	GAIA_TRAJECTORIES_FILE="$$TRAJ" $(GUIX_SHELL) guile -L scheme scripts/run-gaia.scm
+	@echo "\033[1;31mERROR: 'make run' is deprecated because 'make' intercepts Ctrl-C and breaks the REPL.\033[0m"
+	@echo "\033[1;32mPlease run the CLI directly using:\033[0m ./bin/gaia"
+	@exit 1
 
 repl:
 	$(GUIX_SHELL) guile -L scheme

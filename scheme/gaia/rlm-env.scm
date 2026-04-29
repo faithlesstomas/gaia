@@ -216,6 +216,8 @@ Please break your solution into smaller steps in the REPL using variables." num-
                                      (lambda (k . a)
                                        (error 'syntax-error "Extra closing parentheses detected")))))))
                            (lambda (key . args)
+                             ;; Re-throw user interrupts so SIGINT propagates immediately
+                             (when (eq? key 'user-interrupt) (apply throw key args))
                              (cons 'parse-error
                                    (format #f "Syntax Error: ~a ~a" key args))))))
 
@@ -254,6 +256,8 @@ Please break your solution into smaller steps in the REPL using variables." num-
                                      (close-port output-port)
                                      (list 'ok (truncate-output final-output)))))
                                (lambda (key . args)
+                                 ;; Re-throw user interrupts so SIGINT propagates immediately
+                                 (when (eq? key 'user-interrupt) (apply throw key args))
                                  (list 'error 'runtime
                                        (truncate-output
                                          (format #f "Runtime Error: ~a ~a" key args)))))))
