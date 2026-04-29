@@ -87,10 +87,15 @@
 
 (test-group "syntax-errors"
   (let ((env (make-rlm-env)))
-    ;; Unmatched parens
-    (test-equal "catches syntax error"
+    ;; Unmatched parens - auto-healing
+    (test-equal "heals unmatched closing parentheses"
+      '(ok "[Auto-healed 1 missing parentheses]\n42")
+      (rlm-eval! env "(display 42"))
+
+    ;; Unmatched parens - extra closing parens (cannot heal)
+    (test-equal "catches syntax error for extra closing parens"
       'error
-      (car (rlm-eval! env "(define x")))
+      (car (rlm-eval! env "(display 42)))")))
 
     ;; Valid code still works after error
     (test-equal "env survives syntax error"

@@ -122,7 +122,8 @@ Example: (rlm-inject! env 'llm-query my-query-function)"
       str))
 
 (define (analyze-parentheses code-string)
-  "Counts opening and closing parentheses, ignoring strings and comments, and returns a helpful hint if there's a mismatch."
+  "Counts opening and closing parentheses, ignoring strings and comments.
+Returns a pair: (missing-closing-parens-count . hint-string)."
   (let loop ((chars (string->list code-string))
              (in-string? #f)
              (in-comment? #f)
@@ -132,12 +133,14 @@ Example: (rlm-inject! env 'llm-query my-query-function)"
     (if (null? chars)
         (cond
          ((> open-parens close-parens)
-          (format #f "Syntax Error Hint: You have ~a opening '(' but only ~a closing ')'. You are missing ~a closing parentheses!"
-                  open-parens close-parens (- open-parens close-parens)))
+          (cons (- open-parens close-parens)
+                (format #f "Syntax Error Hint: You have ~a opening '(' but only ~a closing ')'. You are missing ~a closing parentheses!"
+                        open-parens close-parens (- open-parens close-parens))))
          ((< open-parens close-parens)
-          (format #f "Syntax Error Hint: You have ~a opening '(' and ~a closing ')'. You have ~a extra closing parentheses!"
-                  open-parens close-parens (- close-parens open-parens)))
-         (else #f))
+          (cons 0
+                (format #f "Syntax Error Hint: You have ~a opening '(' and ~a closing ')'. You have ~a extra closing parentheses!"
+                        open-parens close-parens (- close-parens open-parens))))
+         (else (cons 0 #f)))
         (let ((c (car chars))
               (rest (cdr chars)))
           (cond
@@ -171,49 +174,71 @@ visible in subsequent calls. Output is truncated to avoid context flooding."
         (list 'error 'permission
               (format #f "ENVIRONMENT ERROR: Your code block is ~a lines long, which exceeds the limit of ~a lines. \
 Please break your solution into smaller steps in the REPL using variables." num-lines max-lines))
-        (let* ((wrapped (string-append "(begin " code-string ")"))
-               ;; Parse the code first
-               (parsed (catch #t
-                         (lambda () (with-input-from-string wrapped read))
-                         (lambda (key . args)
-                           (cons 'parse-error
-                                 (format #f "Syntax Error: ~a ~a" key args))))))
+        (let eval-loop ((current-code code-string)
+                        (healed? #f))
+          (let* ((wrapped (string-append "(begin " current-code ")"))
+                 (parsed (catch #t
+                           (lambda () 
+                             (with-input-from-string wrapped 
+                               (lambda () 
+                                 (let ((expr (read)))
+                                   ;; Attempt to read again to catch trailing garbage or extra parens
+                                   (catch #t
+                                     (lambda ()
+                                       (let ((next (read)))
+                                         (if (eof-object? next)
+                                             expr
+                                             (error 'syntax-error "Trailing garbage detected"))))
+                                     (lambda (k . a)
+                                       (error 'syntax-error "Extra closing parentheses detected")))))))
+                           (lambda (key . args)
+                             (cons 'parse-error
+                                   (format #f "Syntax Error: ~a ~a" key args))))))
 
-          (if (and (pair? parsed) (eq? (car parsed) 'parse-error))
-              ;; Parse failure
-              (let ((hint (analyze-parentheses code-string)))
-                (list 'error 'syntax (if hint (string-append (cdr parsed) "\n" hint) (cdr parsed))))
+            (if (and (pair? parsed) (eq? (car parsed) 'parse-error))
+                ;; Parse failure
+                (let* ((analysis (analyze-parentheses current-code))
+                       (missing-close (car analysis))
+                       (hint (cdr analysis)))
+                  (if (and (> missing-close 0) (not healed?))
+                      ;; Auto-heal! Add missing parentheses and try again
+                      (eval-loop (string-append current-code (make-string missing-close #\))) #t)
+                      ;; If already healed or no missing closing parens, just return error
+                      (list 'error 'syntax (if hint (string-append (cdr parsed) "\n" hint) (cdr parsed)))))
 
-        ;; Safety check: scan for banned primitives
-        (let ((safety (validate-rlm-safety parsed)))
-          (if (string? safety)
-              (list 'error 'permission safety)
+                ;; Safety check: scan for banned primitives
+                (let ((safety (validate-rlm-safety parsed)))
+                  (if (string? safety)
+                      (list 'error 'permission safety)
 
-              ;; Evaluate in persistent module
-              (let ((result
-                     (catch #t
-                       (lambda ()
-                         ;; Capture stdout
-                         (let ((output-port (open-output-string)))
-                           (with-output-to-port output-port
-                             (lambda ()
-                               (let ((val (eval parsed (rlm-env-module env))))
-                                 ;; If the expression returns a meaningful value, write it too
-                                 (when (and val (not (unspecified? val)))
-                                   (write val)))))
-                           (let ((output (get-output-string output-port)))
-                             (close-port output-port)
-                             (list 'ok (truncate-output output)))))
-                       (lambda (key . args)
-                         (list 'error 'runtime
-                               (truncate-output
-                                 (format #f "Runtime Error: ~a ~a" key args)))))))
+                      ;; Evaluate in persistent module
+                      (let ((result
+                             (catch #t
+                               (lambda ()
+                                 ;; Capture stdout
+                                 (let ((output-port (open-output-string)))
+                                   (with-output-to-port output-port
+                                     (lambda ()
+                                       (let ((val (eval parsed (rlm-env-module env))))
+                                         ;; If the expression returns a meaningful value, write it too
+                                         (when (and val (not (unspecified? val)))
+                                           (write val)))))
+                                   (let* ((output (get-output-string output-port))
+                                          (final-output (if healed?
+                                                            (string-append "[Auto-healed " (number->string (car (analyze-parentheses code-string))) " missing parentheses]\n" output)
+                                                            output)))
+                                     (close-port output-port)
+                                     (list 'ok (truncate-output final-output)))))
+                               (lambda (key . args)
+                                 (list 'error 'runtime
+                                       (truncate-output
+                                         (format #f "Runtime Error: ~a ~a" key args)))))))
 
-                      ;; Record history
-                      (set-rlm-env-history! env
-                        (append (rlm-env-history env)
-                                (list (cons code-string result))))
-                      result))))))))
+                        ;; Record history
+                        (set-rlm-env-history! env
+                          (append (rlm-env-history env)
+                                  (list (cons current-code result))))
+                        result)))))))))
 
 (define BANNED-PRIMITIVES
   '(system system* delete-file rmdir rename-file chmod

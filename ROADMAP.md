@@ -63,7 +63,7 @@ and leveraging Lisp's code-as-data nature.
 
 ### Code Robustness
 
-- [ ] **Auto-healing (Syntax Self-Repair)** — Instead of rejecting code with missing parentheses,
+- [x] **Auto-healing (Syntax Self-Repair)** — Instead of rejecting code with missing parentheses,
   programmatically close unmatched `)` before calling `eval`. Use the existing
   `analyze-parentheses` function to detect and fix simple cases.
 
@@ -134,6 +134,9 @@ as outlined in [training_spec.md](training_spec.md) and [fine_tuning_guide.md](f
 - [ ] **Trajectory Cleaning (Compact Logging)** — Modify `curator.scm` to strip
   dead-end attempts and reasoning errors before writing to `.jsonl`,
   keeping only the ideal path from problem to final working code.
+  **CRITICAL NOTE (Auto-healing issue):** Phase 1 auto-healing currently saves the broken code in the trajectory alongside the `[Auto-healed]` success message. Training on this directly will cause "lazy model collapse" (model learns to write broken code). `curator.scm` MUST either:
+  1. Rewrite the history (replace the broken code block with the healed code) for Ideal SFT.
+  2. Emit pairs for DPO/ORPO training (Broken code = Rejected, Healed code = Chosen).
 
 - [ ] **AST-based Training (Code-as-Data)** — Instead of logging textual code corrections
   for training, log the evolution of AST structure (how the model improved logic step by step).
