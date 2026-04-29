@@ -265,21 +265,17 @@ Prefers the LAST code block to support LLM self-correction patterns."
 (define (rlm-loop session-id last-output depth history . opt-env)
   "The core RLM loop. Maintains a persistent environment across iterations.
 If opt-env is provided, uses that environment; otherwise creates a new one."
-  (let ((env (if (null? opt-env)
-                 (let ((new-env (make-rlm-env)))
-                   ;; Inject llm-query: a closure that calls LLM proxy
-                   (rlm-inject! new-env 'llm-query
-                     (lambda (prompt)
-                       (let* ((sub-session (string-append session-id "-sub-" (number->string (random 1000000000))))
-                              (response (chat-with-llm sub-session prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT) #:history history))
-                              (payload (assoc-ref response "payload")))
-                         (if payload
-                             (assoc-ref payload "content")
-                             "Error: No response from sub-LLM"))))
-                   ;; Inject context variable
-                   (rlm-inject! new-env 'context last-output)
-                   new-env)
-                 (car opt-env))))
+  (let ((env (if (null? opt-env) (make-rlm-env) (car opt-env))))
+    ;; Always inject/update llm-query and context for the current task
+    (rlm-inject! env 'llm-query
+      (lambda (prompt)
+        (let* ((sub-session (string-append session-id "-sub-" (number->string (random 1000000000))))
+               (response (chat-with-llm sub-session prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT) #:history history))
+               (payload (assoc-ref response "payload")))
+          (if payload
+              (assoc-ref payload "content")
+              "Error: No response from sub-LLM"))))
+    (rlm-inject! env 'context last-output)
 
     (rlm-loop-inner session-id last-output depth env history 1)))
 
@@ -504,14 +500,14 @@ Please provide ONLY the code block. After seeing the execution result, provide F
                         (display (string-append C-RED "\n[GAIA] ⚠ No actionable output. Treating as final answer (unless low confidence)." C-RESET "\n"))
                         response-text))))))))))))
 
-(define (handle-command input session-id history)
+(define (handle-command input session-id history env)
   "Parses and executes meta-commands or delegates to RLM.
-Returns updated (history . should-continue?)"
+Returns (list updated-history updated-env should-continue?)"
   (cond
    ;; /exit
    ((string=? input "/exit")
     (display "Bye.\n")
-    (cons history #f))
+    (list history env #f))
 
    ;; /help
    ((string=? input "/help")
@@ -524,15 +520,27 @@ Returns updated (history . should-continue?)"
     (display "  /base-model <name>- Select the foundation model used for training\n")
     (display "  /train         - Manually trigger Fine Tuning (make learn) from dataset\n")
     (display "  /clear         - Clear conversation history\n")
+    (display "  /env           - Show variables defined in the current REPL session\n")
     (display "  /help          - Show this help\n")
     (display "  /exit          - Quit GAIA\n")
     (display "  <query>        - Start standard RLM investigation\n")
-    (cons history #t))
+    (list history env #t))
 
    ;; /clear
    ((string=? input "/clear")
-    (display (string-append C-YELLOW "Conversation history cleared." C-RESET "\n"))
-    (cons '() #t))
+    (display (string-append C-YELLOW "Conversation history and REPL environment cleared." C-RESET "\n"))
+    (list '() (make-rlm-env) #t))
+
+   ;; /env
+   ((string=? input "/env")
+    (let ((bindings (rlm-env-user-bindings env)))
+      (display (string-append C-BOLD "User-defined REPL Bindings:\n" C-RESET))
+      (if (null? bindings)
+          (display "  (empty)\n")
+          (for-each (lambda (b)
+                      (display (format #f "  ~a = ~a\n" (car b) (cdr b))))
+                    bindings)))
+    (list history env #t))
 
    ;; /ask <query>
    ((string-prefix? "/ask " input)
@@ -544,9 +552,9 @@ Returns updated (history . should-continue?)"
         (display "\nAI: ")
         (display content)
         (newline)
-        (cons (append history (list `(("role" . "user") ("content" . ,query))
+        (list (append history (list `(("role" . "user") ("content" . ,query))
                                     `(("role" . "assistant") ("content" . ,content))))
-              #t))))
+              env #t))))
 
    ;; /eval <scheme>
    ((string-prefix? "/eval " input)
@@ -557,7 +565,7 @@ Returns updated (history . should-continue?)"
           (newline))
         (lambda (key . args)
           (display (format #f "Error: ~a ~a\n" key args))))
-      (cons history #t)))
+      (list history env #t)))
 
    ;; /models
    ((string=? input "/models")
@@ -566,24 +574,24 @@ Returns updated (history . should-continue?)"
        (if (list? models-list)
            (for-each (lambda (m) (display (string-append "  - " m "\n"))) models-list)
            (display (string-append C-RED "  No models found or unexpected response format.\n" C-RESET))))
-    (cons history #t))
+    (list history env #t))
 
    ;; /model
    ((string=? input "/model")
     (display (string-append C-BOLD "Current model: " C-RESET (get-config 'model) "\n"))
-    (cons history #t))
+    (list history env #t))
 
    ;; /model <name>
    ((string-prefix? "/model " input)
     (let ((new-model (substring input 7)))
        (set-config! 'model new-model)
        (display (string-append C-GREEN "Model hot-swapped for session to: " C-RESET new-model "\n")))
-    (cons history #t))
+    (list history env #t))
 
    ;; /thinking
    ((string=? input "/thinking")
     (display (string-append "Current thinking mode: " (if thinking-enabled? "ON" "OFF") "\n"))
-    (cons history #t))
+    (list history env #t))
 
    ;; /thinking <on/off>
    ((string-prefix? "/thinking " input)
@@ -597,19 +605,19 @@ Returns updated (history . should-continue?)"
         (display (string-append C-YELLOW "Thinking mode DISABLED." C-RESET "\n")))
        (else
         (display (string-append "Current thinking mode: " (if thinking-enabled? "ON" "OFF") "\n"))))
-      (cons history #t)))
+      (list history env #t)))
 
    ;; /base-model
    ((string=? input "/base-model")
     (display (string-append C-BOLD "Current base model for training: " C-RESET (get-config 'base-model) "\n"))
-    (cons history #t))
+    (list history env #t))
 
    ;; /base-model <name>
    ((string-prefix? "/base-model " input)
     (let ((new-base (substring input 12)))
        (set-config! 'base-model new-base)
        (display (string-append C-GREEN "Base model for training hot-swapped to: " C-RESET new-base "\n")))
-    (cons history #t))
+    (list history env #t))
 
    ;; /train
    ((string=? input "/train")
@@ -618,14 +626,14 @@ Returns updated (history . should-continue?)"
       (setenv "GAIA_BASE_MODEL" current-base)
       (system* "make" "learn")
       (setenv "GAIA_BASE_MODEL" ""))
-    (cons history #t))
+    (list history env #t))
 
    ;; Standard RLM Loop
    (else
-    (let ((answer (rlm-loop session-id input 0 history)))
-      (cons (append history (list `(("role" . "user") ("content" . ,input))
+    (let ((answer (rlm-loop session-id input 0 history env)))
+      (list (append history (list `(("role" . "user") ("content" . ,input))
                                   `(("role" . "assistant") ("content" . ,answer))))
-            #t)))))
+            env #t)))))
 
 (define (start-gaia . args)
   (activate-readline)
@@ -645,17 +653,19 @@ Returns updated (history . should-continue?)"
 
     (display (string-append "Session ID: " session-id "\n"))
 
-    (let loop ((chat-history '()))
+    (let loop ((chat-history '())
+               (global-env (make-rlm-env)))
       (newline)
       (let ((input (readline (string-append "\x01" C-BOLD C-GREEN "\x02(GAIA) >\x01" C-RESET "\x02 "))))
         (cond
          ((eof-object? input) (newline))
-         ((string=? input "") (loop chat-history))
+         ((string=? input "") (loop chat-history global-env))
          (else
           (add-history input) ;; Add to readline history
-          (let* ((result (handle-command input session-id chat-history))
+          (let* ((result (handle-command input session-id chat-history global-env))
                  (new-history (car result))
-                 (continue? (cdr result)))
+                 (new-env (cadr result))
+                 (continue? (caddr result)))
             (if continue?
-                (loop new-history)
+                (loop new-history new-env)
                 #t))))))))

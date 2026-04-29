@@ -7,7 +7,8 @@
             rlm-eval!
             rlm-inject!
             rlm-env-history
-            rlm-env-module))
+            rlm-env-module
+            rlm-env-user-bindings))
 
 ;;; --- RLM Environment ---
 ;;;
@@ -18,10 +19,11 @@
 
 ;; Record type for the RLM environment
 (define-record-type <rlm-env>
-  (%make-rlm-env module history)
+  (%make-rlm-env module history initial-symbols)
   rlm-env?
   (module  rlm-env-module)
-  (history rlm-env-history set-rlm-env-history!))
+  (history rlm-env-history set-rlm-env-history!)
+  (initial-symbols rlm-env-initial-symbols))
 
 (define (make-safe-rlm-module)
   "Creates a fresh Guile module pre-loaded with safe primitives and libraries
@@ -100,7 +102,29 @@ but restricted to safe operations."
 
 (define (make-rlm-env)
   "Creates a new RLM environment with a pre-loaded persistent module."
-  (%make-rlm-env (make-safe-rlm-module) '()))
+  (let* ((m (make-safe-rlm-module))
+         (initial-syms (module-map (lambda (sym var) sym) m)))
+    (%make-rlm-env m '() initial-syms)))
+
+(define (rlm-env-user-bindings env)
+  "Returns an alist of (symbol . value-string) for variables defined by the user/LLM."
+  (let* ((m (rlm-env-module env))
+         (current-syms (module-map (lambda (sym var) sym) m))
+         (initial-syms (rlm-env-initial-symbols env))
+         ;; Ignore injected primitives that change per step
+         (user-syms (lset-difference eq? current-syms initial-syms '(llm-query context))))
+    (map (lambda (sym)
+           (cons sym (catch #t
+                       (lambda ()
+                         (let ((val (module-ref m sym)))
+                           (if (procedure? val)
+                               "#<procedure>"
+                               (let ((str (format #f "~a" val)))
+                                 (if (> (string-length str) 100)
+                                     (string-append (substring str 0 97) "...")
+                                     str)))))
+                       (lambda _ "#<error>"))))
+         user-syms)))
 
 (define (rlm-inject! env name value)
   "Injects a named binding into the RLM environment.
