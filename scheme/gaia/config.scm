@@ -1,7 +1,9 @@
 (define-module (gaia config)
   #:use-module (ice-9 match)
   #:use-module (srfi srfi-1)
-  #:export (load-config get-config set-config!))
+  #:export (load-config get-config set-config! gaia-version))
+
+(define gaia-version "0.2.0-dev")
 
 (define %default-config
   `((llm-url . "http://localhost:4000")
