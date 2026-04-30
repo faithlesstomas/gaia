@@ -46,7 +46,7 @@ Core infrastructure that is already built and working.
 
 ---
 
-## Phase 1 — RLM Core Improvements & Homoiconicity 🔧
+## Phase 1 — RLM Core Improvements & Homoiconicity
 
 Hardening the agentic loop to handle the "parenthesis blindness" of smaller models (Gemma 4, Ministral)
 and leveraging Lisp's code-as-data nature.
@@ -88,32 +88,39 @@ and leveraging Lisp's code-as-data nature.
 
 ---
 
-## Phase 2 — Headless Architecture & Terminal UX 🏗️
+## Phase 2 — Headless Architecture & Terminal UX
 
 Transition from monolith to a modern client-server architecture
 inspired by tools like Claude Code / Cline.
 
 ### Architecture
 
-- [ ] **Headless GAIA (Client-Server Split)** — Rebuild `run-gaia.scm` so the engine
-  runs as a background server (UNIX sockets or local HTTP/JSON-RPC).
-  The CLI becomes a thin client that communicates with the server.
+- [ ] **Headless GAIA Engine (Fibers-based)** — Rebuild the engine as a background server.
+  - Use **Guile Fibers** for high-performance server orchestration and non-blocking I/O.
+  - Maintain **POSIX Threads** for isolated `rlm-execute` calls to ensure safe interruption of stuck code.
+  - Communicate via local UNIX Sockets for "Local-First" security and low latency.
 
-- [ ] **Response Streaming (SSE)** — Switch LiteLLM calls to `("stream" . #t)` mode
-  and stream tokens to the frontend for real-time character-by-character display.
+- [ ] **Response Streaming** — Switch to character-by-character streaming from LiteLLM.
+  - Stream thoughts (`<|think|>`) and response tokens in real-time to the Rust client.
 
 ### Terminal Client
 
-- [ ] **Native CLI Client (Rust + `ratatui`)** — Build a fast, native terminal client.
-  The client handles only rendering: file trees, Markdown formatting,
-  async "thinking" spinners. No business logic.
+- [ ] **Native CLI Client (Rust + `ratatui`)** — Build a fast, native terminal client inspired by `claw-code`. 
+  - Leverage `rustyline` for rich multiline input and history.
+  - Use `pulldown_cmark` for premium Markdown rendering.
+  - Asynchronous "thinking" and streaming status updates.
+  - The client handles only rendering and user interaction; no business logic.
+
+- [ ] **S-Expression / JSON-RPC Protocol** — Define a lightweight communication protocol over UNIX Sockets.
+  - Support for `eval` requests, `event` streams (tokens, thoughts), and `interrupt` signals.
+  - High performance with minimal serialization overhead.
 
 ### Safety & UX
 
-- [ ] **Human-in-the-Loop Sandbox** — Modify the AST analyzer in `executor.scm`:
-  instead of unconditionally blocking banned primitives (like `delete-file`),
-  send a confirmation request to the CLI client:
-  *"Agent wants to delete file X. Allow? [Y/N]"*.
+- [ ] **Human-in-the-Loop (HITL) Sandbox** — Implement an interactive permission system.
+  - The Rust client intercept risky AST-detected operations (e.g., `delete-file`).
+  - Show a "Permission Request" UI to the user for confirmation before execution.
+  - Toggleable safety levels (Locked, Ask, Permissive).
 
 - [ ] **Auto-Scaffolding** — On agent startup in a directory, silently run a lightweight
   `(list-files)` (respecting `.gitignore`) and inject the directory map
@@ -124,7 +131,7 @@ inspired by tools like Claude Code / Cline.
 
 ---
 
-## Phase 3 — Continuous Learning (Fine-Tuning & Data) 🧠
+## Phase 3 — Continuous Learning (Fine-Tuning & Data)
 
 Closing the self-improvement loop where GAIA learns from its own mistakes,
 as outlined in [training_spec.md](training_spec.md) and [fine_tuning_guide.md](fine_tuning_guide.md).
@@ -154,19 +161,23 @@ as outlined in [training_spec.md](training_spec.md) and [fine_tuning_guide.md](f
 
 ---
 
-## Phase 4 — Long-term Vision 🚀
+## Phase 4 — Long-term Vision
 
 ### Guix Integration
 
 - [ ] **Guix Container Isolation** — Execute AI-generated code in true
   `guix shell --container` ephemeral environments for bit-reproducible isolation.
 
-### Web Interface
+### Web Interface & IDE
 
-- [ ] **WebUI in Guile Hoot (WASM)** — After stabilizing the Headless server,
-  build a web dashboard entirely in Scheme via Guile Hoot.
-  Used for deep RLM tree monitoring, session management,
-  and browsing trajectory databases before sending them to training.
+- [ ] **GAIA IDE (Emacs-like or not)** (optional) — A dedicated developer environment.
+  - Rust-based GUI (e.g., using `iced`, `egui`, or `tauri`) with embedded terminal and code editor.
+  - Deep integration with the Guile REPL (live-inspect variables, AST visualization).
+  - "Local-First" architecture: the IDE is a client for the local GAIA Headless Server.
+
+- [ ] **Web Interface (Guile Hoot / WASM)** — Browser-based monitoring and interaction.
+  - Compile the RLM loop to WASM using Guile Hoot for client-side execution.
+  - Unified JSON-RPC protocol allows the WebUI to talk to a local or remote GAIA engine.
 
 ### Research Directions
 
