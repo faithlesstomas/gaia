@@ -1,4 +1,4 @@
-(add-to-load-path (string-append (dirname (current-filename)) "/../scheme"))
+(add-to-load-path (string-append (dirname (current-filename)) "/../src"))
 
 (use-modules (gaia core)
              (gaia llm-client)
@@ -58,7 +58,7 @@
   (let* ((test-history '((("role" . "user") ("content" . "context"))))
          (rlm-inner (@@ (gaia core) rlm-loop-inner))
          (env (make-rlm-env))
-         (answer (rlm-inner "test-session" "task" 0 env test-history 1)))
+         (answer (rlm-inner "test-session" "task" 0 env test-history 1 '())))
     (test-assert "history reached chat-with-llm via rlm-loop-inner"
       (string-contains answer "FOUND_HISTORY"))))
 

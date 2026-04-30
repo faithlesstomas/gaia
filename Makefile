@@ -6,7 +6,7 @@ export GAIA_LLM_URL
 export GAIA_MODEL
 export GAIA_BASE_MODEL
 
-.PHONY: run repl check test-units test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop clean-trajectories monitor
+.PHONY: run repl check test-units test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop clean-trajectories monitor client
 
 GUIX_SHELL = guix shell -m guix.scm --
 
@@ -16,27 +16,27 @@ run: llm-server
 	@exit 1
 
 repl:
-	$(GUIX_SHELL) guile -L scheme
+	$(GUIX_SHELL) guile -L src
 
 check: test-units test-tools test-rlm-env
 
 test-units:
 	@echo "Running core unit tests..."
-	$(GUIX_SHELL) guile -L scheme scripts/test-units.scm
+	$(GUIX_SHELL) guile -L src scripts/test-units.scm
 	@echo "Running history and meta-command tests..."
-	$(GUIX_SHELL) guile -L scheme scripts/test-history.scm
+	$(GUIX_SHELL) guile -L src scripts/test-history.scm
 	@echo "Running signal extraction tests..."
-	$(GUIX_SHELL) guile -L scheme scripts/test-final-signal.scm
+	$(GUIX_SHELL) guile -L src scripts/test-final-signal.scm
 	@echo "Running error handling tests..."
-	$(GUIX_SHELL) guile -L scheme scripts/test-error-handling.scm
+	$(GUIX_SHELL) guile -L src scripts/test-error-handling.scm
 
 test-tools:
 	@echo "Running tools unit tests..."
-	$(GUIX_SHELL) guile -L scheme scripts/test-tools.scm
+	$(GUIX_SHELL) guile -L src scripts/test-tools.scm
 
 test-rlm-env:
 	@echo "Running RLM environment unit tests..."
-	$(GUIX_SHELL) guile -L scheme scripts/test-rlm-env.scm
+	$(GUIX_SHELL) guile -L src scripts/test-rlm-env.scm
 
 llm-server:
 	@if nc -z localhost 4000 2>/dev/null; then \
@@ -55,14 +55,14 @@ llm-server-stop:
 
 test-rlm: llm-server
 	@echo "Running RLM pipeline sanity check (requires LLM server)..."
-	$(GUIX_SHELL) guile -L scheme scripts/test-sanity.scm; \
+	$(GUIX_SHELL) guile -L src scripts/test-sanity.scm; \
 	STATUS=$$?; \
 	$(MAKE) llm-server-stop; \
 	exit $$STATUS
 
 test-tool-use: llm-server
 	@echo "Running LLM tool-use test: search-file needle (requires LLM server)..."
-	BENCHMARK_SIZE_MB=1 $(GUIX_SHELL) guile -L scheme scripts/test-tool-use.scm; \
+	BENCHMARK_SIZE_MB=1 $(GUIX_SHELL) guile -L src scripts/test-tool-use.scm; \
 	STATUS=$$?; \
 	$(MAKE) llm-server-stop; \
 	exit $$STATUS
@@ -70,12 +70,12 @@ test-tool-use: llm-server
 benchmark:
 	@echo "Running S-NIAH Benchmark — RLM recursion via context chunking + llm_query..."
 	@echo "  Context size: $${BENCHMARK_SIZE_KB:-512}KB"
-	BENCHMARK_SIZE_KB=$${BENCHMARK_SIZE_KB:-512} $(GUIX_SHELL) guile -L scheme scripts/benchmark-niah.scm
+	BENCHMARK_SIZE_KB=$${BENCHMARK_SIZE_KB:-512} $(GUIX_SHELL) guile -L src scripts/benchmark-niah.scm
 
 dataset:
 	@FILE=$${FILE:-$$(cat .last_trajectory 2>/dev/null || ls -t trajectories-*.jsonl 2>/dev/null | head -n1 || echo "trajectories.jsonl")}; \
 	echo "Curating dataset from: $$FILE"; \
-	$(GUIX_SHELL) guile -L scheme -c "(use-modules (gaia curator)) (curate-dataset \"$$FILE\" \"dataset-success.jsonl\" \"dataset-failure.jsonl\")"
+	$(GUIX_SHELL) guile -L src -c "(use-modules (gaia curator)) (curate-dataset \"$$FILE\" \"dataset-success.jsonl\" \"dataset-failure.jsonl\")"
 
 learn:
 	@echo "Curating dataset locally..."
@@ -93,4 +93,8 @@ clean-trajectories:
 monitor:
 	@FILE=$${FILE:-$$(cat .last_trajectory 2>/dev/null || ls -t trajectories-*.jsonl 2>/dev/null | head -n1 || echo "trajectories.jsonl")}; \
 	echo "Monitoring GAIA Trajectory: $$FILE"; \
-	$(GUIX_SHELL) guile -L scheme scripts/gaia-monitor.scm $$FILE
+	$(GUIX_SHELL) guile -L src scripts/gaia-monitor.scm $$FILE
+
+client:
+	@echo "Building and running GAIA Rust Client..."
+	cd src/gaia-cli && $(GUIX_SHELL) cargo run

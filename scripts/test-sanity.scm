@@ -1,4 +1,4 @@
-(add-to-load-path (string-append (dirname (current-filename)) "/../scheme"))
+(add-to-load-path (string-append (dirname (current-filename)) "/../src"))
 
 (use-modules (gaia core)
              (gaia config)
@@ -16,10 +16,10 @@
 ;;   5. Model detects result and returns FINAL()
 ;;   6. rlm-loop correctly parses the FINAL() signal
 ;;
-;; Task: Count .scm files in scheme/gaia/ directory.
+;; Task: Count .scm files in src/gaia/ directory.
 ;; Expected: deterministic integer, computed locally and verified against model's answer.
 
-(define TASK-DIR "scheme/gaia")
+(define TASK-DIR "src/gaia")
 
 (define (count-scm-files dir)
   "Count .scm files in directory using local Guile (no LLM)."

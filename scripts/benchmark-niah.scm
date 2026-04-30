@@ -9,7 +9,7 @@
 ;;; RULER, we consider tasks that require finding a specific phrase or
 ;;; number in a large set of unrelated text."
 
-(add-to-load-path (string-append (dirname (current-filename)) "/../scheme"))
+(add-to-load-path (string-append (dirname (current-filename)) "/../src"))
 
 (use-modules (gaia core)
              (gaia config)

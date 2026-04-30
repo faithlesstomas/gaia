@@ -22,4 +22,4 @@ echo "Starting GAIA. Trajectory will be saved to: $TRAJ"
 # Then we 'exec guile' directly. This prevents 'guix shell' from acting as a 
 # parent process that intercepts and dies on SIGINT (Ctrl-C), leaving Guile orphaned.
 eval "$(guix shell -m guix.scm --search-paths)"
-exec guile -L scheme scripts/run-gaia.scm "$@"
+exec guile -L src scripts/run-gaia.scm "$@"

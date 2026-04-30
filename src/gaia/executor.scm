@@ -44,10 +44,10 @@ ENV is an rlm-env record. Returns ('ok result) or ('error type message)."
               ;; Proceed with execution if safe
               (let* ((escaped-code (string-join (string-split wrapped-str #\') "'\\''"))
                      ;; We wrap the code to run inside our sandbox module
-                     ;; We assume /workspace maps to project root, so 'scheme' dir is at /workspace/scheme
+                     ;; We assume /workspace maps to project root, so 'scheme' dir is at /workspace/src
                      (container-command
                       (format #f
-                             "(begin (add-to-load-path \"/workspace/scheme\") (use-modules (gaia sandbox)) (let ((res (eval-safe '~a))) (if (not (unspecified? res)) (write res))))"
+                             "(begin (add-to-load-path \"/workspace/src\") (use-modules (gaia sandbox)) (let ((res (eval-safe '~a))) (if (not (unspecified? res)) (write res))))"
                               escaped-code))
 
                      ;; Helper to shell-quote a string (wrap in single quotes, escape inner single quotes)

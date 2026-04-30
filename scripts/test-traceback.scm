@@ -1,4 +1,4 @@
-(add-to-load-path (string-append (dirname (current-filename)) "/../scheme"))
+(add-to-load-path (string-append (dirname (current-filename)) "/../src"))
 (use-modules (gaia executor))
 
 (display "Running triggering error code...\n")

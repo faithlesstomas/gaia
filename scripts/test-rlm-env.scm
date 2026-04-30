@@ -1,4 +1,4 @@
-(add-to-load-path (string-append (dirname (current-filename)) "/../scheme"))
+(add-to-load-path (string-append (dirname (current-filename)) "/../src"))
 
 (use-modules (gaia rlm-env)
              (srfi srfi-64))
@@ -54,7 +54,7 @@
 
     ;; gaia tools: list-files
     (test-assert "gaia tools list-files available"
-      (let ((result (rlm-eval! env "(display (list-files \"scheme/gaia\"))")))
+      (let ((result (rlm-eval! env "(display (list-files \"src/gaia\"))")))
         (and (pair? result)
              (eq? (car result) 'ok)
              (string-contains (cadr result) "core.scm"))))))

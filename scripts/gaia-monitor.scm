@@ -4,9 +4,9 @@
 ;;; gaia-monitor.scm — Real-time Thought Monitor for GAIA
 ;;;
 ;;; Tails trajectories.jsonl and displays model's reasoning, code and results.
-;;; Use: guile -L scheme scripts/gaia-monitor.scm
+;;; Use: guile -L src scripts/gaia-monitor.scm
 
-(add-to-load-path (string-append (dirname (current-filename)) "/../scheme"))
+(add-to-load-path (string-append (dirname (current-filename)) "/../src"))
 
 (use-modules (gaia utils)
              (ice-9 rdelim)

@@ -1,4 +1,4 @@
-(add-to-load-path (string-append (dirname (current-filename)) "/../scheme"))
+(add-to-load-path (string-append (dirname (current-filename)) "/../src"))
 (use-modules (gaia sandbox)
              (gaia executor)
              (gaia tools)  ;; For direct testing

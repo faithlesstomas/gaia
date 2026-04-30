@@ -6,6 +6,7 @@
              (gnu packages nss)
              (gnu packages texinfo)
              (gnu packages compression)
+             (gnu packages rust)
              (gnu packages base))
 
 (packages->manifest
@@ -13,6 +14,7 @@
        guile-json-4
        guile-gnutls
        guile-fibers
+       rust
        nss-certs
        coreutils
        texinfo

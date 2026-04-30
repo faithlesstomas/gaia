@@ -1,0 +1,6 @@
+#!/usr/bin/env -S guile -L src
+!#
+(use-modules (gaia server))
+
+(let ((socket-path "/tmp/gaia.sock"))
+  (start-server socket-path))

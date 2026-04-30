@@ -163,10 +163,10 @@ Example of standard delegation (no Scheme variables):
    You are fully capable of writing in the user's language. ONLY delegate for deep, isolated technical investigations.
 
 # EXAMPLE TASK FLOW
-User: \"Count .scm files in scheme/gaia/\"
+User: \"Count .scm files in src/gaia/\"
 Step 1 (GAIA writes code):
 ```repl
-(define files (list-files \"scheme/gaia\"))
+(define files (list-files \"src/gaia\"))
 (define scm-files (filter (lambda (f) (string-suffix? \".scm\" f)) files))
 (display (length scm-files))
 ```
@@ -273,22 +273,21 @@ Prefers the LAST code block to support LLM self-correction patterns."
 (define CONFIDENCE-THRESHOLD 95)
 (define thinking-enabled? #f) ;; Default thinking off
 
-(define (rlm-loop session-id last-output depth history . opt-env)
+(define* (rlm-loop session-id last-output depth history #:optional (env (make-rlm-env)) #:key (event-handler #f))
   "The core RLM loop. Maintains a persistent environment across iterations.
-If opt-env is provided, uses that environment; otherwise creates a new one."
-  (let ((env (if (null? opt-env) (make-rlm-env) (car opt-env))))
-    ;; Always inject/update llm-query and context for the current task
-    (rlm-inject! env 'llm-query
-      (lambda (prompt)
-        (let* ((sub-session (string-append session-id "-sub-" (number->string (random 1000000000))))
-               (response (chat-with-llm sub-session prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT) #:history history))
-               (payload (assoc-ref response "payload")))
-          (if payload
-              (assoc-ref payload "content")
-              "Error: No response from sub-LLM"))))
-    (rlm-inject! env 'context last-output)
+If env is provided, uses that environment; inaccesible otherwise creates a new one."
+  ;; Always inject/update llm-query and context for the current task
+  (rlm-inject! env 'llm-query
+    (lambda (prompt)
+      (let* ((sub-session (string-append session-id "-sub-" (number->string (random 1000000000))))
+             (response (chat-with-llm sub-session prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT) #:history history))
+             (payload (assoc-ref response "payload")))
+        (if payload
+            (assoc-ref payload "content")
+            "Error: No response from sub-LLM"))))
+  (rlm-inject! env 'context last-output)
 
-    (rlm-loop-inner session-id last-output depth env history 1)))
+  (rlm-loop-inner session-id last-output depth env history 1 '() #:event-handler event-handler))
 
 ;; --- Transcript helpers for multi-turn RLM loop ---
 
@@ -347,25 +346,21 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
          (t (regexp-substitute/global #f "`([^`]+)`" t 'pre C-CYAN 1 C-RESET 'post)))
     t))
 
-(define (rlm-loop-inner session-id last-output depth env history . opt-args)
-  ;; opt-args: step [transcript]
-  (let* ((step (if (null? opt-args) 1 (car opt-args)))
-         (transcript (if (or (null? opt-args) (null? (cdr opt-args)))
-                         '()
-                         (cadr opt-args)))
-         (prompt (if (null? transcript)
-                     last-output
-                     (let ((original-task (assoc-ref transcript "original-task"))
-                           (history-text (format-transcript transcript)))
-                       (string-append
-                        "=== ORIGINAL TASK ===\n"
-                        (if original-task original-task "Unknown task")
-                        "\n\n=== EXECUTION LOG (steps so far) ===\n"
-                        history-text
-                        "\n\n=== LATEST ===\n"
-                        last-output
-                        "\n\nContinue working on the original task. "
-                        "Write your next ```repl code block or provide FINAL(answer).")))))
+(define* (rlm-loop-inner session-id last-output depth env history step transcript #:key (event-handler #f))
+  (let ((prompt (if (null? transcript)
+                   last-output
+                   (let ((original-task (assoc-ref transcript "original-task"))
+                         (history-text (format-transcript transcript)))
+                     (string-append
+                      "=== ORIGINAL TASK ===\n"
+                      (if original-task original-task "Unknown task")
+                      "\n\n=== EXECUTION LOG (steps so far) ===\n"
+                      history-text
+                      "\n\n=== LATEST ===\n"
+                      last-output
+                      "\n\nContinue working on the original task. "
+                      "Write your next ```repl code block or provide FINAL(answer).")))))
+    (when event-handler (event-handler `(status ,(format #f "Agent Depth ~a (Step ~a)..." depth step))))
     (check-interrupt!)  ;; Bail out immediately if Ctrl-C was pressed
     (if (> depth MAX-RECURSION-DEPTH)
         (begin
@@ -429,7 +424,7 @@ If opt-env is provided, uses that environment; otherwise creates a new one."
                       (rlm-loop-inner session-id
                                       "Your previous response was empty. Please write a ```repl code block to continue working on the task, \
 or provide FINAL(answer) if you have the answer."
-                        depth env history (+ step 1) retry-transcript)))
+                        depth env history (+ step 1) retry-transcript #:event-handler event-handler)))
 
                   (let ((updated-transcript
                      (append transcript
@@ -441,6 +436,7 @@ or provide FINAL(answer) if you have the answer."
                                        (cons "assistant" (truncate-for-transcript response-text)))))))
 
                 (when (and reasoning-text (> (string-length reasoning-text) 0))
+                  (when event-handler (event-handler `(thought ,reasoning-text)))
                   (display (string-append C-GREY "[GAIA] Thinking asynchronously... (See monitor)" C-RESET "\n")))
 
                 (let ((prose (strip-blocks response-text)))
@@ -457,28 +453,31 @@ or provide FINAL(answer) if you have the answer."
                              (display (string-append C-BOLD C-YELLOW "\n[GAIA] Spawning Sub-Agent (Delegation):\n" C-RESET "Goal: " goal "\nContext: " context-str "\n"))
                              (let* ((sub-session-id (string-append session-id "-sub-" (number->string (random 1000000000))))
                                     (initial-input (string-append "GOAL: " goal "\nCONTEXT: " context-str))
-                                    (sub-result (rlm-loop sub-session-id initial-input (+ depth 1) history)))
+                                    (sub-result (rlm-loop sub-session-id initial-input (+ depth 1) history #:event-handler event-handler)))
                                (display (string-append C-BOLD C-GREEN "\n[GAIA] Sub-Agent completed.\n" C-RESET "Result length: "
                                                        (number->string (string-length sub-result)) " chars\n"))
                                (if final-sig
                                    (begin
                                      (display (string-append C-GREEN "\n[GAIA] ✓ FINAL signal detected after sub-agent execution." C-RESET "\n"))
                                      (let ((answer (match final-sig (('final ans) ans) (('final-var var) var) (_ "Sub-agent executed successfully"))))
+                                       (when event-handler (event-handler `(final ,answer)))
                                        (display (string-append C-BOLD "[GAIA] Final Answer: " C-RESET (markdown->ansi answer) "\n"))
                                        answer))
                                    (rlm-loop-inner session-id (string-append "Sub-agent execution finished. Result: " sub-result)
-                                                   depth env history (+ step 1) updated-transcript))))
+                                                   depth env history (+ step 1) updated-transcript #:event-handler event-handler))))
                             (_
                              (rlm-loop-inner session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")"
-                                             depth env history (+ step 1) updated-transcript)))))
+                                             depth env history (+ step 1) updated-transcript #:event-handler event-handler)))))
 
                        (action-code =>
                         (lambda (code)
                           (if (and code (> (string-length code) 0) (not (string=? code response-text)))
-                              (begin
+                               (begin
+                                (when event-handler (event-handler `(code ,code)))
                                 (display (string-append C-BOLD C-CYAN "\n[GAIA] Executing Scheme Code:\n" C-RESET code "\n"))
                                 (match (rlm-execute env code)
                                   (('ok result)
+                                   (when event-handler (event-handler `(result ,result)))
                                    (display (string-append C-GREEN "\n[REPL] Success:\n" C-RESET result "\n"))
                                    (let ((exec-log `(("session_id" . ,session-id)
                                                      ("code" . ,code)
@@ -493,10 +492,11 @@ or provide FINAL(answer) if you have the answer."
                                        (begin
                                          (display (string-append C-GREEN "\n[GAIA] ✓ FINAL signal detected after successful code execution." C-RESET "\n"))
                                          (let ((answer (match final-sig (('final ans) ans) (('final-var var) var) (_ "Code executed successfully"))))
+                                           (when event-handler (event-handler `(final ,answer)))
                                            (display (string-append C-BOLD "[GAIA] Final Answer: " C-RESET (markdown->ansi answer) "\n"))
                                            answer))
                                        (rlm-loop-inner session-id (string-append "Code executed successfully. Result:\n" result)
-                                                       depth env history (+ step 1) updated-transcript)))
+                                                       depth env history (+ step 1) updated-transcript #:event-handler event-handler)))
 
                                   (('error type msg)
                                    (let ((feedback (handle-error type msg depth)))
@@ -511,12 +511,12 @@ or provide FINAL(answer) if you have the answer."
                                          (display (scm->json exec-log) port)
                                          (newline port)
                                          (close-port port)))
-                                     (rlm-loop-inner session-id feedback depth env history (+ step 1) updated-transcript)))))
+                                     (rlm-loop-inner session-id feedback depth env history (+ step 1) updated-transcript #:event-handler event-handler)))))
                               response-text)))
 
                        ((and final-sig (match final-sig (('final ans) ans) (('final-var var) var) (_ #f))) =>
                         (lambda (answer)
-                          (display (string-append C-GREEN "\n[GAIA] ✓ FINAL signal detected." C-RESET "\n"))
+                          (when event-handler (event-handler `(final ,answer)))
                           (if (equal? (car final-sig) 'final)
                               (display (string-append C-BOLD "[GAIA] Final Answer: " C-RESET (markdown->ansi answer) "\n"))
                               (display (string-append C-BOLD "[GAIA] Answer stored in: " C-RESET answer "\n")))
@@ -659,7 +659,7 @@ Returns (list updated-history updated-env should-continue?)"
 
    ;; Standard RLM Loop
    (else
-    (let ((answer (rlm-loop session-id input 0 history env)))
+    (let ((answer (rlm-loop session-id input 0 history env #:event-handler #f)))
       (list (append history (list `(("role" . "user") ("content" . ,input))
                                   `(("role" . "assistant") ("content" . ,answer))))
             env #t)))))
