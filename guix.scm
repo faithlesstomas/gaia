@@ -12,6 +12,7 @@
  (list guile-3.0
        guile-json-4
        guile-gnutls
+       guile-fibers
        nss-certs
        coreutils
        texinfo
