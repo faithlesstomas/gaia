@@ -110,7 +110,28 @@ Closing the self-improvement loop where GAIA learns from its own mistakes, as ou
 
 ---
 
-## Phase 4 — Desktop Integration (The Two-Pronged Strategy)
+---
+
+## Phase 4 — Multimodal I/O (Vision & Voice)
+
+Transforming GAIA from a text-only interface to a fully conversational and visually aware assistant,
+using highly optimized local models to preserve hardware resources (APU/CPU).
+
+- [ ] **Voice In (Speech-to-Text):** Integrate `whisper.cpp` with VAD (Voice Activity Detection).
+  Create an audio-listening worker in the Rust client that streams transcribed text directly to the Guile Headless Server over JSON-RPC.
+- [ ] **Voice Out (Text-to-Speech):** Integrate a lightweight local TTS engine (e.g., `Piper` or `Kokoro`).
+  Leverage the Headless Server's character streaming to feed the TTS engine sentence-by-sentence, achieving near-zero latency conversational responses.
+- [ ] **Wayland "Screen Read" via PipeWire (Desktop Phase):** Implement a background worker in the Rust client that captures the screen
+  or specific app windows using XDG Desktop Portals and PipeWire, sending frames to a Vision-Language Model (VLM) via LiteLLM.
+- [ ] **Multimodal Context Routing:** Update `llm-client.scm` to handle base64 image payloads and route them to vision-capable
+  models (e.g., LLaVA, Pixtral, or multimodal Gemma variants) when the user asks "What am I looking at?".
+- [ ] **Compositor "God View" (OS Phase Prep):** Architect the system so that when transitioning to the custom Smithay Wayland Compositor, GAIA
+  bypasses PipeWire and directly reads the zero-copy GPU buffers of active windows for instant visual context.
+
+---
+
+
+## Phase 5 — Desktop Integration (The Two-Pronged Strategy)
 
 Evolving GAIA from a terminal utility into a deeply integrated OS assistant, utilizing the Headless Engine and JSON-RPC protocol to serve multiple front-ends.
 
@@ -123,7 +144,7 @@ Evolving GAIA from a terminal utility into a deeply integrated OS assistant, uti
 
 ---
 
-## Phase 5 — The Ultimate Vision (GAIA OS & Advanced Research)
+## Phase 6 — The Ultimate Vision (GAIA OS & Advanced Research)
 
 Transforming GAIA into a standalone, AI-first operating environment and exploring cutting-edge inference architectures.
 
