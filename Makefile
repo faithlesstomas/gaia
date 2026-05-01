@@ -6,7 +6,7 @@ export GAIA_LLM_URL
 export GAIA_MODEL
 export GAIA_BASE_MODEL
 
-.PHONY: run repl check test-units test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop clean-trajectories monitor client
+.PHONY: run repl check test-units test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop clean-trajectories monitor client server
 
 GUIX_SHELL = guix shell -m guix.scm --
 
@@ -97,4 +97,10 @@ monitor:
 
 client:
 	@echo "Building and running GAIA Rust Client..."
-	cd src/gaia-cli && $(GUIX_SHELL) cargo run
+	cd src/gaia-cli && guix shell -m ../../guix.scm -- cargo run
+
+server:
+	@echo "Starting GAIA Headless Server..."
+	$(GUIX_SHELL) ./bin/gaia-server
+
+serwer: server
