@@ -1,138 +1,318 @@
+// GAIA CLI — Scrollback REPL Client (Phase 1)
+//
+// Connects to the GAIA Headless Engine via UNIX socket.
+// Uses rustyline for line editing with history (arrow keys).
+// Prints server events as colored terminal output (scrollback).
+
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixStream;
+use std::time::Duration;
+
 use anyhow::Result;
-use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
-use ratatui::{
-    backend::{Backend, CrosstermBackend},
-    layout::{Constraint, Direction, Layout},
-    widgets::{Block, Borders, Paragraph},
-    Frame, Terminal,
-};
-use std::io;
-use std::sync::{Arc, Mutex};
-use tokio::net::UnixStream;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use lexpr::Value;
+use rustyline::error::ReadlineError;
+use rustyline::history::DefaultHistory;
+use rustyline::{Config, EditMode, Editor};
 
-#[derive(Clone)]
-struct AppState {
-    events: Arc<Mutex<Vec<String>>>,
-    status: Arc<Mutex<String>>,
-}
+// ANSI escape codes
+const RESET: &str = "\x1b[0m";
+const BOLD: &str = "\x1b[1m";
+const DIM: &str = "\x1b[2m";
+const RED: &str = "\x1b[31m";
+const GREEN: &str = "\x1b[32m";
+const YELLOW: &str = "\x1b[33m";
+const CYAN: &str = "\x1b[36m";
+const GREY: &str = "\x1b[90m";
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    // Setup terminal
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+const SOCKET_PATH: &str = "/tmp/gaia.sock";
 
-    let state = AppState {
-        events: Arc::new(Mutex::new(Vec::new())),
-        status: Arc::new(Mutex::new("Disconnected".to_string())),
-    };
+fn main() -> Result<()> {
+    println!("\n{BOLD}{GREEN}GAIA CLI v0.2.0{RESET}");
+    println!("Type {BOLD}/help{RESET} for commands or enter a task.\n");
 
-    // Spawn networking task
-    let state_clone = state.clone();
-    tokio::spawn(async move {
-        if let Err(e) = run_networking(state_clone).await {
-            eprintln!("Networking error: {:?}", e);
-        }
-    });
+    let mut stream = connect_with_retry(SOCKET_PATH)?;
+    let mut reader = BufReader::new(stream.try_clone()?);
 
-    // Main loop
-    let res = run_app(&mut terminal, state).await;
+    let config = Config::builder()
+        .edit_mode(EditMode::Emacs)
+        .auto_add_history(false)
+        .build();
+    let mut editor = Editor::<(), DefaultHistory>::with_config(config)?;
 
-    // Restore terminal
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
-
-    if let Err(err) = res {
-        println!("{:?}", err)
-    }
-
-    Ok(())
-}
-
-async fn run_networking(state: AppState) -> Result<()> {
-    let socket_path = "/tmp/gaia.sock";
-    let mut stream = UnixStream::connect(socket_path).await?;
-    {
-        let mut status = state.status.lock().unwrap();
-        *status = "Connected to Headless Engine".to_string();
-    }
-
-    // Send initial test eval
-    let cmd = "(eval \"List all files in the current directory and explain what this project is about.\")\n";
-    stream.write_all(cmd.as_bytes()).await?;
-
-    let mut buffer = [0; 4096];
     loop {
-        let n = stream.read(&mut buffer).await?;
-        if n == 0 { break; }
-        
-        let chunk = String::from_utf8_lossy(&buffer[..n]);
-        // For now, we just split by newline and add to events
-        // In a real app, we would parse S-expressions with lexpr
-        for line in chunk.lines() {
-            if !line.trim().is_empty() {
-                let mut events = state.events.lock().unwrap();
-                events.push(line.to_string());
-            }
-        }
-    }
+        let prompt = format!("{BOLD}{GREEN}(GAIA) >{RESET} ");
+        match editor.readline(&prompt) {
+            Ok(line) => {
+                let trimmed = line.trim().to_string();
+                if trimmed.is_empty() {
+                    continue;
+                }
 
-    Ok(())
-}
+                let _ = editor.add_history_entry(&trimmed);
 
-async fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: AppState) -> io::Result<()> {
-    loop {
-        terminal.draw(|f| ui(f, &state))?;
-
-        if event::poll(std::time::Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                if let KeyCode::Char('q') = key.code {
-                    return Ok(());
+                match dispatch(&trimmed, &mut stream, &mut reader) {
+                    Ok(Action::Continue) => {}
+                    Ok(Action::Exit) => break,
+                    Err(e) => {
+                        eprintln!("{RED}[Connection lost] {e}{RESET}");
+                        match connect_with_retry(SOCKET_PATH) {
+                            Ok(new_stream) => {
+                                reader = BufReader::new(new_stream.try_clone()?);
+                                stream = new_stream;
+                            }
+                            Err(re) => {
+                                eprintln!("{RED}[Fatal] Cannot reconnect: {re}{RESET}");
+                                break;
+                            }
+                        }
+                    }
                 }
             }
+            Err(ReadlineError::Interrupted) => {
+                println!("{YELLOW}^C (Use /exit to quit){RESET}");
+            }
+            Err(ReadlineError::Eof) => break,
+            Err(e) => {
+                eprintln!("{RED}Readline error: {e}{RESET}");
+                break;
+            }
+        }
+    }
+
+    println!("Bye.");
+    Ok(())
+}
+
+enum Action {
+    Continue,
+    Exit,
+}
+
+fn dispatch(
+    input: &str,
+    stream: &mut UnixStream,
+    reader: &mut BufReader<UnixStream>,
+) -> Result<Action> {
+    match input {
+        "/exit" | "/quit" => Ok(Action::Exit),
+        "/help" => {
+            print_help();
+            Ok(Action::Continue)
+        }
+        "/clear" => {
+            send_sexp(stream, &Value::list(vec![Value::symbol("clear")]))?;
+            receive_events(reader)?;
+            Ok(Action::Continue)
+        }
+        "/env" => {
+            send_sexp(stream, &Value::list(vec![Value::symbol("env")]))?;
+            receive_events(reader)?;
+            Ok(Action::Continue)
+        }
+        "/model" => {
+            send_sexp(stream, &Value::list(vec![Value::symbol("get-model")]))?;
+            receive_events(reader)?;
+            Ok(Action::Continue)
+        }
+        _ if input.starts_with("/eval ") => {
+            let code = &input[6..];
+            let cmd = Value::list(vec![Value::symbol("repl"), Value::string(code)]);
+            send_sexp(stream, &cmd)?;
+            receive_events(reader)?;
+            Ok(Action::Continue)
+        }
+        _ if input.starts_with("/model ") => {
+            let model = &input[7..];
+            let cmd = Value::list(vec![
+                Value::symbol("set-model"),
+                Value::string(model),
+            ]);
+            send_sexp(stream, &cmd)?;
+            receive_events(reader)?;
+            Ok(Action::Continue)
+        }
+        _ if input.starts_with("/ask ") => {
+            let query = &input[5..];
+            let cmd = Value::list(vec![Value::symbol("ask"), Value::string(query)]);
+            send_sexp(stream, &cmd)?;
+            receive_events(reader)?;
+            Ok(Action::Continue)
+        }
+        _ if input.starts_with('/') => {
+            eprintln!(
+                "{YELLOW}Unknown command: {input}. Type /help for available commands.{RESET}"
+            );
+            Ok(Action::Continue)
+        }
+        _ => {
+            // Standard RLM evaluation
+            let cmd = Value::list(vec![Value::symbol("eval"), Value::string(input)]);
+            send_sexp(stream, &cmd)?;
+            receive_events(reader)?;
+            Ok(Action::Continue)
         }
     }
 }
 
-fn ui(f: &mut Frame, state: &AppState) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(1)
-        .constraints(
-            [
-                Constraint::Length(3),
-                Constraint::Min(10),
-                Constraint::Length(3),
-            ]
-            .as_ref(),
-        )
-        .split(f.size());
+fn send_sexp(stream: &mut UnixStream, sexp: &Value) -> Result<()> {
+    let s = lexpr::to_string(sexp)?;
+    writeln!(stream, "{}", s)?;
+    stream.flush()?;
+    Ok(())
+}
 
-    let status_text = state.status.lock().unwrap();
-    let header = Paragraph::new(status_text.clone())
-        .block(Block::default().borders(Borders::ALL).title("Status (GAIA v0.2.0)"));
-    f.render_widget(header, chunks[0]);
+/// Reads and prints server events until a terminal event (final/error/info/env-list)
+/// is received, then returns control to the REPL prompt.
+fn receive_events(reader: &mut BufReader<UnixStream>) -> Result<()> {
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let n = reader.read_line(&mut line)?;
+        if n == 0 {
+            return Err(anyhow::anyhow!("Server disconnected"));
+        }
 
-    let events = state.events.lock().unwrap();
-    let body_text = events.join("\n");
-    let body = Paragraph::new(body_text)
-        .block(Block::default().borders(Borders::ALL).title("Engine Event Stream"));
-    f.render_widget(body, chunks[1]);
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
 
-    let footer = Paragraph::new("Press 'q' to quit. Interaction coming soon...")
-        .block(Block::default().borders(Borders::ALL).title("Input"));
-    f.render_widget(footer, chunks[2]);
+        match lexpr::from_str(trimmed) {
+            Ok(Value::Cons(cons)) => {
+                let tag = cons.car().as_symbol().unwrap_or("unknown");
+                let content = if let Value::Cons(cdr) = cons.cdr() {
+                    cdr.car().as_str().unwrap_or("").to_string()
+                } else {
+                    String::new()
+                };
+
+                match tag {
+                    "status" => {
+                        // Overwrite-style status (dim, on stderr so it doesn't pollute output)
+                        eprint!("\r{DIM}{GREY}⠋ {content}{RESET}\x1b[K");
+                    }
+                    "thought" => {
+                        if !content.is_empty() {
+                            println!("{GREY}{}{RESET}", content);
+                        }
+                    }
+                    "code" => {
+                        eprintln!(); // Clear status line
+                        println!("{BOLD}{CYAN}╭─ scheme{RESET}");
+                        for code_line in content.lines() {
+                            println!("{CYAN}│{RESET} {code_line}");
+                        }
+                        println!("{BOLD}{CYAN}╰─{RESET}");
+                    }
+                    "result" => {
+                        println!("{GREEN}✔ Result:{RESET} {content}");
+                    }
+                    "repl-error" => {
+                        // Non-fatal REPL error: show it but CONTINUE listening for more events
+                        eprintln!(); // Clear status line
+                        eprintln!("{RED}✘ REPL Error:{RESET} {content}");
+                    }
+                    "final" => {
+                        eprintln!(); // Clear status line
+                        println!("\n{BOLD}Final Answer:{RESET} {content}\n");
+                        return Ok(());
+                    }
+                    "error" => {
+                        // Fatal Engine Error: show it and RETURN to prompt
+                        eprintln!(); // Clear status line
+                        eprintln!("{RED}✘ Engine Error:{RESET} {content}");
+                        return Ok(());
+                    }
+                    "info" => {
+                        println!("{CYAN}{content}{RESET}");
+                        return Ok(());
+                    }
+                    "env-list" => {
+                        println!("{BOLD}REPL Bindings:{RESET}");
+                        // Parse the alist from the second element
+                        if let Value::Cons(cdr) = cons.cdr() {
+                            print_env_bindings(cdr.car());
+                        }
+                        return Ok(());
+                    }
+                    "model-info" => {
+                        println!("{BOLD}Current model:{RESET} {content}");
+                        return Ok(());
+                    }
+                    _ => {
+                        println!("[{tag}] {content}");
+                    }
+                }
+            }
+            Ok(other) => {
+                println!("{other}");
+            }
+            Err(_) => {
+                println!("{trimmed}");
+            }
+        }
+    }
+}
+
+fn print_env_bindings(val: &Value) {
+    match val {
+        Value::Null => {
+            println!("  {DIM}(empty){RESET}");
+        }
+        Value::Cons(cons) => {
+            // Walk the alist
+            let mut current = Value::Cons(cons.clone());
+            while let Value::Cons(pair) = &current {
+                let entry = pair.car();
+                if let Value::Cons(kv) = entry {
+                    let key = kv.car();
+                    let val = kv.cdr();
+                    println!("  {CYAN}{key}{RESET} = {val}");
+                }
+                current = pair.cdr().clone();
+            }
+        }
+        _ => {
+            println!("  {val}");
+        }
+    }
+}
+
+fn connect_with_retry(path: &str) -> Result<UnixStream> {
+    for attempt in 1..=10 {
+        match UnixStream::connect(path) {
+            Ok(stream) => {
+                println!("{GREEN}[Connected to GAIA Engine]{RESET}");
+                return Ok(stream);
+            }
+            Err(_e) if attempt < 10 => {
+                eprintln!(
+                    "{YELLOW}[Waiting for server on {path}... (attempt {attempt}/10)]{RESET}"
+                );
+                std::thread::sleep(Duration::from_secs(2));
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "Failed to connect to {}: {}",
+                    path,
+                    e
+                ));
+            }
+        }
+    }
+    unreachable!()
+}
+
+fn print_help() {
+    println!("{BOLD}Available commands:{RESET}");
+    println!("  {CYAN}/help{RESET}              Show this help");
+    println!("  {CYAN}/eval <scheme>{RESET}     Execute Scheme code directly in REPL");
+    println!("  {CYAN}/env{RESET}               Show REPL environment bindings");
+    println!("  {CYAN}/clear{RESET}             Clear conversation history and REPL env");
+    println!("  {CYAN}/ask <query>{RESET}       One-shot question to AI (no RLM loop)");
+    println!("  {CYAN}/model{RESET}             Show current model");
+    println!("  {CYAN}/model <name>{RESET}      Switch to a different model");
+    println!("  {CYAN}/exit{RESET}              Quit GAIA CLI");
+    println!();
+    println!("  {DIM}<query>{RESET}             Start standard RLM investigation");
 }

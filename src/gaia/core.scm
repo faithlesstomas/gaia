@@ -71,10 +71,11 @@ You solve complex tasks by writing and executing GNU Guile Scheme code in a pers
 - `(get-recent-logs [lines] [priority])` — General logs. Priority: \"emerg\", \"err\", \"warning\", \"info\".
 - `(get-kernel-logs [lines] [since])` — Kernel logs (dmesg style).
 - LIMIT: All log tools are capped at 500 lines per call.
-- `(git-status)` — `git status` command (if you're in git project dir.)
-- `(git-diff [opt-path])` — `git diff` of [opt-path] or current dir if not given.
-- `(git-log [opt-count])` — Returns recent git history (oneline format). Default 5.
-- `(run-in-sandbox cmd)` — Executes a shell command inside an isolated Guix container (has coreutils, grep, sed, awk).
+- `(git-ls-files)` — Returns a LIST of strings (all tracked files). Use `(length (git-ls-files))` to count them.
+- `(run-in-sandbox cmd)` — Executes a shell command inside an isolated Guix container (has git, coreutils, grep, sed, awk).
+  Starts in the `/workspace` directory. Use for complex shell pipelines like `(run-in-sandbox \"ls | wc -l\")`.
+- SHELL PIPES: Shell pipes `|` and redirections `>` only work inside the `cmd` string of `run-in-sandbox`.
+  Example: `(run-in-sandbox \"ls | wc -l\")` is VALID. `(ls | wc -l)` is INVALID Scheme.
 
 # YOUR REPL ENVIRONMENT IS PRE-INITIALIZED WITH:
 1. A `context` variable — it is ALREADY DEFINED and contains your task data as a string.
@@ -103,13 +104,18 @@ You solve complex tasks by writing and executing GNU Guile Scheme code in a pers
 - CHEATSHEET: If you are repeatedly failing checks, read the common gotchas via `(read-file \"docs/guile-gotchas.md\")`.
 
 # HOW TO WRITE CODE
-Wrap your Guile Scheme code in a ```repl code block:
+CRITICAL: ALL code and tool calls (like `llm-query`) MUST be wrapped in a ```repl block!
+Think in STATE: Variables you define in one step survive to the next.
+Example of stateful reasoning:
+Step 1:
 ```repl
-(let loop ((files (list-files \"/workspace\"))
-           (count 0))
-  (if (null? files)
-      (display count)
-      (loop (cdr files) (+ count 1))))
+(define my-files (git-ls-files))
+(display (length my-files))
+```
+Step 2 (uses \"my-files\" from Step 1):
+```repl
+(define config-files (filter (lambda (f) (string-contains f \".yaml\")) my-files))
+(display config-files)
 ```
 
 The system will execute your code and return the output. You can then reason about the output and write more code.
@@ -500,6 +506,7 @@ or provide FINAL(answer) if you have the answer."
 
                                   (('error type msg)
                                    (let ((feedback (handle-error type msg depth)))
+                                      (when event-handler (event-handler `(repl-error ,feedback)))
                                      (display (string-append C-RED "\n[REPL] Runtime Error:\n" C-RESET feedback "\n"))
                                      (let ((exec-log `(("session_id" . ,session-id)
                                                        ("code" . ,code)
@@ -523,10 +530,12 @@ or provide FINAL(answer) if you have the answer."
                           answer))
 
                        ((and conf-val (>= conf-val CONFIDENCE-THRESHOLD))
+                        (when event-handler (event-handler `(final ,response-text)))
                         (display (string-append C-GREEN "\n[GAIA] ✓ High confidence (" (number->string conf-val) "%) - stopping." C-RESET "\n"))
                         response-text)
 
                        (else
+                        (when event-handler (event-handler `(final ,response-text)))
                         (display (string-append C-RED "\n[GAIA] ⚠ No actionable output. Treating as final answer (unless low confidence)." C-RESET "\n"))
                         response-text)))))))))))
 

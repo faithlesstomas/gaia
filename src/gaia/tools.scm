@@ -26,6 +26,7 @@
             get-boot-logs
             list-boots
             get-kernel-logs
+            git-ls-files
             run-in-sandbox))
 
 (define (guile-syntax-check code-string)
@@ -75,7 +76,12 @@
 
 
 (define (run-cmd-with-output cmd . args)
-  (let* ((pipe (apply open-pipe* OPEN_READ cmd args))
+  "Runs a command and returns its stdout and stderr merged."
+  (let* ((cmd-str (if (null? args) 
+                      cmd 
+                      (string-join (map (lambda (a) (format #f "~a" a)) (cons cmd args)) " ")))
+         ;; Use shell to merge stderr and stdout
+         (pipe (open-pipe (string-append cmd-str " 2>&1") OPEN_READ))
          (output (read-string pipe)))
     (close-pipe pipe)
     (or output "")))
@@ -119,6 +125,13 @@
   "Returns recent git history (oneline format). Default 5."
   (let ((count (if (null? opt-count) "5" (number->string (car opt-count)))))
     (run-cmd-with-output "git" "log" "--oneline" (string-append "-n" count))))
+
+(define (git-ls-files)
+  "Returns a list of all files tracked by git in the repository."
+  (let ((output (run-cmd-with-output "git" "ls-files")))
+    (if (string-null? output)
+        '()
+        (string-split (string-trim-both output) #\newline))))
 
 ;; --- Guix Tools ---
 
@@ -185,9 +198,11 @@
   "Executes a shell command inside an ephemeral Guix container.
 The container is isolated from the host system, without network access,
 and only the current workspace is mapped as /workspace.
-Available tools are limited to coreutils, bash, findutils, grep, sed, and gawk."
-  (let* ((workspace-path (getcwd)))
+Available tools include coreutils, git, bash, findutils, grep, sed, and gawk."
+  (let* ((workspace-path (getcwd))
+         ;; We use cd inside the container because guix shell doesn't have --workdir in all versions
+         (wrapped-cmd (string-append "cd /workspace && " cmd)))
     (run-cmd-with-output "guix" "shell" "--container"
                          (string-append "--share=" workspace-path "=/workspace")
-                         "coreutils" "bash" "findutils" "grep" "sed" "gawk"
-                         "--" "bash" "-c" cmd)))
+                         "coreutils" "git" "bash" "findutils" "grep" "sed" "gawk"
+                         "--" "bash" "-c" wrapped-cmd)))
