@@ -7,6 +7,8 @@ edition = "2021"
 anyhow = "1.0"
 lexpr = "0.2"
 rustyline = "14"
+syntect = "5"
+pulldown-cmark = "0.11"
 
 [[bin]]
 name = "gaia-cli"

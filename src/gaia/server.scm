@@ -3,12 +3,14 @@
   #:use-module (fibers channels)
   #:use-module (ice-9 match)
   #:use-module (ice-9 threads)
+  #:use-module (ice-9 ftw)
+  #:use-module (ice-9 rdelim)
   #:use-module (gaia core)
   #:use-module (gaia rlm-env)
   #:use-module (gaia config)
   #:use-module (gaia llm-client)
   #:use-module (gaia utils)
-  #:export (start-server))
+  #:export (start-server save-session load-session replay-history))
 
 (define (send-event client-socket event)
   "Write an S-expression event to client, flushing immediately."
@@ -16,104 +18,147 @@
   (newline client-socket)
   (force-output client-socket))
 
+(define (save-session session-id history)
+  (unless (file-exists? "sessions")
+    (mkdir "sessions"))
+  (let ((port (open-file (string-append "sessions/" session-id ".json") "w")))
+    (display (scm->json (list->vector history)) port)
+    (close-port port)))
+
+(define (load-session session-id)
+  (let ((path (string-append "sessions/" session-id ".json")))
+    (if (file-exists? path)
+        (let* ((port (open-file path "r"))
+               (data (read-string port)))
+          (close-port port)
+          (let ((res (json->scm data)))
+            (if (vector? res) (vector->list res) res)))
+        '())))
+
+(define (replay-history env history)
+  "Re-executes all code blocks found in the assistant's history to restore REPL state."
+  (let ((history-list (if (vector? history) (vector->list history) history)))
+    (display (format #f "[SESSION] Replaying ~a turns...\n" (length history-list)))
+    (for-each (lambda (turn)
+                (let ((role (or (assoc-ref turn 'role) (assoc-ref turn "role")))
+                      (content (or (assoc-ref turn 'content) (assoc-ref turn "content"))))
+                  (when (and role (string=? (format #f "~a" role) "assistant") content)
+                    (let ((code (or (extract-code content)
+                                    (if (or (string-prefix? "(" content)
+                                            (string-prefix? ";" content))
+                                        content #f))))
+                      (when code
+                        (display (format #f "[REPLAY] Executing: ~a\n" 
+                                         (if (> (string-length code) 50)
+                                             (string-append (substring code 0 47) "...")
+                                             code)))
+                        (rlm-eval! env code))))))
+              history-list)))
+
 (define (handle-client client-socket)
-  "Handles communication with a single CLI client.
-Maintains persistent REPL environment and conversation history."
-  (let loop ((env (make-rlm-env))
-             (history '())
-             (session-id (string-append "gaia-"
-                                        (number->string (current-time))
-                                        "-"
-                                        (number->string (random 10000)))))
-    (match (read client-socket)
-      ((? eof-object?)
-       (close-port client-socket))
-
-      ;; Standard RLM evaluation (sends task to AI agent loop)
-      (('eval task)
-       (let ((event-sink (lambda (event) (send-event client-socket event))))
-         (catch #t
-           (lambda ()
-             (let ((result (rlm-loop session-id task 0 history env
-                                     #:event-handler event-sink)))
-               (loop env
-                     (append history
-                             (list `(("role" . "user") ("content" . ,task))
-                                   `(("role" . "assistant") ("content" . ,result))))
-                     session-id)))
-           (lambda (key . args)
-             (let ((msg (format #f "Engine Error (~a): ~a" key args)))
-               (send-event client-socket `(error ,msg))
-               (loop env history session-id))))))
-
-      ;; Direct REPL code execution (/eval in CLI)
-      (('repl code)
-       (catch #t
-         (lambda ()
-           (match (rlm-eval! env code)
-             (('ok result)
-              (send-event client-socket `(result ,result)))
-             (('error type msg)
-              (send-event client-socket
-                          `(error ,(format #f "~a: ~a" type msg))))))
-         (lambda (key . args)
-           (send-event client-socket
-                       `(error ,(format #f "~a: ~a" key args)))))
-       (loop env history session-id))
-
-      ;; Show REPL environment bindings
-      (('env)
-       (let ((bindings (rlm-env-user-bindings env)))
-         (send-event client-socket `(env-list ,bindings)))
-       (loop env history session-id))
-
-      ;; Clear history and environment
-      (('clear)
-       (send-event client-socket '(info "History and environment cleared."))
-       (loop (make-rlm-env) '() session-id))
-
-      ;; Query current model
-      (('get-model)
-       (send-event client-socket
-                   `(model-info ,(get-config 'model)))
-       (loop env history session-id))
-
-      ;; Change model
-      (('set-model new-model)
-       (set-config! 'model new-model)
-       (send-event client-socket
-                   `(info ,(string-append "Model switched to: " new-model)))
-       (loop env history session-id))
-
-      ;; One-shot question (no RLM loop)
-      (('ask query)
-       (catch #t
-         (lambda ()
-           (let* ((response (chat-with-llm session-id query
-                                           (get-config 'model)
-                                           "You are a helpful Guile Scheme expert."
-                                           #:history history))
-                  (payload (assoc-ref response "payload"))
-                  (content (if payload
-                               (assoc-ref payload "content")
-                               "Error: No payload in response")))
-             (send-event client-socket `(final ,content))
-             (loop env
-                   (append history
-                           (list `(("role" . "user") ("content" . ,query))
-                                 `(("role" . "assistant") ("content" . ,content))))
-                   session-id)))
-         (lambda (key . args)
-           (send-event client-socket
-                       `(error ,(format #f "Ask Error (~a): ~a" key args)))
-           (loop env history session-id))))
-
-      (else
-       (send-event client-socket '(error "Unknown command"))
-       (loop env history session-id)))))
+  (let* ((event-sink (lambda (event) (send-event client-socket event)))
+         (first-msg (read client-socket))
+         (session-id (match first-msg
+                       (('session id) id)
+                       (_ (string-append "gaia-" (number->string (current-time))))))
+         (history (load-session session-id))
+         (env (make-rlm-env)))
+    (with-output-to-file ".last_session" (lambda () (display session-id)))
+    (when (not (null? history))
+      (display (string-append "[SESSION] Resuming session: " session-id "\n"))
+      (replay-history env history))
+    (let loop ((env env)
+               (history history)
+               (current-session-id session-id))
+      (let ((msg (read client-socket)))
+        (match msg
+          (('eval task)
+           (display (string-append "\n[GAIA] Agent Depth 0 (Step 1)...\n"))
+           (catch #t
+             (lambda ()
+               (let* ((res-pair (rlm-loop current-session-id task 0 history env #:event-handler event-sink))
+                      (answer (car res-pair))
+                      (updated-history (cdr res-pair)))
+                 (save-session current-session-id updated-history)
+                 (with-output-to-file ".last_session" (lambda () (display current-session-id)))
+                 (loop env updated-history current-session-id)))
+             (lambda (key . args)
+               (let ((err-msg (format #f "Engine Error (~a): ~a" key args)))
+                 (send-event client-socket `(error ,err-msg))
+                 (loop env history current-session-id)))))
+          (('repl code)
+           (display (string-append "\n[REPL] Executing: " code "\n"))
+           (catch #t
+             (lambda ()
+               (let* ((res (rlm-eval! env code))
+                      (res-str (format #f "~a" res))
+                      (updated-history (append history
+                                               (list `(("role" . "assistant") 
+                                                       ("content" . ,(string-append "```repl\n" code "\n```")))
+                                                     `(("role" . "user")
+                                                       ("content" . ,(string-append "Result:\n" res-str)))))))
+                 (save-session current-session-id updated-history)
+                 (send-event client-socket `(repl-result ,res-str))
+                 (loop env updated-history current-session-id)))
+             (lambda (key . args)
+               (send-event client-socket `(error (format #f "REPL Error (~a): ~a" key args)))
+               (loop env history current-session-id))))
+          (('env)
+           (let ((bindings (rlm-env-user-bindings env)))
+             (send-event client-socket `(env-list ,bindings))
+             (loop env history current-session-id)))
+          (('clear)
+           (display "[SESSION] Clearing history and environment.\n")
+           (save-session current-session-id '())
+           (loop (make-rlm-env) '() current-session-id))
+          (('get-model)
+           (send-event client-socket `(model-info (get-config 'model)))
+           (loop env history current-session-id))
+          (('set-model new-model)
+           (set-config! 'model new-model)
+           (send-event client-socket `(info (string-append "Model switched to: " new-model)))
+           (loop env history current-session-id))
+          (('ask query)
+           (catch #t
+             (lambda ()
+               (let* ((response (chat-with-llm current-session-id query
+                                               (get-config 'model)
+                                               "You are a helpful Guile Scheme expert."
+                                               #:history history))
+                      (payload (assoc-ref response "payload"))
+                      (content (if payload (assoc-ref payload "content") "Error: No payload")))
+                 (send-event client-socket `(final ,content))
+                 (let ((new-history (append history
+                                           (list `(("role" . "user") ("content" . ,query))
+                                                 `(("role" . "assistant") ("content" . ,content))))))
+                   (save-session current-session-id new-history)
+                   (loop env new-history current-session-id))))
+             (lambda (key . args)
+               (send-event client-socket `(error (format #f "Ask Error (~a): ~a" key args)))
+               (loop env history current-session-id))))
+          (('session new-id)
+           (display (string-append "[SESSION] Switching to: " new-id "\n"))
+           (let* ((new-history (load-session new-id))
+                  (new-env (make-rlm-env)))
+             (with-output-to-file ".last_session" (lambda () (display new-id)))
+             (replay-history new-env new-history)
+             (loop new-env new-history new-id)))
+          (('list-sessions)
+           (let ((sessions (if (file-exists? "sessions")
+                               (map (lambda (f) (substring f 0 (- (string-length f) 5)))
+                                    (filter (lambda (f) (string-suffix? ".json" f))
+                                            (scandir "sessions")))
+                               '())))
+             (send-event client-socket `(session-list ,sessions))
+             (loop env history current-session-id)))
+          (('get-history)
+           (send-event client-socket `(history-list ,history))
+           (loop env history current-session-id))
+          (_ 
+           (display "[GAIA] Client disconnected.\n")
+           (close-port client-socket)))))))
 
 (define (start-server path)
-  "Starts the GAIA Headless Engine on a UNIX socket."
   (load-config)
   (display (format #f "[GAIA] Config loaded. Model: ~a\n" (get-config 'model)))
   (when (file-exists? path) (delete-file path))
@@ -123,7 +168,6 @@ Maintains persistent REPL environment and conversation history."
     (bind server-socket addr)
     (listen server-socket 128)
     (display (string-append "[GAIA] Server listening on " path "\n"))
-
     (run-fibers
      (lambda ()
        (let loop ()

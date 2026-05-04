@@ -137,7 +137,7 @@
 
 (define (guix-search query)
   "Searches for Guix packages and returns a concise list of names."
-  (run-cmd-with-output "sh" "-c" (string-append "guix search " query " | grep '^name:' | head -n 20")))
+  (run-cmd-with-output "sh" "-c" (string-append "guix search " query " 2>/dev/null | grep '^name:' | head -n 20")))
 
 (define (guix-package-info pkg)
   "Shows Guix package details."

@@ -263,26 +263,34 @@ Prefers the LAST code block to support LLM self-correction patterns."
               #f))))
      (else #f))))
 
-(define (handle-error error-type message depth)
+(define (handle-error error-type message code depth)
   "Generates contextual feedback for errors."
-  (case error-type
-    ((syntax)
-     (string-append "Syntax Error in your Scheme code: " message "\nPlease check parentheses and syntax. Remember: use (use-modules ...) NOT require."))
-    ((permission)
+  (match error-type
+    ((or 'syntax 'parse-error 'syntax-error)
+     (let* ((analysis (analyze-parentheses code))
+            (hint (cdr analysis)))
+       (string-append "Syntax Error in your Scheme code: " message 
+                      (if hint (string-append "\n" hint) "")
+                      "\nPlease check parentheses and syntax. Remember: use (use-modules ...) NOT require.")))
+    ('permission
      (string-append "Security Violation: " message "\nYou must use only allowed primitives. Use the pre-loaded tools from (gaia tools) instead."))
-    ((runtime)
+    ('runtime
      (string-append "Runtime Error: " message "\nReview the logic and try debugging with display statements."))
-    (else
+    (_
      (string-append "Unknown Error: " message))))
 
 (define MAX-RECURSION-DEPTH 15)
 (define CONFIDENCE-THRESHOLD 95)
 (define thinking-enabled? #f) ;; Default thinking off
 
+(define (get-trajectory-file session-id)
+  (let ((env-file (getenv "GAIA_TRAJECTORIES_FILE")))
+    (if env-file
+        env-file
+        (string-append "trajectories-" session-id ".jsonl"))))
+
 (define* (rlm-loop session-id last-output depth history #:optional (env (make-rlm-env)) #:key (event-handler #f))
-  "The core RLM loop. Maintains a persistent environment across iterations.
-If env is provided, uses that environment; inaccesible otherwise creates a new one."
-  ;; Always inject/update llm-query and context for the current task
+  "The core RLM loop. Maintains a persistent environment across iterations."
   (rlm-inject! env 'llm-query
     (lambda (prompt)
       (let* ((sub-session (string-append session-id "-sub-" (number->string (random 1000000000))))
@@ -307,8 +315,7 @@ If env is provided, uses that environment; inaccesible otherwise creates a new o
                        (substring text (- len 100) len)))))
 
 (define (format-transcript transcript)
-  "Format transcript entries as a compact execution log.
-   Entries are (role . text) pairs. Skip 'original-task' marker entries."
+  "Format transcript entries as a compact execution log."
   (let ((step-num 0))
     (string-join
      (filter-map
@@ -367,11 +374,11 @@ If env is provided, uses that environment; inaccesible otherwise creates a new o
                       "\n\nContinue working on the original task. "
                       "Write your next ```repl code block or provide FINAL(answer).")))))
     (when event-handler (event-handler `(status ,(format #f "Agent Depth ~a (Step ~a)..." depth step))))
-    (check-interrupt!)  ;; Bail out immediately if Ctrl-C was pressed
+    (check-interrupt!)
     (if (> depth MAX-RECURSION-DEPTH)
         (begin
           (display "\n[GAIA] Max recursion depth reached. Returning current state.\n")
-          last-output)
+          (cons last-output history))
         (begin
           (display (string-append C-GREY "\n[GAIA] Agent Depth " (number->string depth) " (Step " (number->string step) ")..." C-RESET "\n"))
           (let* ((response (catch #t
@@ -380,15 +387,12 @@ If env is provided, uses that environment; inaccesible otherwise creates a new o
                                              #:think thinking-enabled?
                                              #:history history))
                             (lambda (key . args)
-                              ;; Direct user-interrupt from signal handler — propagate immediately
                               (when (eq? key 'user-interrupt) (apply throw key args))
-                              ;; System error (EINTR) during HTTP — check if caused by Ctrl+C
                               (when *interrupted*
                                 (set! *interrupted* #f)
                                 (throw 'user-interrupt))
-                              ;; Otherwise propagate original error
                               (apply throw key args))))
-                 (_ (check-interrupt!))  ;; Check flag after successful return too
+                 (_ (check-interrupt!))
                  (payload (assoc-ref response "payload"))
                  (response-text (if payload
                                     (assoc-ref payload "content")
@@ -401,7 +405,6 @@ If env is provided, uses that environment; inaccesible otherwise creates a new o
             (let ((final-sig (extract-final-signal response-text))
                   (conf-val (extract-confidence response-text)))
 
-              ;; Log interaction FIRST so reasoning trace is captured
               (let ((log-entry `(("session_id" . ,session-id)
                                  ("prompt" . ,prompt)
                                  ("input" . ,last-output)
@@ -410,12 +413,11 @@ If env is provided, uses that environment; inaccesible otherwise creates a new o
                                  ("timestamp" . ,(number->string (current-time)))
                                  ("confidence" . ,(if conf-val conf-val "null"))
                                  ("final_signal" . ,(if final-sig "true" "false")))))
-                (let ((port (open-file (or (getenv "GAIA_TRAJECTORIES_FILE") "trajectories.jsonl") "a")))
+                (let ((port (open-file (get-trajectory-file session-id) "a")))
                   (display (scm->json log-entry) port)
                   (newline port)
                   (close-port port)))
 
-              ;; Guard against empty responses from the model
               (if (string=? response-text "")
                   (begin
                     (display (string-append C-RED "\n[GAIA] Empty response from model. Retrying..." C-RESET "\n"))
@@ -430,7 +432,10 @@ If env is provided, uses that environment; inaccesible otherwise creates a new o
                       (rlm-loop-inner session-id
                                       "Your previous response was empty. Please write a ```repl code block to continue working on the task, \
 or provide FINAL(answer) if you have the answer."
-                        depth env history (+ step 1) retry-transcript #:event-handler event-handler)))
+                        depth env
+                        (append history
+                                (list `(("role" . "assistant") ("content" . "(empty response)"))))
+                        (+ step 1) retry-transcript #:event-handler event-handler)))
 
                   (let ((updated-transcript
                      (append transcript
@@ -445,99 +450,90 @@ or provide FINAL(answer) if you have the answer."
                   (when event-handler (event-handler `(thought ,reasoning-text)))
                   (display (string-append C-GREY "[GAIA] Thinking asynchronously... (See monitor)" C-RESET "\n")))
 
-                (let ((prose (strip-blocks response-text)))
+        (let ((prose (strip-blocks response-text)))
                   (when (> (string-length prose) 0)
                     (display (string-append C-BLUE "\n[GAIA] Analysis: " C-RESET (markdown->ansi prose) "\n"))))
 
                 (let ((action-code (extract-code response-text))
                       (action-delegate (extract-delegation response-text)))
                   (cond
-                       (action-delegate =>
-                        (lambda (delegation)
-                          (match delegation
-                            (('delegate goal context-str)
-                             (display (string-append C-BOLD C-YELLOW "\n[GAIA] Spawning Sub-Agent (Delegation):\n" C-RESET "Goal: " goal "\nContext: " context-str "\n"))
-                             (let* ((sub-session-id (string-append session-id "-sub-" (number->string (random 1000000000))))
-                                    (initial-input (string-append "GOAL: " goal "\nCONTEXT: " context-str))
-                                    (sub-result (rlm-loop sub-session-id initial-input (+ depth 1) history #:event-handler event-handler)))
-                               (display (string-append C-BOLD C-GREEN "\n[GAIA] Sub-Agent completed.\n" C-RESET "Result length: "
-                                                       (number->string (string-length sub-result)) " chars\n"))
-                               (if final-sig
-                                   (begin
-                                     (display (string-append C-GREEN "\n[GAIA] ✓ FINAL signal detected after sub-agent execution." C-RESET "\n"))
-                                     (let ((answer (match final-sig (('final ans) ans) (('final-var var) var) (_ "Sub-agent executed successfully"))))
-                                       (when event-handler (event-handler `(final ,answer)))
-                                       (display (string-append C-BOLD "[GAIA] Final Answer: " C-RESET (markdown->ansi answer) "\n"))
-                                       answer))
-                                   (rlm-loop-inner session-id (string-append "Sub-agent execution finished. Result: " sub-result)
-                                                   depth env history (+ step 1) updated-transcript #:event-handler event-handler))))
-                            (_
-                             (rlm-loop-inner session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")"
-                                             depth env history (+ step 1) updated-transcript #:event-handler event-handler)))))
+                   (action-delegate =>
+                    (lambda (delegation)
+                      (match delegation
+                        (('delegate goal context-str)
+                         (display (string-append C-BOLD C-YELLOW "\n[GAIA] Spawning Sub-Agent (Delegation):\n" C-RESET "Goal: " goal "\nContext: " context-str "\n"))
+                         (let* ((sub-session-id (string-append session-id "-sub-" (number->string (random 1000000000))))
+                                (initial-input (string-append "GOAL: " goal "\nCONTEXT: " context-str))
+                                (sub-res-pair (rlm-loop sub-session-id initial-input (+ depth 1)
+                                                      (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                                            `(("role" . "assistant") ("content" . ,response-text))))
+                                                      #:event-handler event-handler))
+                                (sub-result (car sub-res-pair)))
+                           (display (string-append C-BOLD C-GREEN "\n[GAIA] Sub-Agent completed.\n" C-RESET "Result length: "
+                                                   (number->string (string-length sub-result)) " chars\n"))
+                           (if final-sig
+                               (cons (match final-sig (('final ans) ans) (('final-var var) var) (_ "Sub-agent executed successfully"))
+                                     (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                           `(("role" . "assistant") ("content" . ,response-text)))))
+                               (rlm-loop-inner session-id (string-append "Sub-agent execution finished. Result: " sub-result)
+                                               depth env 
+                                               (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                                     `(("role" . "assistant") ("content" . ,response-text))))
+                                               (+ step 1) updated-transcript #:event-handler event-handler))))
+                        (_
+                         (rlm-loop-inner session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")"
+                                         depth env 
+                                         (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                               `(("role" . "assistant") ("content" . ,response-text))))
+                                         (+ step 1) updated-transcript #:event-handler event-handler)))))
 
-                       (action-code =>
-                        (lambda (code)
-                          (if (and code (> (string-length code) 0) (not (string=? code response-text)))
-                               (begin
-                                (when event-handler (event-handler `(code ,code)))
-                                (display (string-append C-BOLD C-CYAN "\n[GAIA] Executing Scheme Code:\n" C-RESET code "\n"))
-                                (match (rlm-execute env code)
-                                  (('ok result)
-                                   (when event-handler (event-handler `(result ,result)))
-                                   (display (string-append C-GREEN "\n[REPL] Success:\n" C-RESET result "\n"))
-                                   (let ((exec-log `(("session_id" . ,session-id)
-                                                     ("code" . ,code)
-                                                     ("result" . ,result)
-                                                     ("type" . "execution")
-                                                     ("status" . "success"))))
-                                     (let ((port (open-file (or (getenv "GAIA_TRAJECTORIES_FILE") "trajectories.jsonl") "a")))
-                                       (display (scm->json exec-log) port)
-                                       (newline port)
-                                       (close-port port)))
-                                   (if final-sig
-                                       (begin
-                                         (display (string-append C-GREEN "\n[GAIA] ✓ FINAL signal detected after successful code execution." C-RESET "\n"))
-                                         (let ((answer (match final-sig (('final ans) ans) (('final-var var) var) (_ "Code executed successfully"))))
-                                           (when event-handler (event-handler `(final ,answer)))
-                                           (display (string-append C-BOLD "[GAIA] Final Answer: " C-RESET (markdown->ansi answer) "\n"))
-                                           answer))
-                                       (rlm-loop-inner session-id (string-append "Code executed successfully. Result:\n" result)
-                                                       depth env history (+ step 1) updated-transcript #:event-handler event-handler)))
+                   (action-code =>
+                    (lambda (code)
+                      (if (and code (> (string-length code) 0) (not (string=? code response-text)))
+                          (begin
+                            (when event-handler (event-handler `(code ,code)))
+                            (display (string-append C-BOLD C-CYAN "\n[GAIA] Executing Scheme Code:\n" C-RESET code "\n"))
+                            (match (rlm-execute env code)
+                              (('ok result)
+                               (when event-handler (event-handler `(result ,result)))
+                               (display (string-append C-GREEN "\n[REPL] Success:\n" C-RESET result "\n"))
+                               (rlm-loop-inner session-id (string-append "Code executed successfully. Result:\n" result)
+                                               depth env
+                                               (append history
+                                                       (list `(("role" . "user") ("content" . ,last-output))
+                                                             `(("role" . "assistant") ("content" . ,response-text))))
+                                               (+ step 1) updated-transcript #:event-handler event-handler))
+                              (('error et msg . rest)
+                               (let ((feedback (handle-error et msg code depth)))
+                                 (when event-handler (event-handler `(repl-error ,feedback)))
+                                 (display (string-append C-RED "\n[REPL] Runtime Error:\n" C-RESET feedback "\n"))
+                                 (rlm-loop-inner session-id feedback depth env
+                                                 (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                                       `(("role" . "assistant") ("content" . ,response-text))))
+                                                 (+ step 1) updated-transcript #:event-handler event-handler)))))
+                          (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                                    `(("role" . "assistant") ("content" . ,response-text))))))))
 
-                                  (('error type msg)
-                                   (let ((feedback (handle-error type msg depth)))
-                                      (when event-handler (event-handler `(repl-error ,feedback)))
-                                     (display (string-append C-RED "\n[REPL] Runtime Error:\n" C-RESET feedback "\n"))
-                                     (let ((exec-log `(("session_id" . ,session-id)
-                                                       ("code" . ,code)
-                                                       ("result" . ,feedback)
-                                                       ("type" . "execution")
-                                                       ("status" . "error")
-                                                       ("error_type" . ,(symbol->string type)))))
-                                       (let ((port (open-file (or (getenv "GAIA_TRAJECTORIES_FILE") "trajectories.jsonl") "a")))
-                                         (display (scm->json exec-log) port)
-                                         (newline port)
-                                         (close-port port)))
-                                     (rlm-loop-inner session-id feedback depth env history (+ step 1) updated-transcript #:event-handler event-handler)))))
-                              response-text)))
+                   ((and final-sig (match final-sig (('final ans) ans) (('final-var var) var) (_ #f))) =>
+                    (lambda (answer)
+                      (when event-handler (event-handler `(final ,answer)))
+                      (if (equal? (car final-sig) 'final)
+                          (display (string-append C-BOLD "[GAIA] Final Answer: " C-RESET (markdown->ansi answer) "\n"))
+                          (display (string-append C-BOLD "[GAIA] Answer stored in: " C-RESET answer "\n")))
+                      (cons answer (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                         `(("role" . "assistant") ("content" . ,response-text)))))))
 
-                       ((and final-sig (match final-sig (('final ans) ans) (('final-var var) var) (_ #f))) =>
-                        (lambda (answer)
-                          (when event-handler (event-handler `(final ,answer)))
-                          (if (equal? (car final-sig) 'final)
-                              (display (string-append C-BOLD "[GAIA] Final Answer: " C-RESET (markdown->ansi answer) "\n"))
-                              (display (string-append C-BOLD "[GAIA] Answer stored in: " C-RESET answer "\n")))
-                          answer))
+                   ((and conf-val (>= conf-val CONFIDENCE-THRESHOLD))
+                    (when event-handler (event-handler `(final ,response-text)))
+                    (display (string-append C-GREEN "\n[GAIA] ✓ High confidence (" (number->string conf-val) "%) - stopping." C-RESET "\n"))
+                    (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                              `(("role" . "assistant") ("content" . ,response-text))))))
 
-                       ((and conf-val (>= conf-val CONFIDENCE-THRESHOLD))
-                        (when event-handler (event-handler `(final ,response-text)))
-                        (display (string-append C-GREEN "\n[GAIA] ✓ High confidence (" (number->string conf-val) "%) - stopping." C-RESET "\n"))
-                        response-text)
-
-                       (else
-                        (when event-handler (event-handler `(final ,response-text)))
-                        (display (string-append C-RED "\n[GAIA] ⚠ No actionable output. Treating as final answer (unless low confidence)." C-RESET "\n"))
-                        response-text)))))))))))
+                   (else
+                    (when event-handler (event-handler `(final ,response-text)))
+                    (display (string-append C-RED "\n[GAIA] ⚠ No actionable output. Treating as final answer (unless low confidence)." C-RESET "\n"))
+                    (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                              `(("role" . "assistant") ("content" . ,response-text))))))))))))))))
 
 (define (handle-command input session-id history env)
   "Parses and executes meta-commands or delegates to RLM.
@@ -668,10 +664,10 @@ Returns (list updated-history updated-env should-continue?)"
 
    ;; Standard RLM Loop
    (else
-    (let ((answer (rlm-loop session-id input 0 history env #:event-handler #f)))
-      (list (append history (list `(("role" . "user") ("content" . ,input))
-                                  `(("role" . "assistant") ("content" . ,answer))))
-            env #t)))))
+   (let* ((res-pair (rlm-loop session-id input 0 history env #:event-handler #f))
+          (answer (car res-pair))
+          (new-history (cdr res-pair)))
+     (list new-history env #t)))))
 
 (define (start-gaia . args)
   (activate-readline)

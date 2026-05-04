@@ -8,7 +8,8 @@
             rlm-inject!
             rlm-env-history
             rlm-env-module
-            rlm-env-user-bindings))
+            rlm-env-user-bindings
+            analyze-parentheses))
 
 ;;; --- RLM Environment ---
 ;;;

@@ -40,7 +40,7 @@
         (initial-prompt (format #f "There is a large file named '~a' in the current directory. It is ~aMB and contains a secret key hidden somewhere in the text. The key starts with 'GAIA_SECRET_KEY_'. Use search-file to find the line containing it, extract the key, and return it using FINAL()." HAYSTACK-FILE FILE-SIZE-MB)))
 
     ;; Run RLM Loop
-    (let ((result (rlm-loop session-id initial-prompt 0 '())))
+    (let ((result (car (rlm-loop session-id initial-prompt 0 '()))))
       (display (format #f "\n[BENCHMARK] RLM returned: ~a\n" result))
 
       ;; Check if the result contains the needle

@@ -121,7 +121,7 @@ Step 3 — when found, return with FINAL(the_key)."))
         (display (format #f "[S-NIAH] Starting RLM benchmark...\n[S-NIAH] Prompt length: ~a chars\n" (string-length prompt)))
 
         ;; Run RLM loop with pre-configured environment
-        (let ((result (rlm-loop session-id prompt 0 '() env)))
+        (let ((result (car (rlm-loop session-id prompt 0 '() env))))
           (display (format #f "\n[S-NIAH] RLM returned: ~a\n" result))
 
           ;; Evaluate result

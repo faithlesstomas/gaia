@@ -43,9 +43,11 @@
   (let* ((initial-history '())
          (result ((@@ (gaia core) handle-command) "run task" "test-session" initial-history (make-rlm-env)))
          (new-history (car result)))
+    ;; history should have user: "run task" and assistant: "The result is FINAL(Verified Answer)"
     (test-equal "history updated after RLM loop" 2 (length new-history))
-    ;; Sprawdzamy czy "Verified Answer" trafiło do historii
-    (test-equal "captured answer matches mock" "Verified Answer" (assoc-ref (last new-history) "content"))))
+    ;; Sprawdzamy czy "Verified Answer" trafiło do historii (as part of the assistant response)
+    (test-assert "captured answer is in history" 
+      (string-contains (assoc-ref (last new-history) "content") "Verified Answer"))))
 
 ;; --- Test 4: Propagacja historii do rlm-loop-inner ---
 (test-group "rlm-loop-history-propagation"
@@ -58,9 +60,9 @@
   (let* ((test-history '((("role" . "user") ("content" . "context"))))
          (rlm-inner (@@ (gaia core) rlm-loop-inner))
          (env (make-rlm-env))
-         (answer (rlm-inner "test-session" "task" 0 env test-history 1 '())))
+         (res-pair (rlm-inner "test-session" "task" 0 env test-history 1 '())))
     (test-assert "history reached chat-with-llm via rlm-loop-inner"
-      (string-contains answer "FOUND_HISTORY"))))
+      (string-contains (car res-pair) "FOUND_HISTORY"))))
 
 ;; --- Test 5: Meta-komenda /env ---
 (test-group "meta-env"

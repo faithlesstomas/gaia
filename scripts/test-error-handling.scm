@@ -32,12 +32,12 @@
 (define handle-error (@@ (gaia core) handle-error))
 
 (test-assert "Handle Syntax Error"
-  (string-contains (handle-error 'syntax "Bad paren" 0) "Syntax Error"))
+  (string-contains (handle-error 'syntax "Bad paren" "(define x" 0) "Syntax Error"))
 
 (test-assert "Handle Permission Error"
-  (string-contains (handle-error 'permission "Don't use system" 0) "Security Violation"))
+  (string-contains (handle-error 'permission "Don't use system" "(system 'ls)" 0) "Security Violation"))
 
 (test-assert "Handle Runtime Error"
-  (string-contains (handle-error 'runtime "Division by zero" 0) "Runtime Error"))
+  (string-contains (handle-error 'runtime "Division by zero" "(/ 1 0)" 0) "Runtime Error"))
 
 (test-end "core-error-handling")

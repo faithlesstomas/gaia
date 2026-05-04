@@ -52,6 +52,6 @@
 ;; Actually, to properly test rlm-loop which is internal, we should probably temporarily export it or use (@@ (gaia core) rlm-loop).
 
 (display "[TEST] Invoking rlm-loop...\n")
-((@@ (gaia core) rlm-loop) "test-session-1" "Start Task" 0 '())
+(car ((@@ (gaia core) rlm-loop) "test-session-1" "Start Task" 0 '()))
 
 (display "[TEST] Finished.\n")

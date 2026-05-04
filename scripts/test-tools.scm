@@ -85,6 +85,7 @@
 ;; We just verify it doesn't crash structurally.
 (test-assert "guix-search"
   (let ((res (run-safe-code '(guix-search "guile"))))
+    (display (format #f "Guix-search Result: ~s\n" res))
     (string? res)))
 
 ;; 13. Test search-guile-manual

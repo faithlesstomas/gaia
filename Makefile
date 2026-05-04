@@ -18,7 +18,11 @@ run: llm-server
 repl:
 	$(GUIX_SHELL) guile -L src
 
-check: test-units test-tools test-rlm-env
+check: test-units test-tools test-rlm-env test-sessions test-meta-commands
+
+test-meta-commands:
+	@echo "Running GAIA meta-command integration tests..."
+	$(GUIX_SHELL) guile -L src tests/test-meta-commands.scm
 
 test-units:
 	@echo "Running core unit tests..."
@@ -37,6 +41,10 @@ test-tools:
 test-rlm-env:
 	@echo "Running RLM environment unit tests..."
 	$(GUIX_SHELL) guile -L src scripts/test-rlm-env.scm
+
+test-sessions:
+	@echo "Running GAIA session management unit tests..."
+	$(GUIX_SHELL) guile -L src -L tests tests/test-sessions.scm
 
 llm-server:
 	@if nc -z localhost 4000 2>/dev/null; then \
@@ -97,7 +105,7 @@ monitor:
 
 client:
 	@echo "Building and running GAIA Rust Client..."
-	cd src/gaia-cli && guix shell -m ../../guix.scm -- cargo run
+	$(GUIX_SHELL) cargo run --manifest-path src/gaia-cli/Cargo.toml
 
 server:
 	@echo "Starting GAIA Headless Server..."
