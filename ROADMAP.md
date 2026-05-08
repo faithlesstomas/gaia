@@ -1,6 +1,6 @@
 # GAIA Roadmap
 
-> *Last updated: 2026-05-01*
+> *Last updated: 2026-05-08*
 >
 > This document tracks the development plan for the GAIA (GNU AI Assistant) project.
 > For an introduction to the project, see [README.md](README.md).
@@ -73,6 +73,10 @@ Hardening the agentic loop to handle the "parenthesis blindness" of smaller mode
 - [ ] **G-Expressions ("Context Teleportation")** — Use GNU Guix's G-expressions (`#~`) to serialize variable contexts and modules
   when spawning sub-agents, solving the data transfer problem in `delegate` blocks.
 - [ ] **The Self-Modifying Agent** — Allow GAIA to refactor its own `rlm-loop` at runtime by treating the loop logic as a mutable S-expression.
+- [ ] **Capability-Based Security:** Transition from the current static AST whitelisting to a granular, 
+  object-capability model for the RLM environment, ensuring safer and more fine-grained resource access.
+- [ ] **Semantic Texinfo Navigation:** Upgrade `search-guile-manual` to use semantic/vector indexing across all GNU Info manuals 
+  for precise documentation retrieval and citation by the agent.
 
 ---
 
@@ -144,16 +148,64 @@ Evolving GAIA from a terminal utility into a deeply integrated OS assistant, uti
 
 ---
 
-## Phase 6 — The Ultimate Vision (GAIA OS & Advanced Research)
+<!-- ## Phase 6 — The Ultimate Vision (GAIA OS & Advanced Research) -->
+
+<!-- Transforming GAIA into a standalone, AI-first operating environment and exploring cutting-edge inference architectures. -->
+
+<!-- - [ ] **Intent-Driven Wayland Compositor:** Utilize the `smithay` library (Rust) to build a custom window manager where the RLM engine arranges workspaces dynamically based on user intent. -->
+<!-- - [ ] **Guix System OS Integration:** Execute AI-generated code in true `guix shell --container` ephemeral environments for bit-reproducible isolation at the OS level. -->
+<!-- - [ ] **Tiny Recursive Model (TRM):** Explore recursive architectures ([arxiv:2510.04871](https://arxiv.org/abs/2510.04871)) for drastically reduced VRAM requirements via looped layer matrices. -->
+<!-- - [ ] **MLIR/IREE Compilation:** Compile trained models to optimized hardware-specific artifacts for inference without PyTorch overhead. See: MLIR, IREE, TVM. -->
+<!-- - [ ] **RelayLLM (Token-Level Collaboration):** Train an SLM (Small Language Model) controller using GRPO to generate tokens and call a "Teacher" LLM only for difficult reasoning steps via a `<call>` command. -->
+<!-- - [ ] **FusionRoute (Multi-Expert Routing):** Implement a routing layer in the Headless Server that selects the best specialized expert per token and adds a complementary logit to stabilize output. -->
+
+## Phase 6 — The Ultimate Vision (GAIA OS & System Orchestration)
 
 Transforming GAIA into a standalone, AI-first operating environment and exploring cutting-edge inference architectures.
 
-- [ ] **Intent-Driven Wayland Compositor:** Utilize the `smithay` library (Rust) to build a custom window manager where the RLM engine arranges workspaces dynamically based on user intent.
-- [ ] **Guix System OS Integration:** Execute AI-generated code in true `guix shell --container` ephemeral environments for bit-reproducible isolation at the OS level.
-- [ ] **Tiny Recursive Model (TRM):** Explore recursive architectures ([arxiv:2510.04871](https://arxiv.org/abs/2510.04871)) for drastically reduced VRAM requirements via looped layer matrices.
-- [ ] **MLIR/IREE Compilation:** Compile trained models to optimized hardware-specific artifacts for inference without PyTorch overhead. See: MLIR, IREE, TVM.
-- [ ] **RelayLLM (Token-Level Collaboration):** Train an SLM (Small Language Model) controller using GRPO to generate tokens and call a "Teacher" LLM only for difficult reasoning steps via a `<call>` command.
-- [ ] **FusionRoute (Multi-Expert Routing):** Implement a routing layer in the Headless Server that selects the best specialized expert per token and adds a complementary logit to stabilize output.
+- [ ] **Intent-Driven Wayland Compositor:** Utilize the `smithay` library (Rust) to build a custom window manager 
+  where the RLM engine arranges workspaces dynamically based on user intent.
+- [ ] **Transactional OS Self-Healing:** Leverage GNU Guix's rollback capabilities alongside Shepherd Service Orchestration. 
+  Allow the agent to monitor crashing system services via Shepherd API, safely experiment with configuration patches, 
+  and automatically rollback if the system becomes unstable.
+- [ ] **Guix System OS Integration & Ad-hoc Science:** Execute AI-generated code in true `guix shell --container` ephemeral environments. 
+  Dynamically generate Guix manifests to spin up bit-reproducible sandboxes with specific scientific libraries on-the-fly.
+- [ ] **Tiny Recursive Model (TRM) & MLIR/IREE:** Explore recursive architectures (arxiv:2510.04871) for drastically reduced VRAM. 
+  Compile trained models to optimized hardware-specific artifacts using MLIR/IREE to bypass PyTorch overhead.
+- [ ] **RelayLLM & FusionRoute:** Implement token-level collaboration and multi-expert routing layers in the Headless Server.
+
+
+## Phase 7 — Neuro-Symbolic Mathematics & The Automated Scientist
+
+Transforming GAIA into a rigorous mathematical and scientific researcher capable of formal hypothesis generation, reproducible experimentation, and theorem proving.
+
+- [ ] **Scientific DSL & Dimensional Analysis:** Develop custom Guile macros tailored for researchers (e.g., physics, cosmology). 
+  Integrate physical unit systems directly into `(gaia tools)` to prevent dimensional errors in LLM-generated scientific code.
+- [ ] **Data Provenance Engine:** Implement automated cryptographic hashing and logging of all file/data access by the agent, 
+  creating a verifiable "Chain of Evidence" for all research outputs.
+- [ ] **Formal Verification Bridges (SMT-LIB & Lean 4 / Coq):** Equip the agent with tools to generate SMT-LIB/Z3 specifications from Scheme code 
+  to mathematically prove algorithm correctness. Retain an integration path to Lean 4 for formal mathematical theorem proving.
+- [ ] **Adversarial Peer-Review Protocol:** Implement a multi-agent loop where a "Challenger" LLM attempts to logically falsify or find edge-cases 
+  in the "Proposer" LLM's hypotheses before finalizing the output.
+- [ ] **Computational Offloading:** Leverage `guix copy` and remote REPLs to allow the local GAIA agent to orchestrate and delegate heavy numerical 
+  simulations to high-performance computing clusters.
+- [ ] **Literate Research Export:** Automatically compile successful agent trajectories, including code, 
+  reasoning paths, and generated data plots, into reproducible Org-mode or LaTeX research reports.
+
+
+<!-- ## Phase 7 — Neuro-Symbolic Mathematics & Formal Verification (The AI Scientist) -->
+
+<!-- Transforming GAIA into a rigorous mathematical and scientific researcher capable of formal hypothesis generation and theorem proving.  -->
+<!-- We are exploring a hybrid approach, keeping multiple paths open to find the ultimate synergy between LLM intuition and absolute mathematical rigor: -->
+
+<!-- - [ ] **External Formal Tooling (Lean 4 / Coq Integration):** Add a `run-lean-proof` tool to `tools.scm`. Allow the RLM loop to generate Lean code,  -->
+<!--   compile it within a reproducible Guix container, and use the strict compiler feedback to self-correct its mathematical intuition via the standard RLM error-handling pipeline. -->
+<!-- - [ ] **Native Lisp Prover (Metamath/Symbolic Engine):** Implement a lightweight, ultra-fast symbolic verifier directly in GNU Guile (inspired by Metamath).  -->
+<!--   This leverages Guile's homoiconicity for rapid pattern matching, AST manipulation, and logical substitution without the overhead of an external compiler. -->
+<!-- - [ ] **Scientific DSL (Domain Specific Language):** Develop a custom set of Guile macros tailored for researchers (e.g., cosmology, physics, numerical analysis).  -->
+<!--   This DSL will bridge heavy numerical computations (C/C++) with symbolic logic, allowing GAIA to programmatically formulate and test algebraic hypotheses based on simulation data. -->
+<!-- - [ ] **The Hybrid Pipeline:** Combine the above strategies. GAIA uses the DSL to interact with the scientist, performs quick logical sanity checks via the Native Guile Prover,  -->
+<!--   and finally transpiles the theorems into Lean 4 for undisputed formal verification. -->
 
 ---
 
@@ -163,3 +215,4 @@ Transforming GAIA into a standalone, AI-first operating environment and explorin
 - RelayLLM: https://arxiv.org/pdf/2601.05167
 - FusionRoute: https://arxiv.org/pdf/2601.05106
 - TRM: https://arxiv.org/abs/2510.04871 ([source](https://github.com/SamsungSAILMontreal/TinyRecursiveModels))
+
