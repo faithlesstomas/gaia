@@ -89,10 +89,9 @@ Transition from monolith to a modern client-server architecture inspired by tool
   calls and communicate via local UNIX Sockets.
 - [ ] **Response Streaming** — Switch to character-by-character streaming from LiteLLM.
   Stream thoughts (`<|think|>`) and response tokens in real-time to the Rust client.
-- [ ] **Native CLI Client (Rust + `ratatui`)** — Build a fast, native terminal client with `rustyline` for rich input,
-  `pulldown_cmark` for Markdown rendering, and asynchronous status updates.
-- [ ] **JSON-RPC Protocol over UNIX Sockets** — Define a lightweight communication protocol
-  to support `eval` requests, `event` streams (tokens, thoughts), and `interrupt` signals.
+- [ ] **Native CLI Client (Rust)** — Build a fast, native terminal client using the "scrollback" REPL model with `rustyline` for rich input (history, auto-complete), `pulldown_cmark` for Markdown rendering, and asynchronous status updates, replacing the older TUI concepts.
+- [ ] **S-expression Protocol over UNIX Sockets** — Define a lightweight communication protocol based on Scheme S-expressions
+  to support `eval` requests, `event` streams (tokens, thoughts), and `interrupt` signals, natively parsing them in Rust via `lexpr`.
 - [ ] **Human-in-the-Loop (HITL) Sandbox** — Implement an interactive permission system
   in the Rust client to intercept risky AST-detected operations (e.g., `delete-file`).
 - [ ] **Auto-Scaffolding** — On agent startup in a directory, silently run a lightweight `(list-files)`

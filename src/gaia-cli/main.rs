@@ -1,7 +1,7 @@
 use anyhow::Result;
 use lexpr::Value;
 use rustyline::error::ReadlineError;
-use rustyline::{DefaultEditor, Editor};
+use rustyline::DefaultEditor;
 use std::io::BufReader;
 use std::os::unix::net::UnixStream;
 
@@ -10,7 +10,7 @@ mod protocol;
 mod render;
 
 use crate::connection::{connect_with_retry, SOCKET_PATH};
-use crate::protocol::{receive_event, send_sexp};
+use crate::protocol::send_sexp;
 use crate::render::*;
 
 enum Action {
@@ -118,6 +118,8 @@ fn dispatch(
                 println!("  /eval <scheme>   - Execute Scheme code directly in REPL");
                 println!("  /ask <query>     - Ask a one-off question to AI (no recursion)");
                 println!("  /model [name]     - Show or change the active LLM model");
+                println!("  /models           - List available models");
+                println!("  /thinking [on|off]- Enable or disable reasoning mode");
                 Ok(Action::Continue)
             }
             "/exit" | "/quit" => Ok(Action::Exit),
@@ -187,6 +189,22 @@ fn dispatch(
                 }
                 Ok(Action::Continue)
             }
+            "/models" => {
+                send_sexp(stream, &Value::list(vec![Value::symbol("list-models")]))?;
+                receive_events(reader)?;
+                Ok(Action::Continue)
+            }
+            "/thinking" => {
+                if parts.len() > 1 {
+                    let state = parts[1];
+                    send_sexp(stream, &Value::list(vec![Value::symbol("set-thinking"), Value::string(state.to_string())]))?;
+                    println!("{}[SESSION] Thinking mode set to: {}{}", YELLOW, state, RESET);
+                } else {
+                    send_sexp(stream, &Value::list(vec![Value::symbol("get-thinking")]))?;
+                    receive_events(reader)?;
+                }
+                Ok(Action::Continue)
+            }
             _ => {
                 print_error(&format!("Unknown command: {}", cmd));
                 Ok(Action::Continue)
@@ -205,176 +223,122 @@ fn dispatch(
 
 fn receive_events(reader: &mut BufReader<UnixStream>) -> Result<()> {
     loop {
-        match receive_event(reader)? {
-            Some(Value::Cons(cons)) => {
-                let tag = cons.car().as_symbol().unwrap_or("unknown");
-                let cdr = cons.cdr();
+        match protocol::receive_event(reader)? {
+            Some(event) => {
+                if let Value::Cons(cons) = &event {
+                    let tag = cons.car().as_symbol().unwrap_or("");
+                    let cdr = cons.cdr();
 
-                match tag {
-                    "status" => {
-                        if let Value::Cons(c) = cdr {
-                            if let Some(msg) = c.car().as_str() {
-                                print_status(msg);
+                    match tag {
+                        "status" => {
+                            if let Value::Cons(c) = cdr {
+                                if let Some(msg) = c.car().as_str() {
+                                    print_status(msg);
+                                }
                             }
                         }
-                    }
-                    "thought" => {
-                        if let Value::Cons(c) = cdr {
-                            if let Some(msg) = c.car().as_str() {
-                                print!("{DIM}");
-                                print_markdown(msg);
-                                print!("{RESET}");
+                        "thought" => {
+                            if let Value::Cons(c) = cdr {
+                                if let Some(msg) = c.car().as_str() {
+                                    print!("{DIM}");
+                                    print_markdown(msg);
+                                    print!("{RESET}");
+                                }
                             }
                         }
-                    }
-                    "code" => {
-                        if let Value::Cons(c) = cdr {
-                            if let Some(code) = c.car().as_str() {
-                                print_code(code);
+                        "result" => {
+                            if let Value::Cons(c) = cdr {
+                                if let Some(res) = c.car().as_str() {
+                                    print_result(&format!("✔ Result: {}", res));
+                                }
                             }
                         }
-                    }
-                    "result" => {
-                        if let Value::Cons(c) = cdr {
-                            if let Some(res) = c.car().as_str() {
-                                print_result(&format!("✔ Result: {}", res));
+                        "repl-result" => {
+                            if let Value::Cons(c) = cdr {
+                                if let Some(res) = c.car().as_str() {
+                                    print_result(&format!("✔ Result: {}", res));
+                                }
                             }
+                            return Ok(()); // Terminal for /eval
                         }
-                    }
-                    "repl-result" => {
-                        if let Value::Cons(c) = cdr {
-                            if let Some(res) = c.car().as_str() {
-                                print_result(&format!("✔ Result: {}", res));
+                        "final" => {
+                            if let Value::Cons(c) = cdr {
+                                if let Some(ans) = c.car().as_str() {
+                                    eprintln!(); // Clear status
+                                    println!("\n{BOLD}Final Answer:{RESET}");
+                                    print_markdown(ans);
+                                }
                             }
+                            return Ok(()); // Terminal for /eval (ask)
                         }
-                        return Ok(());
-                    }
-                    "final" => {
-                        if let Value::Cons(c) = cdr {
-                            if let Some(ans) = c.car().as_str() {
-                                eprintln!(); // Clear status
-                                println!("\n{BOLD}Final Answer:{RESET}");
-                                print_markdown(ans);
+                        "session-list" => {
+                            println!("{BOLD}Available Sessions:{RESET}");
+                            if let Value::Cons(c) = cdr {
+                                print_list(c.car());
                             }
+                            return Ok(()); // Terminal for /sessions
                         }
-                        return Ok(());
-                    }
-                    "error" => {
-                        if let Value::Cons(c) = cdr {
-                            if let Some(err) = c.car().as_str() {
-                                eprintln!(); // Clear status
-                                print_error(&format!("\n✗ Error: {}\n", err));
+                        "history-list" => {
+                            println!("\n{BOLD}--- Conversation History ---\n{RESET}");
+                            if let Value::Cons(c) = cdr {
+                                print_history(c.car());
                             }
+                            println!("\n{BOLD}--- End of History ---\n{RESET}");
+                            return Ok(()); // Terminal for /history
                         }
-                        return Ok(());
-                    }
-                    "env-list" => {
-                        println!("{BOLD}REPL Bindings:{RESET}");
-                        if let Value::Cons(c) = cdr {
-                            print_env_bindings(c.car());
-                        }
-                        return Ok(());
-                    }
-                    "session-list" => {
-                        println!("{BOLD}Available Sessions:{RESET}");
-                        if let Value::Cons(c) = cdr {
-                            print_list(c.car());
-                        }
-                        return Ok(());
-                    }
-                    "history-list" => {
-                        println!("\n{BOLD}--- Conversation History ---\n{RESET}");
-                        if let Value::Cons(c) = cdr {
-                            print_history(c.car());
-                        }
-                        println!("\n{BOLD}--- End of History ---\n{RESET}");
-                        return Ok(());
-                    }
-                    "model-info" => {
-                        if let Value::Cons(c) = cdr {
-                            if let Some(model) = c.car().as_str() {
-                                println!("{BOLD}Active Model:{RESET} {}", model);
+                        "env-list" => {
+                            println!("{BOLD}REPL Bindings:{RESET}");
+                            if let Value::Cons(c) = cdr {
+                                print_env_bindings(c.car());
                             }
+                            return Ok(()); // Terminal for /env
                         }
-                        return Ok(());
-                    }
-                    _ => {
-                        // Unknown tag
+                        "model-info" => {
+                            if let Value::Cons(c) = cdr {
+                                if let Some(model) = c.car().as_str() {
+                                    println!("{BOLD}Active Model:{RESET} {}", model);
+                                }
+                            }
+                            return Ok(()); // Terminal for /model
+                        }
+                        "models-list" => {
+                            println!("{BOLD}Available Models:{RESET}");
+                            if let Value::Cons(c) = cdr {
+                                print_list(c.car());
+                            }
+                            return Ok(()); // Terminal for /models
+                        }
+                        "thinking-info" => {
+                            if let Value::Cons(c) = cdr {
+                                if let Some(state) = c.car().as_str() {
+                                    println!("{BOLD}Thinking Mode:{RESET} {}", state);
+                                }
+                            }
+                            return Ok(()); // Terminal for /thinking
+                        }
+                        "info" => {
+                            if let Value::Cons(c) = cdr {
+                                if let Some(msg) = c.car().as_str() {
+                                    println!("{}Info: {}{}", CYAN, msg, RESET);
+                                }
+                            }
+                            return Ok(()); // Terminal for general info responses
+                        }
+                        "error" => {
+                            if let Value::Cons(c) = cdr {
+                                if let Some(msg) = c.car().as_str() {
+                                    print_error(&format!("Error: {}", msg));
+                                }
+                            }
+                            return Ok(()); // Terminal for errors
+                        }
+                        _ => {
+                            // Unknown tag, just continue
+                        }
                     }
                 }
             }
-            None => break,
-            _ => {}
+            None => return Ok(()), // EOF
         }
     }
-    Ok(())
-}
-
-fn print_history(val: &Value) {
-    match val {
-        Value::Cons(cons) => {
-            let mut current = Value::Cons(cons.clone());
-            while let Value::Cons(pair) = current {
-                print_turn(pair.car());
-                current = pair.cdr().clone();
-            }
-        }
-        Value::Vector(v) => {
-            for turn in v {
-                print_turn(turn);
-            }
-        }
-        _ => {
-            if !val.is_null() {
-                println!("{}Unexpected history format: {:?}{}", RED, val, RESET);
-            }
-        }
-    }
-}
-
-fn print_turn(turn: &Value) {
-    let role = get_assoc(turn, "role").unwrap_or("unknown".to_string());
-    let content = get_assoc(turn, "content").unwrap_or("".to_string());
-    
-    let color = if role == "user" { CYAN } else { RESET };
-    println!("{}{}:{}{}", BOLD, role.to_uppercase(), RESET, color);
-    println!("{}{}", content, RESET);
-    println!("{}{}{}", DIM, "-".repeat(40), RESET);
-}
-
-fn get_assoc(alist: &Value, key: &str) -> Option<String> {
-    match alist {
-        Value::Cons(cons) => {
-            let mut current = Value::Cons(cons.clone());
-            while let Value::Cons(pair) = current {
-                let entry = pair.car();
-                if let Value::Cons(kv) = entry {
-                    let k = kv.car();
-                    if k.as_symbol() == Some(key) || k.as_str() == Some(key) {
-                        return match kv.cdr() {
-                            Value::String(s) => Some(s.to_string()),
-                            v => Some(format!("{}", v)),
-                        };
-                    }
-                }
-                current = pair.cdr().clone();
-            }
-        }
-        Value::Vector(v) => {
-            // Some JSON parsers return vector of pairs for objects? Unlikely here but possible.
-            for entry in v {
-                if let Value::Cons(kv) = entry {
-                    let k = kv.car();
-                    if k.as_symbol() == Some(key) || k.as_str() == Some(key) {
-                        return match kv.cdr() {
-                            Value::String(s) => Some(s.to_string()),
-                            v => Some(format!("{}", v)),
-                        };
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-    None
 }
