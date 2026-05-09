@@ -1,8 +1,4 @@
 use lexpr::Value;
-use syntect::easy::HighlightLines;
-use syntect::parsing::SyntaxSet;
-use syntect::highlighting::{ThemeSet, Style};
-use syntect::util::as_24_bit_terminal_escaped;
 use pulldown_cmark::{Parser, Event, Tag, TagEnd};
 
 pub const BOLD: &str = "\x1b[1m";
@@ -25,24 +21,45 @@ pub fn print_error(msg: &str) {
     println!("{}{}{}", RED, msg, RESET);
 }
 
-pub fn print_code(code: &str) {
-    let ps = SyntaxSet::load_defaults_newlines();
-    let ts = ThemeSet::load_defaults();
+pub fn print_history(val: &Value) {
+    match val {
+        Value::Null => println!("  (no history)"),
+        Value::Cons(cons) => {
+            let mut current = Value::Cons(cons.clone());
+            while let Value::Cons(pair) = current {
+                let turn = pair.car();
+                let mut role = "unknown".to_string();
+                let mut content = "".to_string();
 
-    let syntax = ps.find_syntax_by_extension("scm")
-        .or_else(|| ps.find_syntax_by_name("Scheme"))
-        .unwrap_or_else(|| ps.find_syntax_plain_text());
-    
-    let theme = &ts.themes["base16-ocean.dark"];
-    let mut h = HighlightLines::new(syntax, theme);
+                // turn is an alist: (("content" . "...") ("role" . "..."))
+                if let Value::Cons(alist) = turn {
+                    let mut items = Value::Cons(alist.clone());
+                    while let Value::Cons(item_pair) = items {
+                        if let Value::Cons(kv) = item_pair.car() {
+                            let k = kv.car().as_str().unwrap_or("");
+                            let v = kv.cdr().as_str().unwrap_or("");
+                            if k == "role" { role = v.to_string(); }
+                            if k == "content" { content = v.to_string(); }
+                        }
+                        items = item_pair.cdr().clone();
+                    }
+                }
 
-    println!("\n{}╭─ scheme ─────────────────────────────────────{}", DIM, RESET);
-    for line in code.lines() {
-        let ranges: Vec<(Style, &str)> = h.highlight_line(line, &ps).unwrap_or_default();
-        let escaped = as_24_bit_terminal_escaped(&ranges[..], false);
-        println!("{}│{} {}", DIM, RESET, escaped);
+                let color = match role.as_str() {
+                    "user" => GREEN,
+                    "assistant" => YELLOW,
+                    _ => DIM,
+                };
+
+                println!("{}[{}]{} ", color, role.to_uppercase(), RESET);
+                print_markdown(&content);
+                println!("{}", "-".repeat(40));
+
+                current = pair.cdr().clone();
+            }
+        }
+        _ => println!("  {}", val),
     }
-    println!("{}╰──────────────────────────────────────────────{}\n", DIM, RESET);
 }
 
 pub fn print_markdown(text: &str) {

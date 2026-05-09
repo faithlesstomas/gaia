@@ -7,6 +7,8 @@
   #:use-module (ice-9 threads)
   #:use-module (ice-9 rdelim))
 
+(sigaction SIGPIPE SIG_IGN)
+
 (test-begin "gaia-meta-commands")
 
 ;; Helper to simulate a client session
