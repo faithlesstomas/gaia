@@ -32,7 +32,7 @@ enum ServerEvent {
 }
 
 fn main() -> Result<()> {
-    println!("\n{BOLD}{GREEN}GAIA CLI v0.2.0{RESET}");
+    println!("\n{BOLD}{GREEN}GAIA CLI v{}{RESET}", env!("GAIA_VERSION"));
     println!("Type {BOLD}/help{RESET} for commands or enter a task.\n");
 
     let mut session_id = format!(

@@ -1,9 +1,17 @@
 (define-module (gaia config)
   #:use-module (ice-9 match)
+  #:use-module (ice-9 popen)
+  #:use-module (ice-9 rdelim)
   #:use-module (srfi srfi-1)
   #:export (load-config get-config set-config! gaia-version))
 
-(define gaia-version "0.2.0-dev")
+(define gaia-version
+  (let* ((port (open-input-pipe "git describe --tags --always --dirty 2>/dev/null"))
+         (ver (read-line port)))
+    (close-pipe port)
+    (if (or (eof-object? ver) (string-null? ver))
+        "X.Y.Z" ;; No version info available
+        ver)))
 
 (define %default-config
   `((llm-url . "http://localhost:4000")

@@ -7,6 +7,7 @@
              (gnu packages texinfo)
              (gnu packages compression)
              (gnu packages rust)
+             (gnu packages version-control)
              (gnu packages base))
 
 (packages->manifest
@@ -17,5 +18,6 @@
        rust
        nss-certs
        coreutils
+       git
        texinfo
        gzip))
