@@ -187,7 +187,7 @@ Returns a pair: (missing-closing-parens-count . hint-string)."
              ((char=? c #\)) (loop rest in-string? in-comment? #f open-parens (+ close-parens 1)))
              (else (loop rest in-string? in-comment? #f open-parens close-parens)))))))))
 
-(define (rlm-eval! env code-string)
+(define* (rlm-eval! env code-string #:key (permission-handler #f))
   "Evaluates CODE-STRING in the persistent RLM module.
 Returns ('ok result-string) on success or ('error type message) on failure.
 State is preserved between calls — variables defined in one call are
@@ -233,10 +233,21 @@ Please break your solution into smaller steps in the REPL using variables." num-
                       ;; If already healed or no missing closing parens, just return error
                       (list 'error 'syntax (if hint (string-append (cdr parsed) "\n" hint) (cdr parsed)))))
 
-                ;; Safety check: scan for banned primitives
-                (let ((safety (validate-rlm-safety parsed)))
-                  (if (string? safety)
-                      (list 'error 'permission safety)
+                ;; Safety check: scan for dangerous primitives
+                (let* ((dangerous-expr (find-dangerous-primitive parsed))
+                       (allowed? (cond
+                                   ((not dangerous-expr) #t)  ;; safe code
+                                   ((not permission-handler)  ;; no handler → block
+                                    #f)
+                                   ((permission-handler dangerous-expr) ;; handler approved
+                                    #t)
+                                   (else ;; handler denied → hard abort
+                                    (throw 'user-interrupt)))))
+
+                  (if (not allowed?)
+                      ;; Blocked without handler (non-interactive / tests)
+                      (list 'error 'permission
+                            (format #f "Blocked: usage of '~a' is not allowed without permission." (car dangerous-expr)))
 
                       ;; Evaluate in persistent module
                       (let ((result
@@ -269,21 +280,20 @@ Please break your solution into smaller steps in the REPL using variables." num-
                                   (list (cons current-code result))))
                         result)))))))))
 
-(define BANNED-PRIMITIVES
+(define DANGEROUS-PRIMITIVES
   '(system system* delete-file rmdir rename-file chmod
-    primitive-load load))
+    primitive-load load run-in-sandbox write-file))
 
-(define (validate-rlm-safety sexp)
-  "Recursively checks S-expression for banned primitives.
-Returns #t if safe, or an error string if unsafe."
+(define (find-dangerous-primitive sexp)
+  "Recursively checks S-expression for dangerous primitives.
+Returns the offending sub-expression if unsafe, or #f if safe."
   (cond
    ((pair? sexp)
-    (let ((head (car sexp))
-          (tail (cdr sexp)))
-      (if (and (symbol? head) (memq head BANNED-PRIMITIVES))
-          (format #f "Security Violation: Usage of banned primitive '~a' is not allowed." head)
-          (let ((head-res (validate-rlm-safety head)))
-            (if (string? head-res)
+    (let ((head (car sexp)))
+      (if (and (symbol? head) (memq head DANGEROUS-PRIMITIVES))
+          sexp
+          (let ((head-res (find-dangerous-primitive head)))
+            (if head-res
                 head-res
-                (validate-rlm-safety tail))))))
-   (else #t)))
+                (find-dangerous-primitive (cdr sexp)))))))
+   (else #f)))

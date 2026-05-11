@@ -37,7 +37,12 @@
         (force-output client-port))
 
       (define (receive)
-        (read client-port))
+        "Read next non-info event from server (skipping info acks)."
+        (let loop ((msg (read client-port)))
+          (match msg
+            (('info . _) (loop (read client-port)))
+            (('stream-log . _) (loop (read client-port)))
+            (_ msg))))
 
       (dynamic-wind
         (lambda () #t)

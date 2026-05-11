@@ -6,10 +6,10 @@
   #:use-module (gaia rlm-env)
   #:export (guix-investigate rlm-execute))
 
-(define (rlm-execute env code-string)
+(define* (rlm-execute env code-string #:key (permission-handler #f))
   "Executes code in the persistent RLM environment (fast, stateful, native).
 ENV is an rlm-env record. Returns ('ok result) or ('error type message)."
-  (rlm-eval! env code-string))
+  (rlm-eval! env code-string #:permission-handler permission-handler))
 
 (define BANNED-PRIMITIVES '(system system* delete-file rmdir rename-file chmod))
 

@@ -15,11 +15,16 @@ TRAJ="trajectories-$(date +%Y%m%d%H%M%S).jsonl"
 echo "$TRAJ" > .last_trajectory
 export GAIA_TRAJECTORIES_FILE="$TRAJ"
 
-echo "Starting GAIA. Trajectory will be saved to: $TRAJ"
+# 3. Start GAIA Server in background if not running
+if ! nc -z -U /tmp/gaia.sock 2>/dev/null; then
+    echo "Starting GAIA Server in background..."
+    eval "$(guix shell -m guix.scm --search-paths)"
+    ./bin/gaia-server > .gaia-server.log 2>&1 &
+    sleep 2
+fi
 
-# 3. Setup Guix Environment and Execute Guile directly
-# We use --search-paths and eval to load the environment into the current shell.
-# Then we 'exec guile' directly. This prevents 'guix shell' from acting as a 
-# parent process that intercepts and dies on SIGINT (Ctrl-C), leaving Guile orphaned.
+echo "Starting GAIA CLI. Trajectory will be saved to: $TRAJ"
+
+# 4. Run Rust Client
 eval "$(guix shell -m guix.scm --search-paths)"
-exec guile -L src scripts/run-gaia.scm "$@"
+exec cargo run --manifest-path src/gaia-cli/Cargo.toml --release

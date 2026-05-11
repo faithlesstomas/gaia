@@ -289,7 +289,7 @@ Prefers the LAST code block to support LLM self-correction patterns."
         env-file
         (string-append "trajectories-" session-id ".jsonl"))))
 
-(define* (rlm-loop session-id last-output depth history #:optional (env (make-rlm-env)) #:key (event-handler #f))
+(define* (rlm-loop session-id last-output depth history #:optional (env (make-rlm-env)) #:key (event-handler #f) (permission-handler #f))
   "The core RLM loop. Maintains a persistent environment across iterations."
   (rlm-inject! env 'llm-query
     (lambda (prompt)
@@ -301,7 +301,7 @@ Prefers the LAST code block to support LLM self-correction patterns."
             "Error: No response from sub-LLM"))))
   (rlm-inject! env 'context last-output)
 
-  (rlm-loop-inner session-id last-output depth env history 1 '() #:event-handler event-handler))
+  (rlm-loop-inner session-id last-output depth env history 1 '() #:event-handler event-handler #:permission-handler permission-handler))
 
 ;; --- Transcript helpers for multi-turn RLM loop ---
 
@@ -359,7 +359,7 @@ Prefers the LAST code block to support LLM self-correction patterns."
          (t (regexp-substitute/global #f "`([^`]+)`" t 'pre C-CYAN 1 C-RESET 'post)))
     t))
 
-(define* (rlm-loop-inner session-id last-output depth env history step transcript #:key (event-handler #f))
+(define* (rlm-loop-inner session-id last-output depth env history step transcript #:key (event-handler #f) (permission-handler #f))
   (let ((prompt (if (null? transcript)
                    last-output
                    (let ((original-task (assoc-ref transcript "original-task"))
@@ -434,8 +434,8 @@ Prefers the LAST code block to support LLM self-correction patterns."
 or provide FINAL(answer) if you have the answer."
                         depth env
                         (append history
-                                (list `(("role" . "assistant") ("content" . "(empty response)"))))
-                        (+ step 1) retry-transcript #:event-handler event-handler)))
+                                       (list `(("role" . "assistant") ("content" . "(empty response)"))))
+                        (+ step 1) retry-transcript #:event-handler event-handler #:permission-handler permission-handler)))
 
                   (let ((updated-transcript
                      (append transcript
@@ -452,6 +452,7 @@ or provide FINAL(answer) if you have the answer."
 
         (let ((prose (strip-blocks response-text)))
                   (when (> (string-length prose) 0)
+                    (when event-handler (event-handler `(analysis ,prose)))
                     (display (string-append C-BLUE "\n[GAIA] Analysis: " C-RESET (markdown->ansi prose) "\n"))))
 
                 (let ((action-code (extract-code response-text))
@@ -467,7 +468,7 @@ or provide FINAL(answer) if you have the answer."
                                 (sub-res-pair (rlm-loop sub-session-id initial-input (+ depth 1)
                                                       (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                             `(("role" . "assistant") ("content" . ,response-text))))
-                                                      #:event-handler event-handler))
+                                                      #:event-handler event-handler #:permission-handler permission-handler))
                                 (sub-result (car sub-res-pair)))
                            (display (string-append C-BOLD C-GREEN "\n[GAIA] Sub-Agent completed.\n" C-RESET "Result length: "
                                                    (number->string (string-length sub-result)) " chars\n"))
@@ -479,13 +480,13 @@ or provide FINAL(answer) if you have the answer."
                                                depth env 
                                                (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                      `(("role" . "assistant") ("content" . ,response-text))))
-                                               (+ step 1) updated-transcript #:event-handler event-handler))))
+                                               (+ step 1) updated-transcript #:event-handler event-handler #:permission-handler permission-handler))))
                         (_
                          (rlm-loop-inner session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")"
                                          depth env 
                                          (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                `(("role" . "assistant") ("content" . ,response-text))))
-                                         (+ step 1) updated-transcript #:event-handler event-handler)))))
+                                         (+ step 1) updated-transcript #:event-handler event-handler #:permission-handler permission-handler)))))
 
                    (action-code =>
                     (lambda (code)
@@ -493,7 +494,7 @@ or provide FINAL(answer) if you have the answer."
                           (begin
                             (when event-handler (event-handler `(code ,code)))
                             (display (string-append C-BOLD C-CYAN "\n[GAIA] Executing Scheme Code:\n" C-RESET code "\n"))
-                            (match (rlm-execute env code)
+                            (match (rlm-execute env code #:permission-handler permission-handler)
                               (('ok result)
                                (when event-handler (event-handler `(result ,result)))
                                (display (string-append C-GREEN "\n[REPL] Success:\n" C-RESET result "\n"))
@@ -502,7 +503,7 @@ or provide FINAL(answer) if you have the answer."
                                                (append history
                                                        (list `(("role" . "user") ("content" . ,last-output))
                                                              `(("role" . "assistant") ("content" . ,response-text))))
-                                               (+ step 1) updated-transcript #:event-handler event-handler))
+                                               (+ step 1) updated-transcript #:event-handler event-handler #:permission-handler permission-handler))
                               (('error et msg . rest)
                                (let ((feedback (handle-error et msg code depth)))
                                  (when event-handler (event-handler `(repl-error ,feedback)))
@@ -510,7 +511,7 @@ or provide FINAL(answer) if you have the answer."
                                  (rlm-loop-inner session-id feedback depth env
                                                  (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                        `(("role" . "assistant") ("content" . ,response-text))))
-                                                 (+ step 1) updated-transcript #:event-handler event-handler)))))
+                                                 (+ step 1) updated-transcript #:event-handler event-handler #:permission-handler permission-handler)))))
                           (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                     `(("role" . "assistant") ("content" . ,response-text))))))))
 
@@ -664,7 +665,7 @@ Returns (list updated-history updated-env should-continue?)"
 
    ;; Standard RLM Loop
    (else
-   (let* ((res-pair (rlm-loop session-id input 0 history env #:event-handler #f))
+   (let* ((res-pair (rlm-loop session-id input 0 history env #:event-handler #f #:permission-handler #f))
           (answer (car res-pair))
           (new-history (cdr res-pair)))
      (list new-history env #t)))))

@@ -7,7 +7,92 @@ pub const RED: &str = "\x1b[31m";
 pub const GREEN: &str = "\x1b[32m";
 pub const YELLOW: &str = "\x1b[33m";
 pub const CYAN: &str = "\x1b[36m";
+pub const MAGENTA: &str = "\x1b[35m";
+pub const BLUE: &str = "\x1b[34m";
 pub const RESET: &str = "\x1b[0m";
+
+const SCHEME_KEYWORDS: &[&str] = &[
+    "define", "define*", "lambda", "let", "let*", "letrec", "if", "cond", "else",
+    "when", "unless", "begin", "do", "case", "match", "and", "or", "not",
+    "set!", "quote", "quasiquote", "unquote", "display", "format", "newline",
+    "car", "cdr", "cons", "list", "map", "filter", "for-each", "apply",
+    "string-append", "string-length", "substring", "number->string",
+    "use-modules", "catch", "throw", "with-exception-handler",
+    "#t", "#f",
+];
+
+/// Print Scheme code with syntax highlighting
+pub fn print_scheme(code: &str) {
+    for line in code.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with(";;") || trimmed.starts_with(";") {
+            // Comment line
+            println!("  {DIM}{CYAN}{}{RESET}", line);
+        } else {
+            print!("  ");
+            print_scheme_line(line);
+            println!();
+        }
+    }
+}
+
+fn print_scheme_line(line: &str) {
+    let mut chars = line.chars().peekable();
+    while let Some(&ch) = chars.peek() {
+        match ch {
+            '(' | ')' => {
+                print!("{YELLOW}{}{RESET}", ch);
+                chars.next();
+            }
+            '"' => {
+                // String literal
+                let mut s = String::new();
+                s.push(ch);
+                chars.next();
+                let mut escaped = false;
+                while let Some(&c) = chars.peek() {
+                    s.push(c);
+                    chars.next();
+                    if escaped { escaped = false; continue; }
+                    if c == '\\' { escaped = true; continue; }
+                    if c == '"' { break; }
+                }
+                print!("{GREEN}{}{RESET}", s);
+            }
+            ';' => {
+                // Inline comment — rest of line
+                let rest: String = chars.collect();
+                print!("{DIM}{CYAN}{}{RESET}", rest);
+                return;
+            }
+            ' ' | '\t' => {
+                print!("{}", ch);
+                chars.next();
+            }
+            _ => {
+                // Collect a token
+                let mut token = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c == '(' || c == ')' || c == ' ' || c == '\t' || c == '"' || c == ';' {
+                        break;
+                    }
+                    token.push(c);
+                    chars.next();
+                }
+                if SCHEME_KEYWORDS.contains(&token.as_str()) {
+                    print!("{MAGENTA}{BOLD}{}{RESET}", token);
+                } else if token.starts_with('#') || token.starts_with('\'') {
+                    print!("{BLUE}{}{RESET}", token);
+                } else if token.parse::<f64>().is_ok() {
+                    print!("{BLUE}{}{RESET}", token);
+                } else {
+                    print!("{}", token);
+                }
+            }
+        }
+    }
+}
+
 
 pub fn print_status(msg: &str) {
     eprint!("\r{}{}{}{}", DIM, msg, " ".repeat(10), RESET);

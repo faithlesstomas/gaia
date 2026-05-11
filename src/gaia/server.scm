@@ -1,9 +1,9 @@
 (define-module (gaia server)
-  #:use-module (fibers)
-  #:use-module (fibers channels)
   #:use-module (ice-9 match)
   #:use-module (ice-9 threads)
   #:use-module (ice-9 ftw)
+  #:use-module (ice-9 regex)
+  #:use-module (srfi srfi-13)
   #:use-module (ice-9 rdelim)
   #:use-module (gaia core)
   #:use-module (gaia rlm-env)
@@ -17,6 +17,23 @@
   (write event client-socket)
   (newline client-socket)
   (force-output client-socket))
+
+(define (make-broadcast-port out-port event-sink)
+  "Creates a soft port that writes to OUT-PORT and also sends strings to EVENT-SINK."
+  (make-soft-port
+   (vector
+    (lambda (c) (write-char c out-port))
+    (lambda (s) 
+      (display s out-port)
+      (let ((trimmed (string-trim-both s)))
+        (when (> (string-length trimmed) 0)
+          ;; Send debug info but strip ANSI codes for JSON
+          (let ((clean (regexp-substitute/global #f "\x1b\\[[0-9;]*m" trimmed 'pre "" 'post)))
+            (event-sink `(info ,clean))))))
+    (lambda () (force-output out-port))
+    #f
+    (lambda () #t))
+   "w"))
 
 (define (save-session session-id history)
   (unless (file-exists? "sessions")
@@ -47,12 +64,21 @@
                                             (string-prefix? ";" content))
                                         content #f))))
                       (when code
-                        (rlm-eval! env code))))))
+                        (rlm-eval! env code #:permission-handler (lambda (_) #t)))))))
               history-list)))
 
 (define (handle-client client-socket)
   (set-port-encoding! client-socket "UTF-8")
   (let* ((event-sink (lambda (event) (send-event client-socket event)))
+         (permission-sink (lambda (expr)
+                            (send-event client-socket `(permission-request ,(format #f "Agent wants to execute: ~a" expr)))
+                            (let loop ()
+                              (let* ((line (read-line client-socket))
+                                     (msg (if (eof-object? line) line (with-input-from-string line read))))
+                                (match msg
+                                  (('permission-response #t) #t)
+                                  (('permission-response #f) #f)
+                                  (_ (loop)))))))
          (line (read-line client-socket))
          (first-msg (if (eof-object? line) line (with-input-from-string line read)))
          (session-id (match first-msg
@@ -72,7 +98,7 @@
           (('eval task)
            (catch #t
              (lambda ()
-               (let* ((res-pair (rlm-loop current-session-id task 0 history env #:event-handler event-sink))
+               (let* ((res-pair (rlm-loop current-session-id task 0 history env #:event-handler event-sink #:permission-handler permission-sink))
                       (answer (car res-pair))
                       (updated-history (cdr res-pair)))
                  (save-session current-session-id updated-history)
@@ -85,7 +111,7 @@
           (('repl code)
            (catch #t
              (lambda ()
-               (let* ((res (rlm-eval! env code))
+               (let* ((res (rlm-eval! env code #:permission-handler permission-sink))
                       (res-str (format #f "~a" res))
                       (updated-history (append history
                                                (list `(("role" . "assistant") 
@@ -104,6 +130,7 @@
              (loop env history current-session-id)))
           (('clear)
            (save-session current-session-id '())
+           (send-event client-socket '(info "Environment and history cleared."))
            (loop (make-rlm-env) '() current-session-id))
           (('get-model)
            (send-event client-socket `(model-info ,(get-config 'model)))
@@ -144,11 +171,17 @@
                (send-event client-socket `(error (format #f "Ask Error (~a): ~a" key args)))
                (loop env history current-session-id))))
           (('session new-id)
-           (let* ((new-history (load-session new-id))
-                  (new-env (make-rlm-env)))
-             (with-output-to-file ".last_session" (lambda () (display new-id)))
-             (replay-history new-env new-history)
-             (loop new-env new-history new-id)))
+           (catch #t
+             (lambda ()
+               (let* ((new-history (load-session new-id))
+                      (new-env (make-rlm-env)))
+                 (with-output-to-file ".last_session" (lambda () (display new-id)))
+                 (replay-history new-env new-history)
+                 (send-event client-socket `(info ,(string-append "Session switched to: " new-id)))
+                 (loop new-env new-history new-id)))
+             (lambda (key . args)
+               (send-event client-socket `(error (format #f "Session Error (~a): ~a" key args)))
+               (loop env history current-session-id))))
           (('list-sessions)
            (let ((sessions (if (file-exists? "sessions")
                                (let ((files (scandir "sessions")))
@@ -169,6 +202,7 @@
   (display (format #f "[GAIA] Server listening on ~a\n" path)) (force-output)
   ;; Ignore SIGPIPE here to avoid hang at top level
   (sigaction SIGPIPE SIG_IGN)
+  (with-output-to-file "/tmp/gaia.pid" (lambda () (display (getpid))))
   (when (file-exists? path) (delete-file path))
   (let ((server-socket (socket AF_UNIX SOCK_STREAM 0))
         (addr (make-socket-address AF_UNIX path)))

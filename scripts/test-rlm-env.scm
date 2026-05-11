@@ -63,25 +63,79 @@
 
 (test-group "safety"
   (let ((env (make-rlm-env)))
-    ;; Banned primitive: system
+    ;; Dangerous primitive without handler: system
     (test-equal "blocks system call"
       'error
       (car (rlm-eval! env "(system \"ls\")")))
 
-    ;; Banned primitive: system*
+    ;; Dangerous primitive without handler: system*
     (test-equal "blocks system* call"
       'error
       (car (rlm-eval! env "(system* \"ls\")")))
 
-    ;; Banned primitive: delete-file
+    ;; Dangerous primitive without handler: delete-file
     (test-equal "blocks delete-file"
       'error
       (car (rlm-eval! env "(delete-file \"important.txt\")")))
+
+    ;; Dangerous primitive without handler: run-in-sandbox
+    (test-equal "blocks run-in-sandbox"
+      'error
+      (car (rlm-eval! env "(run-in-sandbox \"rm -rf /\")")))
+
+    ;; Dangerous primitive without handler: write-file
+    (test-equal "blocks write-file"
+      'error
+      (car (rlm-eval! env "(write-file \"foo.txt\" \"bar\")")))
 
     ;; Safe code still works
     (test-equal "safe code works"
       '(ok "hello")
       (rlm-eval! env "(display \"hello\")"))))
+
+;; --- HITL Permission Handler ---
+
+(test-group "hitl-permission"
+  ;; Handler that always approves → code is NOT blocked by permission system
+  ;; (it may still fail at runtime, but the safety gate is bypassed)
+  (let ((env (make-rlm-env)))
+    (let ((result (rlm-eval! env "(delete-file \"/nonexistent\")"
+                             #:permission-handler (lambda (expr) #t))))
+      (test-assert "handler-approve bypasses safety gate"
+        ;; Result should be a runtime error (file not found), NOT a permission error
+        (not (and (pair? result) (eq? (car result) 'error)
+                  (pair? (cdr result)) (eq? (cadr result) 'permission))))))
+
+  ;; Handler that always denies → throws user-interrupt
+  (let ((env (make-rlm-env)))
+    (test-assert "handler-deny throws user-interrupt"
+      (catch 'user-interrupt
+        (lambda ()
+          (rlm-eval! env "(system \"ls\")"
+                     #:permission-handler (lambda (expr) #f))
+          #f)  ;; should not reach here
+        (lambda (key . args) #t))))
+
+  ;; Safe code with handler → handler is never called
+  (let* ((env (make-rlm-env))
+         (called? #f))
+    (test-equal "handler not called for safe code"
+      '(ok "42")
+      (rlm-eval! env "(display 42)"
+                 #:permission-handler (lambda (expr) (set! called? #t) #t)))
+    (test-assert "handler was indeed not called"
+      (not called?)))
+
+  ;; Handler receives the full dangerous expression
+  (let* ((env (make-rlm-env))
+         (captured-expr #f))
+    (rlm-eval! env "(run-in-sandbox \"echo hello\")"
+               #:permission-handler (lambda (expr)
+                                      (set! captured-expr expr)
+                                      #t))
+    (test-assert "handler receives full expression"
+      (and (pair? captured-expr)
+           (eq? (car captured-expr) 'run-in-sandbox)))))
 
 ;; --- Syntax Error Handling ---
 
