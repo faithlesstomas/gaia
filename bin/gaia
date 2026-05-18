@@ -1,5 +1,5 @@
 #!/bin/sh
-# GAIA Launcher
+# GAIA CLI Launcher
 # Usage: ./bin/gaia [options]
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
@@ -7,24 +7,13 @@ PROJECT_ROOT=$(dirname "$SCRIPT_DIR")
 
 cd "$PROJECT_ROOT" || exit 1
 
-# 1. Ensure LLM server is running
-make llm-server
-
-# 2. Setup Trajectory
+# 1. Setup Trajectory
 TRAJ="trajectories-$(date +%Y%m%d%H%M%S).jsonl"
 echo "$TRAJ" > .last_trajectory
 export GAIA_TRAJECTORIES_FILE="$TRAJ"
 
-# 3. Start GAIA Server in background if not running
-if ! nc -z -U /tmp/gaia.sock 2>/dev/null; then
-    echo "Starting GAIA Server in background..."
-    eval "$(guix shell -m guix.scm --search-paths)"
-    ./bin/gaia-server > .gaia-server.log 2>&1 &
-    sleep 2
-fi
-
 echo "Starting GAIA CLI. Trajectory will be saved to: $TRAJ"
 
-# 4. Run Rust Client
+# 2. Run Rust Client
 eval "$(guix shell -m guix.scm --search-paths)"
 exec cargo run --manifest-path src/gaia-cli/Cargo.toml --release

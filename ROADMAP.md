@@ -9,12 +9,12 @@
 
 ## Current State Summary
 
-GAIA is a functional AI assistant with a working RLM (Recursive Language Model) loop, persistent Guile REPL environment,
-safety validation, trajectory logging, and LiteLLM integration.
+GAIA is a functional AI assistant with a working RLM (Recursive Language Model) loop, 
+persistent Guile REPL environment, safety validation, trajectory logging, and LiteLLM integration.
 The core agentic loop is stable and has been validated with Gemma 4 and other models.
 
-**Codebase:** ~2350 lines of GNU Guile Scheme + 12 test scripts
-**Architecture:** GAIA (Guile) ↔ LiteLLM Proxy ↔ LLM backends (Gemma, Ollama, Gemini, etc.)
+**Codebase:** ~2350 lines of GNU Guile Scheme + Native Rust CLI Client + 12 test scripts
+**Architecture:** Rust Client - GAIA Server (Guile REPL) - LiteLLM Proxy - LLM backends (Ollama, Lemonade, external LLM API etc.)
 
 ---
 
@@ -76,16 +76,17 @@ Hardening the agentic loop to handle the "parenthesis blindness" of smaller lang
 
 Transition from monolith to a modern client-server architecture inspired by tools like Claude Code / Cline.
 
-- [ ] **Headless GAIA Engine (Fibers-based)** — Rebuild the engine as a background server using **Guile Fibers**
-  for high-performance server orchestration and non-blocking I/O. Maintain POSIX Threads for isolated `rlm-execute`
-  calls and communicate via local UNIX Sockets.
+- [ ] **Headless GAIA Engine (Fibers-based Refactoring)** — Migrate the server orchestration to **Guile Fibers**
+  for high-performance, non-blocking I/O. Implement cooperative cancellation for LLM network requests (e.g., closing the port).
+  **Crucially:** Maintain POSIX Threads for isolated `rlm-execute` calls so that AI-generated infinite loops can still be
+  aborted preemptively using `cancel-thread` without hanging the Fibers scheduler.
 - [ ] **Response Streaming** — Switch to character-by-character streaming from LiteLLM.
   Stream thoughts (`<|think|>`) and response tokens in real-time to the Rust client.
-- [ ] **Native CLI Client (Rust)** — Build a fast, native terminal client using the "scrollback" REPL model with `rustyline`
+- [x] **Native CLI Client (Rust)** — Build a fast, native terminal client using the "scrollback" REPL model with `rustyline`
   for rich input (history, auto-complete), `pulldown_cmark` for Markdown rendering, and asynchronous status updates, replacing the older TUI concepts.
-- [ ] **S-expression Protocol over UNIX Sockets** — Define a lightweight communication protocol based on Scheme S-expressions
+- [x] **S-expression Protocol over UNIX Sockets** — Define a lightweight communication protocol based on Scheme S-expressions
   to support `eval` requests, `event` streams (tokens, thoughts), and `interrupt` signals, natively parsing them in Rust via `lexpr`.
-- [ ] **Human-in-the-Loop (HITL) Sandbox** — Implement an interactive permission system
+- [x] **Human-in-the-Loop (HITL) Sandbox** — Implement an interactive permission system
   in the Rust client to intercept risky AST-detected operations (e.g., `delete-file`).
 - [ ] **Auto-Scaffolding** — On agent startup in a directory, silently run a lightweight `(list-files)`
   and inject the directory map into the system prompt for immediate spatial awareness.
@@ -154,7 +155,7 @@ Transforming GAIA into a standalone, AI-first operating environment and explorin
 - [ ] **RelayLLM & FusionRoute:** Implement token-level collaboration and multi-expert routing layers in the Headless Server.
 
 
-## Phase 7 — Neuro-Symbolic AGI & The Automated Scientist Workflow
+## Phase 7 — Neuro-Symbolic AI & The Automated Scientist Workflow
 
 Transforming GAIA into a rigorous mathematical and scientific researcher capable of formal hypothesis generation, reproducible experimentation, and theorem proving.
 This phase integrates the complete synergistic pipeline: RAG (System 1 perception) + AtomSpace (System 2 reasoning) + Goblins (Orchestration) + Guix (Execution).
@@ -180,7 +181,7 @@ This phase integrates the complete synergistic pipeline: RAG (System 1 perceptio
 
 ---
 
-## References
+## References and other ideas worth adopting
 
 - RLM Paper: https://arxiv.org/abs/2512.24601
 - RelayLLM: https://arxiv.org/pdf/2601.05167

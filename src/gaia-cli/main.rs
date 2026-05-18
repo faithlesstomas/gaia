@@ -31,10 +31,11 @@ enum ServerEvent {
     Closed,
 }
 
-fn main() -> Result<()> {
-    println!("\n{BOLD}{GREEN}GAIA CLI {}{RESET}", env!("GAIA_VERSION"));
-    println!("Type {BOLD}/help{RESET} for commands or enter a task.\n");
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
+fn main() -> Result<()> {
+    let running_agent = Arc::new(AtomicBool::new(false));
     let mut session_id = format!(
         "gaia-cli-{}",
         std::time::SystemTime::now()
@@ -42,7 +43,27 @@ fn main() -> Result<()> {
             .as_secs()
     );
 
+    println!("\n{BOLD}{GREEN}GAIA CLI {}{RESET}", env!("GAIA_VERSION"));
+    println!("Type {BOLD}/help{RESET} for commands or enter a task.\n");
+
     let mut stream = connect_with_retry(SOCKET_PATH)?;
+
+    let mut interrupt_stream = stream.try_clone()?;
+    let ctrlc_running = Arc::clone(&running_agent);
+    ctrlc::set_handler(move || {
+        if ctrlc_running.load(Ordering::SeqCst) {
+            // Send explicit interrupt message over the socket
+            let _ = send_sexp(
+                &mut interrupt_stream,
+                &Value::list(vec![Value::symbol("interrupt")]),
+            );
+
+            println!("\n{YELLOW}^C (Agent interrupted by user){RESET}");
+        } else {
+            // At prompt - just show hint
+            println!("\n{CYAN}ℹ Type /exit or /quit to close GAIA.{RESET}");
+        }
+    })?;
 
     // Send initial session message
     send_sexp(
@@ -61,14 +82,11 @@ fn main() -> Result<()> {
         listener_loop(&mut reader, tx);
     });
 
-    // The initial (session ...) produces an (info ...) ack from the server.
-    // Since 'info' is now a display-only event (printed by listener thread),
-    // we do NOT need to consume it here. The listener thread handles it.
-
     let mut rl = DefaultEditor::new()?;
 
     loop {
         let prompt = format!("{}(GAIA) > {}", GREEN, RESET);
+        running_agent.store(false, Ordering::SeqCst);
         let readline = rl.readline(&prompt);
 
         match readline {
@@ -79,6 +97,7 @@ fn main() -> Result<()> {
                 }
                 let _ = rl.add_history_entry(trimmed);
 
+                running_agent.store(true, Ordering::SeqCst);
                 match dispatch(trimmed, &mut stream, &rx, &mut session_id) {
                     Ok(Action::Exit) => break,
                     Ok(Action::Continue) => {}
@@ -89,19 +108,8 @@ fn main() -> Result<()> {
                 }
             }
             Err(ReadlineError::Interrupted) => {
-                println!("^C (Sending interrupt to server...)");
-                if let Ok(pid_str) = std::fs::read_to_string("/tmp/gaia.pid") {
-                    if let Ok(pid) = pid_str.trim().parse::<i32>() {
-                        let _ = std::process::Command::new("kill")
-                            .arg("-SIGINT")
-                            .arg(pid.to_string())
-                            .status();
-                    }
-                }
-                let _ = send_sexp(
-                    &mut stream,
-                    &Value::list(vec![Value::symbol("interrupt")]),
-                );
+                // Should not happen with check_signals(false), but handled for safety
+                println!("\n{CYAN}ℹ Type /exit or /quit to close GAIA.{RESET}");
                 continue;
             }
             Err(ReadlineError::Eof) => {
@@ -121,6 +129,9 @@ fn main() -> Result<()> {
 /// Background listener: reads ALL events from server, prints display-events
 /// immediately, and forwards terminal-events to the main thread via channel.
 fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
+    let mut in_token_stream = false;
+    let mut in_thought_stream = false;
+
     loop {
         match protocol::receive_event(reader) {
             Ok(Some(event)) => {
@@ -129,6 +140,38 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                     let cdr = cons.cdr();
 
                     match tag {
+                        // === STREAMING EVENTS ===
+                        "token" => {
+                            if let Value::Cons(c) = cdr {
+                                if let Some(msg) = c.car().as_str() {
+                                    if !in_token_stream {
+                                        eprint!("\r\x1b[K"); // clear status
+                                        println!("\n{BOLD}📋 Analysis:{RESET}");
+                                        in_token_stream = true;
+                                        in_thought_stream = false;
+                                    }
+                                    print!("{}", msg);
+                                    use std::io::Write;
+                                    std::io::stdout().flush().unwrap();
+                                }
+                            }
+                        }
+                        "thought" => {
+                            if let Value::Cons(c) = cdr {
+                                if let Some(msg) = c.car().as_str() {
+                                    if !in_thought_stream {
+                                        eprint!("\r\x1b[K"); // clear status
+                                        println!("\n{DIM}💭 Thinking:{RESET}");
+                                        in_thought_stream = true;
+                                        in_token_stream = false;
+                                    }
+                                    print!("{DIM}{}{RESET}", msg);
+                                    use std::io::Write;
+                                    std::io::stdout().flush().unwrap();
+                                }
+                            }
+                        }
+
                         // === DISPLAY-ONLY EVENTS ===
                         "status" => {
                             if let Value::Cons(c) = cdr {
@@ -137,21 +180,19 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                                 }
                             }
                         }
-                        "thought" => {
-                            if let Value::Cons(c) = cdr {
-                                if let Some(msg) = c.car().as_str() {
-                                    eprint!("\r\x1b[K"); // clear status line
-                                    println!("\n{DIM}💭 Thinking:{RESET}");
-                                    println!("{DIM}{}{RESET}", msg);
-                                }
-                            }
-                        }
                         "analysis" => {
+                            // Full analysis event (fallback or final summary)
                             if let Value::Cons(c) = cdr {
                                 if let Some(msg) = c.car().as_str() {
-                                    eprint!("\r\x1b[K");
-                                    println!("\n{BOLD}📋 Analysis:{RESET}");
+                                    if !in_token_stream {
+                                        eprint!("\r\x1b[K");
+                                        println!("\n{BOLD}📋 Analysis:{RESET}");
+                                    } else {
+                                        println!(); // finish the stream line
+                                    }
                                     print_markdown(msg);
+                                    in_token_stream = false;
+                                    in_thought_stream = false;
                                 }
                             }
                         }
@@ -159,8 +200,13 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                             if let Value::Cons(c) = cdr {
                                 if let Some(code) = c.car().as_str() {
                                     eprint!("\r\x1b[K");
+                                    if in_token_stream || in_thought_stream {
+                                        println!();
+                                    }
                                     println!("\n{CYAN}{BOLD}▶ Executing Scheme:{RESET}");
                                     print_scheme(code);
+                                    in_token_stream = false;
+                                    in_thought_stream = false;
                                 }
                             }
                         }
@@ -198,11 +244,16 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                         | "session-list" | "history-list" | "env-list"
                         | "model-info" | "models-list" | "thinking-info" 
                         | "permission-request" => {
+                            if in_token_stream || in_thought_stream {
+                                println!();
+                            }
                             // Clear any residual status line before forwarding
                             eprint!("\r\x1b[K");
                             if tx.send(ServerEvent::Terminal(event.clone())).is_err() {
                                 return;
                             }
+                            in_token_stream = false;
+                            in_thought_stream = false;
                         }
 
                         _ => {

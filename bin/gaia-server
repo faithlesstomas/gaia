@@ -2,5 +2,8 @@
 !#
 (use-modules (gaia server))
 
+(display "[GAIA] Ensuring LLM proxy server is running...\n")
+(system* "make" "llm-server")
+
 (let ((socket-path "/tmp/gaia.sock"))
   (start-server socket-path))
