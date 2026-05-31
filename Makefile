@@ -6,7 +6,7 @@ export GAIA_LLM_URL
 export GAIA_MODEL
 export GAIA_BASE_MODEL
 
-.PHONY: run repl check test-units test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop clean-trajectories monitor client server
+.PHONY: run repl check test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop clean-trajectories monitor client server
 
 GUIX_SHELL = guix shell -m guix.scm --
 
@@ -18,7 +18,7 @@ run: llm-server
 repl:
 	$(GUIX_SHELL) guile -L src
 
-check: test-units test-tools test-rlm-env test-sessions test-meta-commands
+check: test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands
 
 test-meta-commands:
 	@echo "Running GAIA meta-command integration tests..."
@@ -26,21 +26,25 @@ test-meta-commands:
 
 test-units:
 	@echo "Running core unit tests..."
-	$(GUIX_SHELL) guile -L src scripts/test-units.scm
+	$(GUIX_SHELL) guile -L src tests/test-units.scm
 	@echo "Running history and meta-command tests..."
-	$(GUIX_SHELL) guile -L src scripts/test-history.scm
+	$(GUIX_SHELL) guile -L src tests/test-history.scm
 	@echo "Running signal extraction tests..."
-	$(GUIX_SHELL) guile -L src scripts/test-final-signal.scm
+	$(GUIX_SHELL) guile -L src tests/test-final-signal.scm
 	@echo "Running error handling tests..."
-	$(GUIX_SHELL) guile -L src scripts/test-error-handling.scm
+	$(GUIX_SHELL) guile -L src tests/test-error-handling.scm
+
+test-sandbox:
+	@echo "Running Goblins sandbox unit tests..."
+	$(GUIX_SHELL) guile -L src tests/test-sandbox.scm
 
 test-tools:
 	@echo "Running tools unit tests..."
-	$(GUIX_SHELL) guile -L src scripts/test-tools.scm
+	$(GUIX_SHELL) guile -L src tests/test-tools.scm
 
 test-rlm-env:
 	@echo "Running RLM environment unit tests..."
-	$(GUIX_SHELL) guile -L src scripts/test-rlm-env.scm
+	$(GUIX_SHELL) guile -L src tests/test-rlm-env.scm
 
 test-sessions:
 	@echo "Running GAIA session management unit tests..."
@@ -63,14 +67,14 @@ llm-server-stop:
 
 test-rlm: llm-server
 	@echo "Running RLM pipeline sanity check (requires LLM server)..."
-	$(GUIX_SHELL) guile -L src scripts/test-sanity.scm; \
+	$(GUIX_SHELL) guile -L src tests/test-sanity.scm; \
 	STATUS=$$?; \
 	$(MAKE) llm-server-stop; \
 	exit $$STATUS
 
 test-tool-use: llm-server
 	@echo "Running LLM tool-use test: search-file needle (requires LLM server)..."
-	BENCHMARK_SIZE_MB=1 $(GUIX_SHELL) guile -L src scripts/test-tool-use.scm; \
+	BENCHMARK_SIZE_MB=1 $(GUIX_SHELL) guile -L src tests/test-tool-use.scm; \
 	STATUS=$$?; \
 	$(MAKE) llm-server-stop; \
 	exit $$STATUS

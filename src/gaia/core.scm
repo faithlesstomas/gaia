@@ -315,23 +315,55 @@ Prefers the LAST code block to support LLM self-correction patterns."
                        (substring text (- len 100) len)))))
 
 (define (format-transcript transcript)
-  "Format transcript entries as a compact execution log."
-  (let ((step-num 0))
-    (string-join
-     (filter-map
-      (lambda (entry)
-        (let ((role (car entry))
-              (text (cdr entry)))
-          (cond
-           ((string=? role "original-task") #f) ;; Skip marker
-           ((string=? role "user")
-            (set! step-num (+ step-num 1))
-            (string-append "[Step " (number->string step-num) " input] " text))
-           ((string=? role "assistant")
-            (string-append "[Step " (number->string step-num) " response] " (truncate-for-transcript text)))
-           (else #f))))
-      transcript)
-     "\n")))
+  "Format transcript entries as a compact execution log with Step Compaction to prevent Context Rot."
+  (let* ((step-entries (filter (lambda (entry)
+                                 (let ((role (car entry)))
+                                   (or (string=? role "user") (string=? role "assistant"))))
+                               transcript))
+         (total-steps (inexact->exact (round (/ (length step-entries) 2))))
+         (compaction-threshold 4)
+         (step-num 0))
+    (if (<= total-steps compaction-threshold)
+        ;; No compaction needed
+        (string-join
+         (filter-map
+          (lambda (entry)
+            (let ((role (car entry))
+                  (text (cdr entry)))
+              (cond
+               ((string=? role "user")
+                (set! step-num (+ step-num 1))
+                (string-append "[Step " (number->string step-num) " input] " text))
+               ((string=? role "assistant")
+                (string-append "[Step " (number->string step-num) " response] " (truncate-for-transcript text)))
+               (else #f))))
+          transcript)
+         "\n")
+        ;; Perform Step Compaction!
+        ;; We summarize the first (total-steps - 3) steps, and show the last 3 steps in full.
+        (let* ((steps-to-compact (- total-steps 3))
+               (compacted-count (* steps-to-compact 2))
+               (compacted-entries (take step-entries compacted-count))
+               (remaining-entries (drop step-entries compacted-count))
+               (summary-text
+                (format #f "[Steps 1-~a summarized: Successful execution of Scheme REPL operations and exploratory commands. Defined variables and functions survive permanently in Goblins sandbox memory.]"
+                        steps-to-compact)))
+          (set! step-num steps-to-compact)
+          (string-join
+           (cons summary-text
+                 (filter-map
+                  (lambda (entry)
+                    (let ((role (car entry))
+                          (text (cdr entry)))
+                      (cond
+                       ((string=? role "user")
+                        (set! step-num (+ step-num 1))
+                        (string-append "[Step " (number->string step-num) " input] " text))
+                       ((string=? role "assistant")
+                        (string-append "[Step " (number->string step-num) " response] " (truncate-for-transcript text)))
+                       (else #f))))
+                  remaining-entries))
+           "\n")))))
 
 (define (strip-blocks text)
   "Strips markdown code blocks, thought blocks, and internal tokens from text."

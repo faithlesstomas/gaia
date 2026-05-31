@@ -25,25 +25,25 @@
 ;; We know scripts/test-tools.scm exists.
 ;; Inside container, it might be at /workspace/scripts/test-tools.scm
 (test-assert "read-file"
-  (let ((res (run-safe-code '(read-file "scripts/test-tools.scm"))))
+  (let ((res (run-safe-code '(read-file "tests/test-tools.scm"))))
     (display (format #f "Read-file Result: ~s\n" res))
     (and (string? res) (string-contains res "(test-begin \"gaia-tools\")"))))
 
 ;; 3. Test search-file (grep)
 (test-assert "search-file"
-  (let ((res (run-safe-code '(search-file "test-begin" "scripts/test-tools.scm"))))
+  (let ((res (run-safe-code '(search-file "test-begin" "tests/test-tools.scm"))))
     (and (string? res) (string-contains res "(test-begin \"gaia-tools\")"))))
 
 ;; 4. Test run-sed
 ;; Echo "hello" | sed s/hello/world/ -> No, run-sed takes a file.
 ;; Let's sed this file.
 (test-assert "run-sed"
-  (let ((res (run-safe-code '(run-sed "s/test-begin/TEST-BEGIN/g" "scripts/test-tools.scm"))))
+  (let ((res (run-safe-code '(run-sed "s/test-begin/TEST-BEGIN/g" "tests/test-tools.scm"))))
     (and (string? res) (string-contains res "(TEST-BEGIN \"gaia-tools\")"))))
 
 ;; 5. Test file-info (stat)
 (test-assert "file-info"
-  (let ((res (run-safe-code '(file-info "scripts/test-tools.scm"))))
+  (let ((res (run-safe-code '(file-info "tests/test-tools.scm"))))
     (and (string? res) (string-contains res "Size:") (string-contains res "Type: regular"))))
 
 ;; 6. Test write-file

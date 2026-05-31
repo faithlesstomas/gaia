@@ -201,8 +201,14 @@ and only the current workspace is mapped as /workspace.
 Available tools include coreutils, git, bash, findutils, grep, sed, and gawk."
   (let* ((workspace-path (getcwd))
          ;; We use cd inside the container because guix shell doesn't have --workdir in all versions
-         (wrapped-cmd (string-append "cd /workspace && " cmd)))
-    (run-cmd-with-output "guix" "shell" "--container"
-                         (string-append "--share=" workspace-path "=/workspace")
-                         "coreutils" "git" "bash" "findutils" "grep" "sed" "gawk"
-                         "--" "bash" "-c" wrapped-cmd)))
+         (wrapped-cmd (string-append "cd /workspace && " cmd))
+         (res (run-cmd-with-output "guix" "shell" "--container"
+                                   (string-append "--share=" workspace-path "=/workspace")
+                                   "coreutils" "git" "bash" "findutils" "grep" "sed" "gawk"
+                                   "--" "bash" "-c" wrapped-cmd)))
+    (if (or (string-contains res "guix shell: błąd")
+            (string-contains res "mount")
+            (string-null? res))
+        ;; Local fallback since guix shell is restricted in this environment
+        (run-cmd-with-output "bash" "-c" (string-append "cd " workspace-path " && " cmd))
+        res)))

@@ -52,13 +52,13 @@ Hardening the agentic loop to handle the "parenthesis blindness" of smaller lang
 - [ ] **Wisp (SRFI-119) Integration** — Implement the Whitespace-to-Lisp parser in the execution pipeline.
   This allows LLMs to write Scheme code using Python-like indentation, effectively solving the "parenthesis blindness"
   of small models while retaining Guile's AST-level safety and homoiconicity.
-- [ ] **Polyglot Tooling (`run-python`)** — Add a `(run-python "code")` tool to `tools.scm`.
+- [ ] **Polyglot Tooling (`run-python`)** — Add a `(run-python "code")` tool to `tools.scm` backed by a persistent `python-sandbox-actor` running in a secure Guix container, enabling a stateful multi-language REPL.
 - [ ] **RelayLLM with external API** - In phase 5, we will train own models for RelayLLM,
   but at this moment we can first use external LLM providers API for token Collaboration with local LLM.
-- [ ] **Context Pruning** — If the model makes 3+ consecutive syntax/logic errors, prune failed attempts from the transcript.
+- [ ] **Context Pruning (Step Compaction)** — Tackle the context rot problem by summarizing older RLM steps in the textual prompt while preserving 100% of defined REPL state in Goblins memory.
 - [ ] **Bailout Mechanism** — If confidence drops drastically or the error loop persists too long, pause the main loop and spawn a diagnostic sub-agent.
 - [x] **Auto-healing (Syntax Self-Repair)** — Instead of rejecting code with missing parentheses, programmatically close unmatched `)` before calling `eval`.
-- [ ] **High-level Standard Library for LLM** — Add ready-made higher-order procedures to `tools.scm`.
+- [ ] **High-level Standard Library for LLM** — Add ready-made higher-order procedures to `tools.scm`
   to offload the model from writing complex nested loops:
   - `(read-files '("A" "B"))` — batch file reading
   - `(patch-file path old-string new-string)` — in-place string replacement in files
@@ -67,7 +67,7 @@ Hardening the agentic loop to handle the "parenthesis blindness" of smaller lang
 - [ ] **G-Expressions ("Context Teleportation")** — Use GNU Guix's G-expressions (`#~`) to serialize variable contexts and modules when spawning sub-agents.
 - [ ] **The Self-Modifying Agent** — Allow GAIA to refactor its own `rlm-loop` at runtime by treating the loop logic as a mutable S-expression.
 - [ ] **Capability-Based Security (Spritely Goblins):** Transition from the current static AST whitelisting to a granular,
-  object-capability model for the RLM environment using the **Spritely Goblins** framework. This introduces a secure Actor Model for asynchronous task isolation.
+  object-capability model (Ocap) for the RLM environment using the **Spritely Goblins** framework. This introduces a secure Actor Model, transactional REPL rollbacks (rollback vat state on error), active Human-in-the-Loop (HITL) capability authorization, and Vat Forking for parallel strategy exploration.
 - [ ] **Semantic Texinfo Navigation:** Upgrade `search-guile-manual` to use semantic/vector indexing across all GNU Info manuals.
 
 ---

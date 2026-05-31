@@ -18,7 +18,8 @@
   (test-assert "Runtime Error type detection"
     (and (equal? (car result) 'error)
          (equal? (cadr result) 'runtime)
-         (string-contains (caddr result) "Error: Execution failed with exit code"))))
+         (or (string-contains (caddr result) "Error: Execution failed")
+             (string-contains (caddr result) "Runtime Error:")))))
 
 ;; Test 4: Success
 (test-equal "Success Execution"

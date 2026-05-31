@@ -1,92 +1,440 @@
 (define-module (gaia sandbox)
   #:use-module (ice-9 match)
-  #:use-module (srfi srfi-1)  ;; List library
-  #:export (make-safe-module eval-safe))
+  #:use-module (ice-9 popen)
+  #:use-module (ice-9 rdelim)
+  #:use-module (srfi srfi-1)
+  #:use-module (srfi srfi-9)   ;; Records
+  #:use-module (srfi srfi-13)  ;; Strings
+  #:use-module (gaia tools)
+  #:export (make-sandbox
+            sandbox-eval
+            sandbox-definitions
+            fork-sandbox
+            run-python-in-sandbox))
+
+(define (safe-path? path)
+  (and (not (string-contains path ".."))
+       (or (not (string-prefix? "/" path))
+           (string-prefix? (getcwd) path))))
 
 ;; Whitelist of allowed primitives from (guile)
-(define SAFE-GUILLE-EXPORTS
+(define SAFE-GUILE-EXPORTS
   '(
     ;; Arithmetic
     + - * / = > < >= <= quotient remainder modulo
     positive? negative? zero? odd? even? abs max min
-
+    
     ;; Booleans
     not and or boolean?
-
+    
     ;; Lists
     list cons car cdr pair? null? list? length append reverse
     list-ref member memq memv assoc assq assv
-    map for-each filter
-
+    map for-each filter fold append-map
+    
     ;; Strings
     string? string-length string-append substring string->number number->string
-    string=? string<? string>?
-
+    string=? string<? string>? string-suffix? string-prefix? string-contains
+    
     ;; Symbols
     symbol? symbol->string string->symbol
-
+    
     ;; Vectors
     vector? vector-length vector-ref vector-set! make-vector vector
-
+    
     ;; Control Flow
     if cond case begin let let* letrec lambda define set!
-    do while ;; Macros often need syntax-rules which is in (guile)
+    do while
     quote quasiquote unquote unquote-splicing
-
+    
     ;; Basic I/O (Stdout only)
     display newline format write read
-
+    
     ;; Exceptions (Basic)
     catch throw error
-
-    ;; File System Operations (POSIX-like)
-    stat lstat
-    stat:type stat:size stat:mode stat:mtime stat:atime stat:ctime
-    file-exists?
-    dirname basename
-
-    ;; Ports (String only - for now)
+    
+    ;; Ports (String only)
     open-input-string open-output-string get-output-string
     call-with-input-string call-with-output-string
-
-    ;; Modules
-    use-modules
     ))
 
-(define (make-safe-interface)
-  "Creates a module interface that only exports SAFE-GUILLE-EXPORTS."
-  (let ((m (make-module)))
-    (beautify-user-module! m) ;; Populate with default guile bindings first
-    ;; Now allow only whitelisted exports from this interface
-    ;; Actually, easier: Create a fresh module, and copy bindings from (guile) to it.
-    (let ((safe-m (make-module)))
-      (for-each (lambda (sym)
-                  (let ((var (module-variable (resolve-module '(guile)) sym)))
-                    (if var
-                        (module-add! safe-m sym var)
-                        (display (format #f "Warning: Symbol ~a not found in (guile).\n" sym)))))
-                SAFE-GUILLE-EXPORTS)
-      safe-m)))
+(define (make-safe-module-interface)
+  "Creates a safe module interface containing only whitelisted (guile) exports."
+  (let ((safe-m (make-module)))
+    (for-each (lambda (sym)
+                (let ((var (module-variable (resolve-module '(guile)) sym)))
+                  (if var
+                      (module-add! safe-m sym var)
+                      (display (format #f "Warning: Symbol ~a not found in (guile).\n" sym) (current-error-port)))))
+              SAFE-GUILE-EXPORTS)
+    safe-m))
 
-(define (make-safe-module)
-  "Creates a fresh module that uses ONLY the safe interface."
+(define (make-safe-sandbox-module capabilities)
+  "Creates a fresh safe module utilizing the safe interface and injecting capabilities."
   (let ((m (make-module))
-        (safe-interface (make-safe-interface)))
-    ;; We do NOT want (guile) by default. make-module creates an empty one but usually
-    ;; the system adds the-root-module.
-
-    ;; Add our safe interface
+        (safe-interface (make-safe-module-interface)))
     (module-use! m safe-interface)
-
-    ;; Add other safe libraries
+    
+    ;; Pre-load ice-9 match and regex which are standard in GAIA
     (module-use! m (resolve-interface '(ice-9 match)))
     (module-use! m (resolve-interface '(ice-9 regex)))
-    (module-use! m (resolve-interface '(srfi srfi-1)))
-    (module-use! m (resolve-interface '(srfi srfi-13)))
-    (module-use! m (resolve-interface '(gaia tools)))
+    
+    ;; Inject capabilities as procedures
+    (for-each (lambda (cap-pair)
+                (module-define! m (car cap-pair) (cdr cap-pair)))
+              capabilities)
     m))
 
-(define (eval-safe code-sexp)
-  "Evaluates s-expression in a fresh safe module."
-  (let ((m (make-safe-module)))
-    (eval code-sexp m)))
+;; Parenthesis Auto-Healer
+(define (analyze-parentheses code-string)
+  "Counts missing closing parentheses in a code string."
+  (let loop ((chars (string->list code-string))
+             (in-string? #f)
+             (in-comment? #f)
+             (escape? #f)
+             (open-parens 0)
+             (close-parens 0))
+    (if (null? chars)
+        (cond
+         ((> open-parens close-parens)
+          (cons (- open-parens close-parens)
+                (format #f "Syntax Error Hint: You have ~a opening '(' but only ~a closing ')'. You are missing ~a closing parentheses!"
+                        open-parens close-parens (- open-parens close-parens))))
+         ((< open-parens close-parens)
+          (cons 0
+                (format #f "Syntax Error Hint: You have ~a opening '(' and ~a closing ')'. You have ~a extra closing parentheses!"
+                        open-parens close-parens (- close-parens open-parens))))
+         (else (cons 0 #f)))
+        (let ((c (car chars))
+              (rest (cdr chars)))
+          (cond
+           (escape? (loop rest in-string? in-comment? #f open-parens close-parens))
+           (in-comment?
+            (if (char=? c #\newline)
+                (loop rest in-string? #f #f open-parens close-parens)
+                (loop rest in-string? #t #f open-parens close-parens)))
+           (in-string?
+            (cond
+             ((char=? c #\\) (loop rest in-string? in-comment? #t open-parens close-parens))
+             ((char=? c #\") (loop rest #f in-comment? #f open-parens close-parens))
+             (else (loop rest in-string? in-comment? #f open-parens close-parens))))
+           (else
+            (cond
+             ((char=? c #\() (loop rest in-string? in-comment? #f (+ open-parens 1) close-parens))
+             ((char=? c #\)) (loop rest in-string? in-comment? #f open-parens (+ close-parens 1)))
+             ((char=? c #\;) (loop rest in-string? #t #f open-parens close-parens))
+             ((char=? c #\") (loop rest #t in-comment? #f open-parens close-parens))
+             (else (loop rest in-string? in-comment? #f open-parens close-parens)))))))))
+
+(define (auto-heal-parentheses code-string)
+  (let* ((res (analyze-parentheses code-string))
+         (missing (car res)))
+    (if (> missing 0)
+        (string-append code-string (make-string missing #\)))
+        code-string)))
+
+;; Python process management
+(define (make-python-process)
+  (let ((open-process (module-ref (resolve-module '(ice-9 popen)) 'open-process)))
+    (catch #t
+      (lambda ()
+        (call-with-values
+            (lambda ()
+              (open-process "r+" "guix" "shell" "python" "--" "python3" "-u" "-i" "-q"))
+          (lambda (r w pid) (list pid w r))))
+      (lambda _
+        (call-with-values
+            (lambda ()
+              (open-process "r+" "python3" "-u" "-i" "-q"))
+          (lambda (r w pid) (list pid w r)))))))
+
+(define (run-python-code py-proc code)
+  (match py-proc
+    ((pid stdin stdout)
+     (display code stdin)
+     (newline stdin)
+     (display "print('__GAIA_PYTHON_DONE__')" stdin)
+     (newline stdin)
+     (force-output stdin)
+     (let loop ((output-lines '()))
+       (let ((line (read-line stdout)))
+         (cond
+          ((eof-object? line)
+           (string-join (reverse output-lines) "\n"))
+          ((string-prefix? "__GAIA_PYTHON_DONE__" line)
+           (string-join (reverse output-lines) "\n"))
+          (else
+           (loop (cons line output-lines)))))))))
+
+;; Sandbox Record holding state with persistent module
+(define-record-type <sandbox>
+  (%make-sandbox module initial-symbols python-process event-handler permission-handler)
+  sandbox?
+  (module sandbox-module set-sandbox-module!)
+  (initial-symbols sandbox-initial-symbols)
+  (python-process sandbox-python-process set-sandbox-python-process!)
+  (event-handler sandbox-event-handler)
+  (permission-handler sandbox-permission-handler))
+
+;; Module backup and restore
+(define (backup-module m initial-symbols)
+  (let ((current-symbols (module-map (lambda (sym var) sym) m)))
+    (filter-map (lambda (sym)
+                  (if (memq sym initial-symbols)
+                      #f
+                      (let ((var (module-variable m sym)))
+                        (and var (cons sym (variable-ref var))))))
+                current-symbols)))
+
+(define (restore-module! m initial-symbols backup)
+  (let ((current-symbols (module-map (lambda (sym var) sym) m))
+        (backup-syms (map car backup)))
+    ;; Remove symbols that were defined but are not in the backup or initial-symbols
+    (for-each (lambda (sym)
+                (unless (or (memq sym initial-symbols)
+                            (memq sym backup-syms))
+                  (module-remove! m sym)))
+              current-symbols)
+    ;; Restore old values from the backup
+    (for-each (lambda (pair)
+                (module-define! m (car pair) (cdr pair)))
+              backup)))
+
+(define (clone-module original-module initial-symbols)
+  (let* ((new-m (make-module))
+         (current-symbols (module-map (lambda (sym var) sym) original-module)))
+    ;; Copy imports from original module
+    (for-each (lambda (use)
+                (module-use! new-m use))
+              (module-uses original-module))
+    ;; Copy all local variables
+    (for-each (lambda (sym)
+                (let ((var (module-variable original-module sym)))
+                  (when (and var (not (memq sym initial-symbols)))
+                    (module-define! new-m sym (variable-ref var)))))
+              current-symbols)
+    new-m))
+
+(define (make-sandbox session-id event-handler permission-handler)
+  "Creates a secure sandbox environment backing variables natively in a persistent module."
+  (let* ((caps '())
+         (m (make-safe-sandbox-module caps))
+         (initial-symbols (module-map (lambda (sym var) sym) m)))
+    (%make-sandbox m initial-symbols #f event-handler permission-handler)))
+
+(define (fork-sandbox original-sandbox)
+  "Forks/clones the sandbox state functionally using module cloning."
+  (let* ((m-clone (clone-module (sandbox-module original-sandbox)
+                                (sandbox-initial-symbols original-sandbox)))
+         (py (sandbox-python-process original-sandbox))
+         (new-py (if py (make-python-process) #f)))
+    (%make-sandbox m-clone
+                   (sandbox-initial-symbols original-sandbox)
+                   new-py
+                   (sandbox-event-handler original-sandbox)
+                   (sandbox-permission-handler original-sandbox))))
+
+(define (run-python-in-sandbox sandbox code)
+  (let ((py (sandbox-python-process sandbox)))
+    (if (not py)
+        (let ((new-py (make-python-process)))
+          (set-sandbox-python-process! sandbox new-py)
+          (run-python-code new-py code))
+        (run-python-code py code))))
+
+(define (sandbox-definitions sandbox)
+  "Returns an alist of (symbol . value) for all user-defined bindings in the sandbox module."
+  (let* ((m (sandbox-module sandbox))
+         (initial-symbols (sandbox-initial-symbols sandbox))
+         (all-bindings (backup-module m initial-symbols))
+         (capability-names '(read-file write-file delete-file list-files run-command
+                             system system* run-in-sandbox run-python search-file
+                             search-guile-manual run-sed run-awk file-info
+                             guile-syntax-check git-status git-diff git-log
+                             git-ls-files guix-search guix-package-info
+                             get-system-logs get-recent-logs get-boot-logs
+                             list-boots get-kernel-logs fork-sandbox)))
+    (filter (lambda (pair)
+              (not (memq (car pair) capability-names)))
+            all-bindings)))
+
+;; Sandbox execution engine
+(define* (sandbox-eval sandbox code-string #:key (permission-handler #f) (injected-bindings '()))
+  "Evaluates Guile Scheme code securely in the persistent module, with rollback on error."
+  (let* ((healed (auto-heal-parentheses code-string))
+         (parsed (catch #t
+                   (lambda ()
+                     (with-input-from-string (string-append "(begin " healed ")")
+                       (lambda ()
+                         (let ((expr (read)))
+                           (catch #t
+                             (lambda ()
+                               (let ((next (read)))
+                                 (if (eof-object? next)
+                                     expr
+                                     (error 'syntax-error "Trailing garbage detected"))))
+                             (lambda _
+                               (error 'syntax-error "Extra closing parentheses detected")))))))
+                   (lambda (key . args)
+                     (list 'error 'syntax (format #f "Syntax Error: ~a ~a" key args))))))
+    (if (and (pair? parsed) (eq? (car parsed) 'error))
+        parsed
+        (let* ((m (sandbox-module sandbox))
+               (initial-symbols (sandbox-initial-symbols sandbox))
+               (perm-handler (or permission-handler (sandbox-permission-handler sandbox)))
+               ;; Back up current module bindings
+               (backup (backup-module m initial-symbols))
+               ;; Define capabilities
+               (caps
+                (list
+                 ;; File System Capability (fs-cap)
+                 (cons 'read-file
+                       (lambda (path)
+                         (if (not (safe-path? path))
+                             (error "Access Denied: Path outside workspace" path)
+                             (read-file path))))
+                 (cons 'write-file
+                       (lambda (path content)
+                         (if (not (safe-path? path))
+                             (error "Access Denied: Path outside workspace" path)
+                             (if perm-handler
+                                 (if (perm-handler `(write-file ,path ,content))
+                                     (write-file path content)
+                                     (throw 'user-interrupt))
+                                 (error "Permission Denied: No permission handler registered for dangerous operation")))))
+                 (cons 'delete-file
+                       (lambda (path)
+                         (if (not (safe-path? path))
+                             (error "Access Denied: Path outside workspace" path)
+                             (if perm-handler
+                                 (if (perm-handler `(delete-file ,path))
+                                     (begin
+                                       (delete-file path)
+                                       (string-append "Deleted file: " path))
+                                     (throw 'user-interrupt))
+                                 (error "Permission Denied: No permission handler registered for dangerous operation")))))
+                 (cons 'list-files
+                       (lambda (path)
+                         (if (not (safe-path? path))
+                             (error "Access Denied: Path outside workspace" path)
+                             (list-files path))))
+                 ;; Process Capability (process-cap)
+                 (cons 'run-command
+                       (lambda (cmd)
+                         (let* ((safe-prefixes '("git status" "git diff" "git log" "git ls-files" "grep" "find" "sed" "awk" "info"))
+                                (is-safe? (any (lambda (p) (string-prefix? p cmd)) safe-prefixes)))
+                           (if is-safe?
+                               (catch #t
+                                 (lambda ()
+                                   (let ((res (run-in-sandbox cmd)))
+                                     (if (string-contains res "guix shell: błąd")
+                                         (error "Guix container failed")
+                                         res)))
+                                 (lambda _
+                                   (let* ((pipe (open-pipe (string-append cmd " 2>&1") OPEN_READ))
+                                          (out (read-string pipe)))
+                                     (close-pipe pipe)
+                                     out)))
+                               (if perm-handler
+                                   (if (perm-handler `(run-command ,cmd))
+                                       (catch #t
+                                         (lambda ()
+                                           (let ((res (run-in-sandbox cmd)))
+                                             (if (string-contains res "guix shell: błąd")
+                                                 (error "Guix container failed")
+                                                 res)))
+                                         (lambda _
+                                           (let* ((pipe (open-pipe (string-append cmd " 2>&1") OPEN_READ))
+                                                  (out (read-string pipe)))
+                                             (close-pipe pipe)
+                                             out)))
+                                       (throw 'user-interrupt))
+                                   (error "Permission Denied: No permission handler registered for dangerous operation"))))))
+                 (cons 'system
+                       (lambda (cmd)
+                         (if perm-handler
+                             (if (perm-handler `(system ,cmd))
+                                 (let* ((pipe (open-pipe (string-append cmd " 2>&1") OPEN_READ))
+                                        (out (read-string pipe)))
+                                   (close-pipe pipe)
+                                   out)
+                                 (throw 'user-interrupt))
+                             (error "Permission Denied: No permission handler registered for dangerous operation"))))
+                 (cons 'system*
+                       (lambda args
+                         (let ((cmd (string-join (map (lambda (a) (format #f "~a" a)) args) " ")))
+                           (if perm-handler
+                               (if (perm-handler `(system* ,cmd))
+                                   (let* ((pipe (open-pipe (string-append cmd " 2>&1") OPEN_READ))
+                                          (out (read-string pipe)))
+                                     (close-pipe pipe)
+                                     out)
+                                   (throw 'user-interrupt))
+                               (error "Permission Denied: No permission handler registered for dangerous operation")))))
+                 (cons 'run-in-sandbox
+                       (lambda (cmd)
+                         (if perm-handler
+                             (if (perm-handler `(run-in-sandbox ,cmd))
+                                 (run-in-sandbox cmd)
+                                 (throw 'user-interrupt))
+                             (error "Permission Denied: No permission handler registered for dangerous operation"))))
+                 ;; Python Polyglot Capability (python-cap)
+                 (cons 'run-python
+                       (lambda (py-code)
+                         (if perm-handler
+                             (if (perm-handler `(run-python ,py-code))
+                                 (run-python-in-sandbox sandbox py-code)
+                                 (throw 'user-interrupt))
+                             (error "Permission Denied: No permission handler registered for dangerous operation"))))
+                 ;; Search capabilities
+                 (cons 'search-file search-file)
+                 (cons 'search-guile-manual search-guile-manual)
+                 (cons 'run-sed run-sed)
+                 (cons 'run-awk run-awk)
+                 (cons 'file-info file-info)
+                 (cons 'guile-syntax-check guile-syntax-check)
+                 ;; Git capabilities
+                 (cons 'git-status git-status)
+                 (cons 'git-diff git-diff)
+                 (cons 'git-log git-log)
+                 (cons 'git-ls-files git-ls-files)
+                 ;; Guix capabilities
+                 (cons 'guix-search guix-search)
+                 (cons 'guix-package-info guix-package-info)
+                 ;; System Logs capabilities
+                 (cons 'get-system-logs get-system-logs)
+                 (cons 'get-recent-logs get-recent-logs)
+                 (cons 'get-boot-logs get-boot-logs)
+                 (cons 'list-boots list-boots)
+                 (cons 'get-kernel-logs get-kernel-logs)
+                 ;; Fork capability
+                 (cons 'fork-sandbox (lambda () (fork-sandbox sandbox)))
+                 )))
+          
+          ;; Inject capabilities and injected bindings into the persistent module
+          (for-each (lambda (cap-pair)
+                      (module-define! m (car cap-pair) (cdr cap-pair)))
+                    (append caps injected-bindings))
+          
+          (catch #t
+            (lambda ()
+              ;; Evaluate expression, capturing stdout
+              (let* ((output-port (open-output-string))
+                     (res (with-output-to-port output-port
+                            (lambda ()
+                              (let ((val (eval parsed m)))
+                                (when (and val (not (unspecified? val)))
+                                  (write val))
+                                val))))
+                     (output (get-output-string output-port))
+                     (final-output (if (> (car (analyze-parentheses code-string)) 0)
+                                       (string-append "[Auto-healed " (number->string (car (analyze-parentheses code-string))) " missing parentheses]\n" output)
+                                       output)))
+                (close-port output-port)
+                (list 'ok final-output)))
+            (lambda (key . args)
+              ;; Automatic rollback (restore the module state to backup!)
+              (restore-module! m initial-symbols backup)
+              (if (eq? key 'user-interrupt)
+                  (apply throw key args)
+                  (list 'error 'runtime (format #f "Runtime Error: ~a ~a" key args)))))))))

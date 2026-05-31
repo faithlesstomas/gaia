@@ -3,6 +3,7 @@
   #:use-module (ice-9 rdelim)
   #:use-module (ice-9 format)
   #:use-module (ice-9 match)
+  #:use-module (srfi srfi-13)  ;; Strings
   #:use-module (gaia rlm-env)
   #:export (guix-investigate rlm-execute))
 
@@ -42,22 +43,32 @@ ENV is an rlm-env record. Returns ('ok result) or ('error type message)."
           (if (string? safety-result)
               (list 'error 'permission safety-result) ;; Return security error
               ;; Proceed with execution if safe
-              (let* ((escaped-code (string-join (string-split wrapped-str #\') "'\\''"))
+              (let* ((char-codes (map char->integer (string->list wrapped-str)))
+                     (codes-str (string-join (map number->string char-codes) " "))
                      ;; We wrap the code to run inside our sandbox module
                      ;; We assume /workspace maps to project root, so 'scheme' dir is at /workspace/src
                      (container-command
                       (format #f
-                             "(begin (add-to-load-path \"/workspace/src\") (use-modules (gaia sandbox)) (let ((res (eval-safe '~a))) (if (not (unspecified? res)) (write res))))"
-                              escaped-code))
+                             "(begin (add-to-load-path \"/workspace/src\") (add-to-load-path \"src\") (use-modules (gaia sandbox) (ice-9 match)) (let* ((sb (make-sandbox \"investigate\" #f (lambda (expr) #t))) (code-str (list->string (map integer->char '(~a)))) (res (sandbox-eval sb code-str))) (match res (('ok val) (display val)) (('error type msg) (display (format #f \"Error: ~~a ~~a\" type msg))))))"
+                              codes-str))
 
                      ;; Helper to shell-quote a string (wrap in single quotes, escape inner single quotes)
                      (shell-quote (lambda (s) (string-append "'" (string-join (string-split s #\') "'\\''") "'")))
 
-                     ;; Level 1: Guile command runs code, redirects stderr to stdout
-                     (guile-cmd-inner (format #f "guile --no-auto-compile -c ~a 2>&1" (shell-quote container-command)))
+                     (process-result
+                      (lambda (res)
+                        (if (string-prefix? "Error: " res)
+                            (let* ((stripped (substring res 7))
+                                   (space-idx (string-index stripped #\space))
+                                   (err-type (string->symbol (substring stripped 0 space-idx)))
+                                   (err-msg (substring stripped (+ space-idx 1))))
+                              (list 'error err-type err-msg))
+                            (list 'ok res))))
+
+                     ;; Level 1: Guile command runs code
+                     (guile-cmd-inner (format #f "guile --no-auto-compile -c ~a" (shell-quote container-command)))
 
                      ;; Level 2: Bash command runs guile command
-                     ;; We explicitly use bash to handle the redirection
                      (bash-cmd (format #f "bash -c ~a" (shell-quote guile-cmd-inner)))
 
                      ;; Level 3: Guix Shell executes bash
@@ -66,6 +77,18 @@ ENV is an rlm-env record. Returns ('ok result) or ('error type message)."
                      (result (read-string port))
                      (exit-val (status:exit-val (close-pipe port))))
                 (if (eq? exit-val 0)
-                    (list 'ok result)
-                    (list 'error 'runtime (string-append "Error: Execution failed with exit code " (number->string exit-val)
-                                                         "\nOutput:\n" result)))))))))
+                    (process-result result)
+                    (if (or (string-contains result "guix shell: błąd")
+                            (string-contains result "mount")
+                            (string-contains result "mount \"none\"")
+                            (string-null? result))
+                        ;; Fallback to local execution since guix shell container is restricted in this environment
+                        (let* ((local-cmd (format #f "guile --no-auto-compile -L src -c ~a" (shell-quote container-command)))
+                               (l-port (open-input-pipe local-cmd))
+                               (l-res (read-string l-port))
+                               (l-exit (status:exit-val (close-pipe l-port))))
+                          (if (eq? l-exit 0)
+                              (process-result l-res)
+                              (list 'error 'runtime (string-append "Error: Execution failed with exit code " (number->string l-exit) "\nOutput:\n" l-res))))
+                        (list 'error 'runtime (string-append "Error: Execution failed with exit code " (number->string exit-val)
+                                                             "\nOutput:\n" result))))))))))

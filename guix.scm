@@ -15,6 +15,7 @@
        guile-json-4
        guile-gnutls
        guile-fibers
+       guile-goblins
        rust
        nss-certs
        coreutils
