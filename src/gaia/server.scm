@@ -67,20 +67,71 @@
                         (rlm-eval! env code #:permission-handler (lambda (_) #t)))))))
               history-list)))
 
+;; --- Thread-Safe Queue for asynchronous CLI socket input ---
+
+(define (make-thread-queue)
+  (vector (make-mutex) '()))
+
+(define (thread-queue-push! tq item)
+  (let ((mutex (vector-ref tq 0)))
+    (with-mutex mutex
+      (vector-set! tq 1 (append (vector-ref tq 1) (list item))))))
+
+(define (thread-queue-pop-or-interrupt! tq)
+  (let ((mutex (vector-ref tq 0)))
+    (let loop ()
+      (check-interrupt!)
+      (let ((item (with-mutex mutex
+                    (let ((q (vector-ref tq 1)))
+                      (if (not (null? q))
+                          (begin
+                            (vector-set! tq 1 (cdr q))
+                            (car q))
+                          #f)))))
+        (if item
+            item
+            (begin
+              (usleep 50000) ;; Check interrupts every 50ms
+              (loop)))))))
+
 (define (handle-client client-socket)
   (set-port-encoding! client-socket "UTF-8")
-  (let* ((event-sink (lambda (event) (send-event client-socket event)))
+  (let* ((queue (make-thread-queue))
+         ;; Spawn the asynchronous socket reader
+         (reader-thread (call-with-new-thread
+                         (lambda ()
+                           (let loop ()
+                             (let* ((line (catch #t
+                                            (lambda () (read-line client-socket))
+                                            (lambda _ (with-input-from-string "" read))))
+                                    (msg (if (eof-object? line) 
+                                             line 
+                                             (catch #t 
+                                               (lambda () (with-input-from-string line read)) 
+                                               (lambda _ 'error)))))
+                               (cond
+                                ((eof-object? line)
+                                 (thread-queue-push! queue 'eof))
+                                ((equal? msg '(interrupt))
+                                 ;; Set the global *interrupted* flag in core
+                                 (let ((core-mod (resolve-module '(gaia core) #:ensure #f)))
+                                   (when core-mod
+                                     (module-set! core-mod '*interrupted* #t)))
+                                 (loop))
+                                (else
+                                 (thread-queue-push! queue msg)
+                                 (loop))))))))
+         (event-sink (lambda (event) (send-event client-socket event)))
          (permission-sink (lambda (expr)
                             (send-event client-socket `(permission-request ,(format #f "Agent wants to execute: ~a" expr)))
                             (let loop ()
-                              (let* ((line (read-line client-socket))
-                                     (msg (if (eof-object? line) line (with-input-from-string line read))))
+                              (let ((msg (thread-queue-pop-or-interrupt! queue)))
                                 (match msg
                                   (('permission-response #t) #t)
                                   (('permission-response #f) #f)
+                                  ('eof (throw 'user-interrupt))
                                   (_ (loop)))))))
-         (line (read-line client-socket))
-         (first-msg (if (eof-object? line) line (with-input-from-string line read)))
+         (first-msg (thread-queue-pop-or-interrupt! queue))
          (session-id (match first-msg
                        (('session id) id)
                        (_ (string-append "gaia-" (number->string (current-time))))))
@@ -92,9 +143,10 @@
     (let loop ((env env)
                (history history)
                (current-session-id session-id))
-      (let* ((line (read-line client-socket))
-             (msg (if (eof-object? line) line (with-input-from-string line read))))
+      (let* ((msg (thread-queue-pop-or-interrupt! queue)))
         (match msg
+          ('eof
+           (close-port client-socket))
           (('eval task)
            (catch #t
              (lambda ()

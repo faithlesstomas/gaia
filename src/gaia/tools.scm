@@ -206,8 +206,9 @@ Available tools include coreutils, git, bash, findutils, grep, sed, and gawk."
                                    (string-append "--share=" workspace-path "=/workspace")
                                    "coreutils" "git" "bash" "findutils" "grep" "sed" "gawk"
                                    "--" "bash" "-c" wrapped-cmd)))
-    (if (or (string-contains res "guix shell: błąd")
+    (if (or (string-contains res "guix shell:")
             (string-contains res "mount")
+            (string-contains res "dostę")
             (string-null? res))
         ;; Local fallback since guix shell is restricted in this environment
         (run-cmd-with-output "bash" "-c" (string-append "cd " workspace-path " && " cmd))

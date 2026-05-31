@@ -1,5 +1,6 @@
 use lexpr::Value;
 use pulldown_cmark::{Parser, Event, Tag, TagEnd};
+use regex::Regex;
 
 pub const BOLD: &str = "\x1b[1m";
 pub const DIM: &str = "\x1b[2m";
@@ -106,6 +107,46 @@ pub fn print_error(msg: &str) {
     println!("{}{}{}", RED, msg, RESET);
 }
 
+fn clean_assistant_content(text: &str) -> String {
+    let mut cleaned = text.to_string();
+
+    // 1. Strip <confidence>...</confidence> and CONFIDENCE(...)
+    if let Ok(re) = Regex::new(r"(?s)<confidence>\d+</confidence>") {
+        cleaned = re.replace_all(&cleaned, "").to_string();
+    }
+    if let Ok(re) = Regex::new(r"CONFIDENCE\(\d+\)") {
+        cleaned = re.replace_all(&cleaned, "").to_string();
+    }
+
+    // 2. Strip FINAL(...) and FINAL_VAR(...)
+    if let Ok(re) = Regex::new(r"(?s)FINAL\([^)]*\)") {
+        cleaned = re.replace_all(&cleaned, "").to_string();
+    }
+    if let Ok(re) = Regex::new(r"(?s)FINAL_VAR\([^)]*\)") {
+        cleaned = re.replace_all(&cleaned, "").to_string();
+    }
+
+    // 3. Strip Scheme code blocks entirely to keep conversation clean
+    if let Ok(re) = Regex::new(r"(?s)```repl.*?```") {
+        cleaned = re.replace_all(&cleaned, "").to_string();
+    }
+    if let Ok(re) = Regex::new(r"(?s)```scheme.*?```") {
+        cleaned = re.replace_all(&cleaned, "").to_string();
+    }
+
+    // 4. Strip <|think|>...</|think|> blocks
+    if let Ok(re) = Regex::new(r"(?s)<\|think\|>.*?</\|think\|>") {
+        cleaned = re.replace_all(&cleaned, "").to_string();
+    }
+
+    let trimmed = cleaned.trim().to_string();
+    if trimmed.is_empty() {
+        format!("{DIM}[State Update / Internal Execution]{RESET}")
+    } else {
+        trimmed
+    }
+}
+
 pub fn print_history(val: &Value) {
     match val {
         Value::Null => println!("  (no history)"),
@@ -135,10 +176,20 @@ pub fn print_history(val: &Value) {
                     "assistant" => YELLOW,
                     _ => DIM,
                 };
+                let display_name = match role.as_str() {
+                    "user" => "👤 User",
+                    "assistant" => "🤖 GAIA",
+                    _ => "❓ Unknown",
+                };
 
-                println!("{}[{}]{} ", color, role.to_uppercase(), RESET);
-                print_markdown(&content);
-                println!("{}", "-".repeat(40));
+                println!("{}{} >{} ", color, display_name, RESET);
+                let cleaned = if role == "assistant" {
+                    clean_assistant_content(&content)
+                } else {
+                    content
+                };
+                print_markdown(&cleaned);
+                println!("{}", "—".repeat(40));
 
                 current = pair.cdr().clone();
             }

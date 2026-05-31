@@ -146,7 +146,7 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                                 if let Some(msg) = c.car().as_str() {
                                     if !in_token_stream {
                                         eprint!("\r\x1b[K"); // clear status
-                                        println!("\n{BOLD}📋 Analysis:{RESET}");
+                                        println!("\n{BOLD}Analysis >{RESET}");
                                         in_token_stream = true;
                                         in_thought_stream = false;
                                     }
@@ -161,7 +161,7 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                                 if let Some(msg) = c.car().as_str() {
                                     if !in_thought_stream {
                                         eprint!("\r\x1b[K"); // clear status
-                                        println!("\n{DIM}💭 Thinking:{RESET}");
+                                        println!("\n{DIM}Thinking >{RESET}");
                                         in_thought_stream = true;
                                         in_token_stream = false;
                                     }
@@ -186,7 +186,7 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                                 if let Some(msg) = c.car().as_str() {
                                     if !in_token_stream {
                                         eprint!("\r\x1b[K");
-                                        println!("\n{BOLD}📋 Analysis:{RESET}");
+                                        println!("\n{BOLD}Analysis >{RESET}");
                                     } else {
                                         println!(); // finish the stream line
                                     }
@@ -203,7 +203,7 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                                     if in_token_stream || in_thought_stream {
                                         println!();
                                     }
-                                    println!("\n{CYAN}{BOLD}▶ Executing Scheme:{RESET}");
+                                    println!("\n{CYAN}{BOLD}Executing Scheme >{RESET}");
                                     print_scheme(code);
                                     in_token_stream = false;
                                     in_thought_stream = false;

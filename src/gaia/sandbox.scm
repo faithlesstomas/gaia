@@ -327,7 +327,7 @@
                                (catch #t
                                  (lambda ()
                                    (let ((res (run-in-sandbox cmd)))
-                                     (if (string-contains res "guix shell: błąd")
+                                     (if (string-contains res "guix shell:")
                                          (error "Guix container failed")
                                          res)))
                                  (lambda _
@@ -340,7 +340,7 @@
                                        (catch #t
                                          (lambda ()
                                            (let ((res (run-in-sandbox cmd)))
-                                             (if (string-contains res "guix shell: błąd")
+                                             (if (string-contains res "guix shell:")
                                                  (error "Guix container failed")
                                                  res)))
                                          (lambda _

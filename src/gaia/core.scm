@@ -11,7 +11,7 @@
   #:use-module (srfi srfi-13)
   #:use-module (srfi srfi-43)
   #:use-module (gaia config)
-  #:export (start-gaia SYSTEM_PROMPT extract-code extract-final-signal extract-confidence rlm-loop))
+  #:export (start-gaia SYSTEM_PROMPT extract-code extract-final-signal extract-confidence rlm-loop *interrupted* check-interrupt!))
 
 
 
@@ -24,6 +24,11 @@
 (define C-BLUE "\x1b[34m")
 (define C-CYAN "\x1b[36m")
 (define C-GREY "\x1b[90m")
+
+(define (gaia-log . args)
+  (when (getenv "GAIA_DEBUG")
+    (for-each (lambda (arg) (display arg)) args)
+    (force-output)))
 
 ;; Flag-based interrupt: signal handler sets flag, checked at safe points
 (define *interrupted* #f)
@@ -411,10 +416,10 @@ Prefers the LAST code block to support LLM self-correction patterns."
     (check-interrupt!)
     (if (> depth MAX-RECURSION-DEPTH)
         (begin
-          (display "\n[GAIA] Max recursion depth reached. Returning current state.\n")
+          (gaia-log "\n[GAIA] Max recursion depth reached. Returning current state.\n")
           (cons last-output history))
         (begin
-          (display (string-append C-GREY "\n[GAIA] Agent Depth " (number->string depth) " (Step " (number->string step) ")..." C-RESET "\n"))
+          (gaia-log (string-append C-GREY "\n[GAIA] Agent Depth " (number->string depth) " (Step " (number->string step) ")..." C-RESET "\n"))
           (let* ((response (catch #t
                             (lambda ()
                               (chat-with-llm session-id prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT)
@@ -454,7 +459,7 @@ Prefers the LAST code block to support LLM self-correction patterns."
 
               (if (string=? response-text "")
                   (begin
-                    (display (string-append C-RED "\n[GAIA] Empty response from model. Retrying..." C-RESET "\n"))
+                    (gaia-log (string-append C-RED "\n[GAIA] Empty response from model. Retrying..." C-RESET "\n"))
                     (let ((retry-transcript
                            (if (= step 1)
                                (list (cons "original-task" last-output)
@@ -482,12 +487,12 @@ or provide FINAL(answer) if you have the answer."
 
                 (when (and reasoning-text (> (string-length reasoning-text) 0))
                   (when event-handler (event-handler `(thought ,reasoning-text)))
-                  (display (string-append C-GREY "[GAIA] Thinking asynchronously... (See monitor)" C-RESET "\n")))
+                  (gaia-log (string-append C-GREY "[GAIA] Thinking asynchronously... (See monitor)" C-RESET "\n")))
 
         (let ((prose (strip-blocks response-text)))
                   (when (> (string-length prose) 0)
                     (when event-handler (event-handler `(analysis ,prose)))
-                    (display (string-append C-BLUE "\n[GAIA] Analysis: " C-RESET (markdown->ansi prose) "\n"))))
+                    (gaia-log (string-append C-BLUE "\n[GAIA] Analysis: " C-RESET (markdown->ansi prose) "\n"))))
 
                 (let ((action-code (extract-code response-text))
                       (action-delegate (extract-delegation response-text)))
@@ -496,7 +501,7 @@ or provide FINAL(answer) if you have the answer."
                     (lambda (delegation)
                       (match delegation
                         (('delegate goal context-str)
-                         (display (string-append C-BOLD C-YELLOW "\n[GAIA] Spawning Sub-Agent (Delegation):\n" C-RESET "Goal: " goal "\nContext: " context-str "\n"))
+                         (gaia-log (string-append C-BOLD C-YELLOW "\n[GAIA] Spawning Sub-Agent (Delegation):\n" C-RESET "Goal: " goal "\nContext: " context-str "\n"))
                          (let* ((sub-session-id (string-append session-id "-sub-" (number->string (random 1000000000))))
                                 (initial-input (string-append "GOAL: " goal "\nCONTEXT: " context-str))
                                 (sub-res-pair (rlm-loop sub-session-id initial-input (+ depth 1)
@@ -504,7 +509,7 @@ or provide FINAL(answer) if you have the answer."
                                                                             `(("role" . "assistant") ("content" . ,response-text))))
                                                       #:event-handler event-handler #:permission-handler permission-handler))
                                 (sub-result (car sub-res-pair)))
-                           (display (string-append C-BOLD C-GREEN "\n[GAIA] Sub-Agent completed.\n" C-RESET "Result length: "
+                           (gaia-log (string-append C-BOLD C-GREEN "\n[GAIA] Sub-Agent completed.\n" C-RESET "Result length: "
                                                    (number->string (string-length sub-result)) " chars\n"))
                            (if final-sig
                                (cons (match final-sig (('final ans) ans) (('final-var var) var) (_ "Sub-agent executed successfully"))
@@ -527,11 +532,11 @@ or provide FINAL(answer) if you have the answer."
                       (if (and code (> (string-length code) 0) (not (string=? code response-text)))
                           (begin
                             (when event-handler (event-handler `(code ,code)))
-                            (display (string-append C-BOLD C-CYAN "\n[GAIA] Executing Scheme Code:\n" C-RESET code "\n"))
+                            (gaia-log (string-append C-BOLD C-CYAN "\n[GAIA] Executing Scheme Code:\n" C-RESET code "\n"))
                             (match (rlm-execute env code #:permission-handler permission-handler)
                               (('ok result)
                                (when event-handler (event-handler `(result ,result)))
-                               (display (string-append C-GREEN "\n[REPL] Success:\n" C-RESET result "\n"))
+                               (gaia-log (string-append C-GREEN "\n[REPL] Success:\n" C-RESET result "\n"))
                                (rlm-loop-inner session-id (string-append "Code executed successfully. Result:\n" result)
                                                depth env
                                                (append history
@@ -541,7 +546,7 @@ or provide FINAL(answer) if you have the answer."
                               (('error et msg . rest)
                                (let ((feedback (handle-error et msg code depth)))
                                  (when event-handler (event-handler `(repl-error ,feedback)))
-                                 (display (string-append C-RED "\n[REPL] Runtime Error:\n" C-RESET feedback "\n"))
+                                 (gaia-log (string-append C-RED "\n[REPL] Runtime Error:\n" C-RESET feedback "\n"))
                                  (rlm-loop-inner session-id feedback depth env
                                                  (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                        `(("role" . "assistant") ("content" . ,response-text))))
@@ -553,20 +558,20 @@ or provide FINAL(answer) if you have the answer."
                     (lambda (answer)
                       (when event-handler (event-handler `(final ,answer)))
                       (if (equal? (car final-sig) 'final)
-                          (display (string-append C-BOLD "[GAIA] Final Answer: " C-RESET (markdown->ansi answer) "\n"))
-                          (display (string-append C-BOLD "[GAIA] Answer stored in: " C-RESET answer "\n")))
+                          (gaia-log (string-append C-BOLD "[GAIA] Final Answer: " C-RESET (markdown->ansi answer) "\n"))
+                          (gaia-log (string-append C-BOLD "[GAIA] Answer stored in: " C-RESET answer "\n")))
                       (cons answer (append history (list `(("role" . "user") ("content" . ,last-output))
                                                          `(("role" . "assistant") ("content" . ,response-text)))))))
 
                    ((and conf-val (>= conf-val CONFIDENCE-THRESHOLD))
                     (when event-handler (event-handler `(final ,response-text)))
-                    (display (string-append C-GREEN "\n[GAIA] ✓ High confidence (" (number->string conf-val) "%) - stopping." C-RESET "\n"))
+                    (gaia-log (string-append C-GREEN "\n[GAIA] ✓ High confidence (" (number->string conf-val) "%) - stopping." C-RESET "\n"))
                     (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
                                                               `(("role" . "assistant") ("content" . ,response-text))))))
 
                    (else
                     (when event-handler (event-handler `(final ,response-text)))
-                    (display (string-append C-RED "\n[GAIA] ⚠ No actionable output. Treating as final answer (unless low confidence)." C-RESET "\n"))
+                    (gaia-log (string-append C-RED "\n[GAIA] ⚠ No actionable output. Treating as final answer (unless low confidence)." C-RESET "\n"))
                     (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
                                                               `(("role" . "assistant") ("content" . ,response-text))))))))))))))))
 
@@ -714,7 +719,7 @@ Returns (list updated-history updated-env should-continue?)"
   ;; Flag is backup for safe-point checks when throw gets lost.
   (sigaction SIGINT (lambda (sig)
                       (set! *interrupted* #t)
-                      (display (string-append C-RED "\n[GAIA] Interrupt received. Returning to prompt..." C-RESET "\n"))
+                      (gaia-log (string-append C-RED "\n[GAIA] Interrupt received. Returning to prompt..." C-RESET "\n"))
                       (throw 'user-interrupt)))
 
   (load-config)
@@ -751,5 +756,5 @@ Returns (list updated-history updated-env should-continue?)"
                     #t))))))
         (lambda _
           (set! *interrupted* #f)  ;; Reset flag
-          (display (string-append C-YELLOW "\n[GAIA] Task interrupted by user. State preserved." C-RESET "\n"))
+          (gaia-log (string-append C-YELLOW "\n[GAIA] Task interrupted by user. State preserved." C-RESET "\n"))
           (loop chat-history global-env))))))
