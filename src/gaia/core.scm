@@ -46,6 +46,7 @@ You solve complex tasks by writing and executing GNU Guile Scheme code in a pers
 - CRITICAL: Use `(use-modules ...)` for imports.
 - Your code runs in a persistent REPL: variables and functions you define in one step are available in the next.
 - Output from `display`, `write`, `format` is captured and returned to you.
+- **Transactional REPL:** If your code throws a syntax or runtime error, the state mutations for that entire step are rolled back. Ensure your code is syntactically and logically correct to persist variables.
 
 # PRE-LOADED MODULES (already available, no need to import)
 - `(srfi srfi-1)` — List library: `filter`, `fold`, `any`, `every`, `partition`, etc.
@@ -74,6 +75,7 @@ You solve complex tasks by writing and executing GNU Guile Scheme code in a pers
 - `(git-ls-files)` — Returns a LIST of strings (all tracked files). Use `(length (git-ls-files))` to count them.
 - `(run-in-sandbox cmd)` — Executes a shell command inside an isolated Guix container (has git, coreutils, grep, sed, awk).
   Starts in the `/workspace` directory. Use for complex shell pipelines like `(run-in-sandbox \"ls | wc -l\")`.
+- `(run-python code)` — Stateful, persistent Python execution. Runs the given `code` string in a secure Python REPL container. Variables, functions, and imports in Python persist across `(run-python ...)` calls within the session.
 - SHELL PIPES: Shell pipes `|` and redirections `>` only work inside the `cmd` string of `run-in-sandbox`.
   Example: `(run-in-sandbox \"ls | wc -l\")` is VALID. `(ls | wc -l)` is INVALID Scheme.
 
