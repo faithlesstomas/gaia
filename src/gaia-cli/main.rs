@@ -61,7 +61,7 @@ fn main() -> Result<()> {
             println!("\n{YELLOW}^C (Agent interrupted by user){RESET}");
         } else {
             // At prompt - just show hint
-            println!("\n{CYAN}ℹ Type /exit or /quit to close GAIA.{RESET}");
+            println!("\n{CYAN}Info: Type /exit or /quit to close GAIA.{RESET}");
         }
     })?;
 
@@ -109,7 +109,7 @@ fn main() -> Result<()> {
             }
             Err(ReadlineError::Interrupted) => {
                 // Should not happen with check_signals(false), but handled for safety
-                println!("\n{CYAN}ℹ Type /exit or /quit to close GAIA.{RESET}");
+                println!("\n{CYAN}Info: Type /exit or /quit to close GAIA.{RESET}");
                 continue;
             }
             Err(ReadlineError::Eof) => {
@@ -213,14 +213,14 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                         "result" => {
                             if let Value::Cons(c) = cdr {
                                 if let Some(res) = c.car().as_str() {
-                                    println!("{GREEN}✔ Result:{RESET} {}", truncate_output(res, 500));
+                                    println!("{GREEN}Result >{RESET} {}", truncate_output(res, 500));
                                 }
                             }
                         }
                         "repl-error" => {
                             if let Value::Cons(c) = cdr {
                                 if let Some(msg) = c.car().as_str() {
-                                    println!("{RED}✘ REPL Error:{RESET} {}", msg);
+                                    println!("{RED}REPL Error >{RESET} {}", msg);
                                 }
                             }
                         }
@@ -234,7 +234,7 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                         "info" => {
                             if let Value::Cons(c) = cdr {
                                 if let Some(msg) = c.car().as_str() {
-                                    println!("{CYAN}ℹ {}{RESET}", msg);
+                                    println!("{CYAN}Info > {}{RESET}", msg);
                                 }
                             }
                         }
@@ -445,7 +445,7 @@ fn wait_and_print(rx: &Receiver<ServerEvent>, stream: &mut UnixStream) -> Result
                         "permission-request" => {
                             if let Value::Cons(c) = cdr {
                                 if let Some(req) = c.car().as_str() {
-                                    println!("\n{BOLD}{YELLOW}⚠ Permission Request:{RESET} {}", req);
+                                    println!("\n{BOLD}{YELLOW}Permission Request >{RESET} {}", req);
                                     let mut input = String::new();
                                     loop {
                                         print!("Allow execution? (y/N): ");
@@ -469,7 +469,7 @@ fn wait_and_print(rx: &Receiver<ServerEvent>, stream: &mut UnixStream) -> Result
                         "repl-result" => {
                             if let Value::Cons(c) = cdr {
                                 if let Some(res) = c.car().as_str() {
-                                    print_result(&format!("✔ Result: {}", res));
+                                    print_result(&format!("Result: {}", res));
                                 }
                             }
                             break;

@@ -1,6 +1,10 @@
 use lexpr::Value;
 use pulldown_cmark::{Parser, Event, Tag, TagEnd};
 use regex::Regex;
+use syntect::easy::HighlightLines;
+use syntect::parsing::SyntaxSet;
+use syntect::highlighting::{ThemeSet, Style};
+use syntect::util::as_24_bit_terminal_escaped;
 
 pub const BOLD: &str = "\x1b[1m";
 pub const DIM: &str = "\x1b[2m";
@@ -12,86 +16,25 @@ pub const MAGENTA: &str = "\x1b[35m";
 pub const BLUE: &str = "\x1b[34m";
 pub const RESET: &str = "\x1b[0m";
 
-const SCHEME_KEYWORDS: &[&str] = &[
-    "define", "define*", "lambda", "let", "let*", "letrec", "if", "cond", "else",
-    "when", "unless", "begin", "do", "case", "match", "and", "or", "not",
-    "set!", "quote", "quasiquote", "unquote", "display", "format", "newline",
-    "car", "cdr", "cons", "list", "map", "filter", "for-each", "apply",
-    "string-append", "string-length", "substring", "number->string",
-    "use-modules", "catch", "throw", "with-exception-handler",
-    "#t", "#f",
-];
-
-/// Print Scheme code with syntax highlighting
+/// Print Scheme code with syntax highlighting inside a premium ASCII box
 pub fn print_scheme(code: &str) {
-    for line in code.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with(";;") || trimmed.starts_with(";") {
-            // Comment line
-            println!("  {DIM}{CYAN}{}{RESET}", line);
-        } else {
-            print!("  ");
-            print_scheme_line(line);
-            println!();
-        }
-    }
-}
+    let ps = SyntaxSet::load_defaults_newlines();
+    let ts = ThemeSet::load_defaults();
 
-fn print_scheme_line(line: &str) {
-    let mut chars = line.chars().peekable();
-    while let Some(&ch) = chars.peek() {
-        match ch {
-            '(' | ')' => {
-                print!("{YELLOW}{}{RESET}", ch);
-                chars.next();
-            }
-            '"' => {
-                // String literal
-                let mut s = String::new();
-                s.push(ch);
-                chars.next();
-                let mut escaped = false;
-                while let Some(&c) = chars.peek() {
-                    s.push(c);
-                    chars.next();
-                    if escaped { escaped = false; continue; }
-                    if c == '\\' { escaped = true; continue; }
-                    if c == '"' { break; }
-                }
-                print!("{GREEN}{}{RESET}", s);
-            }
-            ';' => {
-                // Inline comment — rest of line
-                let rest: String = chars.collect();
-                print!("{DIM}{CYAN}{}{RESET}", rest);
-                return;
-            }
-            ' ' | '\t' => {
-                print!("{}", ch);
-                chars.next();
-            }
-            _ => {
-                // Collect a token
-                let mut token = String::new();
-                while let Some(&c) = chars.peek() {
-                    if c == '(' || c == ')' || c == ' ' || c == '\t' || c == '"' || c == ';' {
-                        break;
-                    }
-                    token.push(c);
-                    chars.next();
-                }
-                if SCHEME_KEYWORDS.contains(&token.as_str()) {
-                    print!("{MAGENTA}{BOLD}{}{RESET}", token);
-                } else if token.starts_with('#') || token.starts_with('\'') {
-                    print!("{BLUE}{}{RESET}", token);
-                } else if token.parse::<f64>().is_ok() {
-                    print!("{BLUE}{}{RESET}", token);
-                } else {
-                    print!("{}", token);
-                }
-            }
-        }
+    let syntax = ps.find_syntax_by_extension("scm")
+        .or_else(|| ps.find_syntax_by_name("Scheme"))
+        .unwrap_or_else(|| ps.find_syntax_plain_text());
+
+    let theme = &ts.themes["base16-ocean.dark"];
+    let mut h = HighlightLines::new(syntax, theme);
+
+    println!("\n{}╭─ scheme ───────────────────────────────────────────────────────────{}", DIM, RESET);
+    for line in code.lines() {
+        let ranges: Vec<(Style, &str)> = h.highlight_line(line, &ps).unwrap_or_default();
+        let escaped = as_24_bit_terminal_escaped(&ranges[..], false);
+        println!("{}│{} {}", DIM, RESET, escaped);
     }
+    println!("{}╰───────────────────────────────────────────────────────────────────{}\n", DIM, RESET);
 }
 
 
@@ -177,9 +120,9 @@ pub fn print_history(val: &Value) {
                     _ => DIM,
                 };
                 let display_name = match role.as_str() {
-                    "user" => "👤 User",
-                    "assistant" => "🤖 GAIA",
-                    _ => "❓ Unknown",
+                    "user" => "USER",
+                    "assistant" => "GAIA",
+                    _ => "UNKNOWN",
                 };
 
                 println!("{}{} >{} ", color, display_name, RESET);
