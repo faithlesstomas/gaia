@@ -143,12 +143,12 @@
       (lambda ()
         (call-with-values
             (lambda ()
-              (open-process "r+" "guix" "shell" "python" "--" "python3" "-u" "-i" "-q"))
+              (open-process "r+" "sh" "-c" "exec guix shell python -- python3 -u -i -q 2>/dev/null"))
           (lambda (r w pid) (list pid w r))))
       (lambda _
         (call-with-values
             (lambda ()
-              (open-process "r+" "python3" "-u" "-i" "-q"))
+              (open-process "r+" "sh" "-c" "exec python3 -u -i -q 2>/dev/null"))
           (lambda (r w pid) (list pid w r)))))))
 
 (define (run-python-code py-proc code)
@@ -162,7 +162,7 @@
                (display code port))))
          (lambda (key . args)
            (error "Failed to write python code to temporary file" tmp-file)))
-       (display (format #f "exec(open('~a').read())\n" tmp-file) stdin)
+       (display (format #f "exec(\"try:\\n    exec(open('~a').read())\\nexcept Exception:\\n    import traceback, sys; traceback.print_exc(file=sys.stdout)\\n\")\n" tmp-file) stdin)
        (display "print('__GAIA_PYTHON_DONE__')\n" stdin)
        (force-output stdin)
        (let loop ((output-lines '()))

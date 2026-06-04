@@ -11,7 +11,7 @@
   #:use-module (srfi srfi-13)
   #:use-module (srfi srfi-43)
   #:use-module (gaia config)
-  #:export (start-gaia SYSTEM_PROMPT extract-code extract-final-signal extract-confidence rlm-loop *interrupted* check-interrupt!))
+  #:export (start-gaia SYSTEM_PROMPT extract-code extract-final-signal extract-confidence rlm-loop *interrupted* check-interrupt! gaia-log))
 
 
 
@@ -24,11 +24,27 @@
 (define C-BLUE "\x1b[34m")
 (define C-CYAN "\x1b[36m")
 (define C-GREY "\x1b[90m")
-
 (define (gaia-log . args)
-  (when (getenv "GAIA_DEBUG")
-    (for-each (lambda (arg) (display arg)) args)
-    (force-output)))
+  (let* ((text (string-join (map (lambda (a) (format #f "~a" a)) args) ""))
+         (text (string-map (lambda (c) (if (char=? c #\return) #\space c)) text))
+         (lines (string-split text #\newline))
+         (timestamp (strftime "%Y-%m-%d %H:%M:%S" (localtime (current-time)))))
+    (for-each (lambda (line)
+                (let ((trimmed (string-trim-both line)))
+                  (unless (string-null? trimmed)
+                    (let ((formatted-line (format #f "[~a] ~a" timestamp trimmed)))
+                      ;; 1. Display to stdout (ANSI colored)
+                      (display (string-append formatted-line "\n"))
+                      (force-output)
+                      ;; 2. Write to gaia-server.log (ANSI stripped)
+                      (catch #t
+                        (lambda ()
+                          (let* ((clean-line (regexp-substitute/global #f "\x1b\\[[0-9;]*m" formatted-line 'pre "" 'post))
+                                 (port (open-file "gaia-server.log" "a")))
+                            (display (string-append clean-line "\n") port)
+                            (close-port port)))
+                        (lambda _ #f))))))
+              lines)))
 
 ;; Flag-based interrupt: signal handler sets flag, checked at safe points
 (define *interrupted* #f)
