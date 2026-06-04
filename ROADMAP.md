@@ -1,6 +1,6 @@
 # GAIA Roadmap
 
-> *Last updated: 2026-05-12*
+> *Last updated: 2026-06-04*
 >
 > This document tracks the development plan for the GAIA (GNU AI Assistant) project.
 > For an introduction to the project, see [README.md](README.md).
@@ -13,7 +13,6 @@ GAIA is a functional AI assistant with a working RLM (Recursive Language Model) 
 persistent Guile REPL environment, safety validation, trajectory logging, and LiteLLM integration.
 The core agentic loop is stable and has been validated with Gemma 4 and other models.
 
-**Codebase:** ~2350 lines of GNU Guile Scheme + Native Rust CLI Client + 12 test scripts
 **Architecture:** Rust Client - GAIA Server (Guile REPL) - LiteLLM Proxy - LLM backends (Ollama, Lemonade, external LLM API etc.)
 
 ---
@@ -74,8 +73,15 @@ Hardening the agentic loop to handle the "parenthesis blindness" of smaller lang
 
 ## Phase 2 — Headless Architecture & Terminal UX
 
-Transition from monolith to a modern client-server architecture inspired by tools like Claude Code / Cline.
+Transition from monolith to a modern client-server architecture inspired by tools like Claude Code / Antigravity CLI.
 
+- [ ] **[CRITICAL / HIGH PRIORITY] Client-Server Refactoring (De-bloat gaia-cli)**:
+  - **Clean Presentation Layer**: Move all regex parsing and cleaning (e.g. `clean_assistant_content` stripping `<|think|>`, `<confidence>`, etc.) out of the Rust client to the Guile Server. The server should emit clean, pre-parsed events (`token`, `thought`, `code`).
+  - **Server-Side Command Dispatch**: Delegate slash commands (`/model`, `/thinking`, etc.) to the server's REPL/command dispatcher. The client should just send the raw command line to the server.
+- [ ] **[CRITICAL / HIGH PRIORITY] Advanced Terminal UX (Antigravity-like)**:
+  - **Progress & Status Bar**: Implement a non-blocking inline spinner or bottom status bar showing current background RLM execution state (e.g. `[GAIA] Running grep...`) using ANSI cursor control codes or `indicatif`.
+  - **Interactive Terminal Diffs**: Show colorful git-style file diffs in the terminal using a Rust library (like `similar` + `syntect`) when requesting file modification approval.
+  - **External Editor Hook**: Implement a `/edit` command or fallback using `$EDITOR` (e.g., `emacsclient`) for editing complex multi-line prompts.
 - [ ] **Headless GAIA Engine (Fibers-based Refactoring)** — Migrate the server orchestration to **Guile Fibers**
   for high-performance, non-blocking I/O. Implement cooperative cancellation for LLM network requests (e.g., closing the port).
   **Crucially:** Maintain POSIX Threads for isolated `rlm-execute` calls so that AI-generated infinite loops can still be
@@ -134,8 +140,9 @@ Evolving GAIA from a terminal utility into a deeply integrated OS assistant, uti
   Implement a global overlay activated by shortcuts for quick intent processing, and utilize XDG Desktop Portals for secure screen context and notification reading.
 - [ ] **Phase 4B: COSMIC Ecosystem (The Future Foundation):** Develop a native, highly performant `libcosmic` Applet in Rust.
   Leverage `tokio` and the Iced architecture for zero-overhead, asynchronous UI rendering of streaming LLM responses.
-- [ ] **Alternative Interfaces (Optional):** Explore browser-based monitoring (Guile Hoot / WASM) or a dedicated Rust-based IDE (Tauri/Iced)
-  tightly coupled with the Guile REPL.
+- [ ] **Alternative Interfaces & Integrations (Optional / Mid-Term):**
+  - **Doom Emacs or Crafted Emacs Module (`+gaia`)**: Write a native `gaia.el` Emacs package connecting to `/tmp/gaia.sock`, interactive HITL diff prompts in buffers, and an Org-Babel/chat UI interface.
+  - **GAIA-Edit IDE (Long-Term)**: Design and build a standalone, modal text-editor written from scratch in Guile Scheme or Rust+Guile TUI (Phase 6/7 integration).
 
 ---
 
