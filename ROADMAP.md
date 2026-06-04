@@ -52,10 +52,10 @@ Hardening the agentic loop to handle the "parenthesis blindness" of smaller lang
 - [ ] **Wisp (SRFI-119) Integration** — Implement the Whitespace-to-Lisp parser in the execution pipeline.
   This allows LLMs to write Scheme code using Python-like indentation, effectively solving the "parenthesis blindness"
   of small models while retaining Guile's AST-level safety and homoiconicity.
-- [ ] **Polyglot Tooling (`run-python`)** — Add a `(run-python "code")` tool to `tools.scm` backed by a persistent `python-sandbox-actor` running in a secure Guix container, enabling a stateful multi-language REPL.
+- [x] **Polyglot Tooling (`run-python`)** — Add a `(run-python "code")` tool to `tools.scm` backed by a persistent `python-sandbox-actor` running in a secure Guix container, enabling a stateful multi-language REPL.
 - [ ] **RelayLLM with external API** - In phase 5, we will train own models for RelayLLM,
   but at this moment we can first use external LLM providers API for token Collaboration with local LLM.
-- [ ] **Context Pruning (Step Compaction)** — Tackle the context rot problem by summarizing older RLM steps in the textual prompt while preserving 100% of defined REPL state in Goblins memory.
+- [x] **Context Pruning (Step Compaction)** — Tackle the context rot problem by summarizing older RLM steps in the textual prompt while preserving 100% of defined REPL state in Goblins memory.
 - [ ] **Bailout Mechanism** — If confidence drops drastically or the error loop persists too long, pause the main loop and spawn a diagnostic sub-agent.
 - [x] **Auto-healing (Syntax Self-Repair)** — Instead of rejecting code with missing parentheses, programmatically close unmatched `)` before calling `eval`.
 - [ ] **High-level Standard Library for LLM** — Add ready-made higher-order procedures to `tools.scm`
