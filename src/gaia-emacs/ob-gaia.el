@@ -46,8 +46,8 @@
 BODY is the code block content.
 PARAMS is the alist of header arguments."
   (let* ((session (or (cdr (assq :session params)) "default"))
-         (session-str (prin1-to-string session))
-         (body-str (prin1-to-string body))
+         (session-str (replace-regexp-in-string "\n" "\\n" (prin1-to-string session) t t))
+         (body-str (replace-regexp-in-string "\n" "\\n" (prin1-to-string body) t t))
          (msg (format "(session %s)\n(repl %s)\n" session-str body-str))
          (socket-file (expand-file-name ob-gaia-socket-path))
          (raw-response

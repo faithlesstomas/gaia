@@ -266,8 +266,8 @@
           (('get-history)
            (send-event client-socket `(history-list ,history))
            (loop env history current-session-id))
-          (_ 
-           (gaia-log "[SERVER] Unknown request command. Terminating socket.")
+          (other 
+           (gaia-log (format #f "[SERVER] Unknown request command: ~s. Terminating socket." other))
            (close-port client-socket)))))))
 
 (define (start-server path)
