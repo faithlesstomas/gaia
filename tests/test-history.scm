@@ -24,7 +24,7 @@
 (test-group "meta-ask"
   ;; Mockujemy chat-with-llm w module źródłowym
   (module-define! (resolve-module '(gaia llm-client)) 'chat-with-llm 
-    (lambda* (session-id input model prompt #:key (think #f) (history '()))
+    (lambda* (session-id input model prompt #:key (think #f) (history '()) (stream-callback #f) #:allow-other-keys)
       `(("payload" . (("content" . "AI Response"))))))
   
   (let* ((initial-history '())
@@ -37,7 +37,7 @@
 (test-group "rlm-loop-history"
   ;; Nadpisujemy chat-with-llm, aby rlm-loop zwrócił przewidywalny wynik przez FINAL
   (module-define! (resolve-module '(gaia llm-client)) 'chat-with-llm 
-    (lambda* (session-id input model prompt #:key (think #f) (history '()))
+    (lambda* (session-id input model prompt #:key (think #f) (history '()) (stream-callback #f) #:allow-other-keys)
       `(("payload" . (("content" . "The result is FINAL(Verified Answer)"))))))
   
   (let* ((initial-history '())
@@ -52,7 +52,7 @@
 ;; --- Test 4: Propagacja historii do rlm-loop-inner ---
 (test-group "rlm-loop-history-propagation"
   (module-define! (resolve-module '(gaia llm-client)) 'chat-with-llm 
-    (lambda* (session-id input model prompt #:key (think #f) (history '()))
+    (lambda* (session-id input model prompt #:key (think #f) (history '()) (stream-callback #f) #:allow-other-keys)
       (if (and (list? history) (not (null? history)))
           `(("payload" . (("content" . "FOUND_HISTORY"))))
           `(("payload" . (("content" . "NO_HISTORY")))))))

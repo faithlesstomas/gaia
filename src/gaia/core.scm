@@ -218,20 +218,28 @@ CONFIDENCE(100)
   "Extracts Scheme code from the LLM response (```repl or ```scheme code block).
 Prefers the LAST code block to support LLM self-correction patterns."
   (let ((str (if (string? response) response (scm->json response))))
-    (cond
-     ;; Prefer ```repl blocks (RLM style)
-     ((string-contains-last str "```repl")
-      => (lambda (idx)
-           (let* ((start (+ idx 7))
-                  (end (string-contains str "```" start)))
-             (if end (substring str start end) #f))))
-     ;; Fallback: ```scheme blocks
-     ((string-contains-last str "```scheme")
-      => (lambda (idx)
-           (let* ((start (+ idx 9))
-                  (end (string-contains str "```" start)))
-             (if end (substring str start end) #f))))
-     (else #f))))
+    (let ((raw-code
+           (cond
+            ;; Prefer ```repl blocks (RLM style)
+            ((string-contains-last str "```repl")
+             => (lambda (idx)
+                  (let* ((start (+ idx 7))
+                         (end (string-contains str "```" start)))
+                    (if end (substring str start end) #f))))
+            ;; Fallback: ```scheme blocks
+            ((string-contains-last str "```scheme")
+             => (lambda (idx)
+                  (let* ((start (+ idx 9))
+                         (end (string-contains str "```" start)))
+                    (if end (substring str start end) #f))))
+            (else #f))))
+      (if raw-code
+          ;; Clean any FINAL(N) or CONFIDENCE(N) that small models mistakenly put inside code blocks
+          (let* ((cleaned (regexp-substitute/global #f "FINAL\\([^)]*\\)" raw-code 'pre "" 'post))
+                 (cleaned (regexp-substitute/global #f "CONFIDENCE\\([^)]*\\)" cleaned 'pre "" 'post))
+                 (trimmed (string-trim-both cleaned)))
+            (if (> (string-length trimmed) 0) trimmed #f))
+          #f))))
 
 (define (extract-delegation response)
   "Extracts delegation S-expression from the LLM response."
@@ -440,7 +448,10 @@ Prefers the LAST code block to support LLM self-correction patterns."
                             (lambda ()
                               (chat-with-llm session-id prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT)
                                              #:think thinking-enabled?
-                                             #:history history))
+                                             #:history history
+                                             #:stream-callback (lambda (evt)
+                                                                 (when event-handler
+                                                                   (event-handler evt)))))
                             (lambda (key . args)
                               (when (eq? key 'user-interrupt) (apply throw key args))
                               (when *interrupted*

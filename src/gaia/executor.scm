@@ -4,13 +4,44 @@
   #:use-module (ice-9 format)
   #:use-module (ice-9 match)
   #:use-module (srfi srfi-13)  ;; Strings
+  #:use-module (ice-9 threads)
   #:use-module (gaia rlm-env)
   #:export (guix-investigate rlm-execute))
 
 (define* (rlm-execute env code-string #:key (permission-handler #f))
-  "Executes code in the persistent RLM environment (fast, stateful, native).
-ENV is an rlm-env record. Returns ('ok result) or ('error type message)."
-  (rlm-eval! env code-string #:permission-handler permission-handler))
+  "Executes code in the persistent RLM environment inside a POSIX thread
+to prevent blocking the Fibers scheduler, yielding control cooperatively."
+  (let* ((result-val #f)
+         (result-err #f)
+         (done? #f)
+         (worker (call-with-new-thread
+                  (lambda ()
+                    (catch #t
+                      (lambda ()
+                        (set! result-val (rlm-eval! env code-string #:permission-handler permission-handler)))
+                      (lambda (key . args)
+                        (set! result-err (cons key args))))
+                    (set! done? #t)))))
+    (let ((interrupted? (lambda ()
+                          (module-ref (resolve-module '(gaia core)) '*interrupted*)))
+          (yield (catch #t
+                   (lambda ()
+                     (module-ref (resolve-module '(fibers scheduler)) 'yield-current-task))
+                   (lambda _ #f))))
+      (let loop ()
+        (cond
+         ((interrupted?)
+          (cancel-thread worker)
+          (throw 'user-interrupt))
+         (done?
+          (if result-err
+              (apply throw (car result-err) (cdr result-err))
+              result-val))
+         (else
+          (if yield
+              (yield)
+              (usleep 10000)) ;; Fallback if not running inside fibers
+          (loop)))))))
 
 (define BANNED-PRIMITIVES '(system system* delete-file rmdir rename-file chmod))
 

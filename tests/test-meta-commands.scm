@@ -5,7 +5,8 @@
   #:use-module (gaia core)
   #:use-module (ice-9 match)
   #:use-module (ice-9 threads)
-  #:use-module (ice-9 rdelim))
+  #:use-module (ice-9 rdelim)
+  #:use-module (fibers))
 
 (sigaction SIGPIPE SIG_IGN)
 
@@ -25,11 +26,19 @@
 
     (let ((server-thread (call-with-new-thread
                           (lambda ()
-                            (catch #t
+                            (dynamic-wind
+                              (lambda () #t)
                               (lambda ()
-                                ((@@ (gaia server) handle-client) server-port))
-                              (lambda (key . args)
-                                #f)))))) ;; Silence expected read errors on close
+                                (catch #t
+                                  (lambda ()
+                                    (run-fibers
+                                     (lambda ()
+                                       ((@@ (gaia server) handle-client) server-port))
+                                     #:drain? #t))
+                                  (lambda (key . args)
+                                    #f)))
+                              (lambda ()
+                                (close-port server-port))))))) ;; Silence expected read errors on close
       
       (define (send msg)
         (write msg client-port)

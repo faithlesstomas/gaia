@@ -6,14 +6,31 @@
   #:use-module (ice-9 receive)
   #:use-module (ice-9 optargs)
   #:use-module (ice-9 threads)
+  #:use-module (ice-9 rdelim)
+  #:use-module (ice-9 textual-ports)
+  #:use-module (srfi srfi-13)
   #:use-module (gaia utils)
   #:use-module (gaia config)
-  #:export (chat-with-llm get-models))
+  #:export (chat-with-llm get-models abort-active-llm-calls!))
 
 ;; Shared interrupt flag — set by signal handler in core.scm
 ;; We import it by reference so both modules see the same value.
 (define (interrupted?)
   (module-ref (resolve-module '(gaia core)) '*interrupted*))
+
+(define *active-llm-port* #f)
+
+(define (abort-active-llm-calls!)
+  (let ((port *active-llm-port*))
+    (when (and port (not (port-closed? port)))
+      (catch #t
+        (lambda () (close-port port))
+        (lambda _ #f))
+      (set! *active-llm-port* #f))))
+
+(define (set-nonblocking! port)
+  (fcntl port F_SETFL (logior O_NONBLOCK (fcntl port F_GETFL)))
+  (setvbuf port 'none))
 
 (define (interruptible-http-post url body headers)
   "Runs http-post in a thread so the main thread can poll for Ctrl-C.
@@ -48,7 +65,11 @@ Returns (response-header . response-body) or throws 'user-interrupt."
         (usleep 100000) ;; 100ms
         (poll))))))
 
-(define* (chat-with-llm session-id input model system-prompt #:key (think #f) (history '()))
+(define (check-interrupt!)
+  (when (interrupted?)
+    (throw 'user-interrupt)))
+
+(define* (chat-with-llm session-id input model system-prompt #:key (think #f) (history '()) (stream-callback #f))
   (let* ((host (get-config 'llm-url))
          (url (string-append host "/v1/chat/completions"))
          (messages-list (append (list `(("role" . "system") ("content" . ,system-prompt)))
@@ -57,29 +78,78 @@ Returns (response-header . response-body) or throws 'user-interrupt."
          (body (scm->json `(("model" . ,model)
                             ("messages" . ,(list->vector messages-list))
                             ("think" . ,think)
-                            ("stream" . #f))))
+                            ("stream" . ,(if stream-callback #t #f)))))
          (headers '((content-type . (application/json)))))
-    (let* ((result (interruptible-http-post url body headers))
-           (response-header (car result))
-           (response-body (cdr result)))
-      (let* ((body-str (if (string? response-body) response-body (utf8->string response-body)))
-             (json-response (catch #t
-                                   (lambda () (json->scm body-str))
-                                   (lambda (key . args)
-                                     (when (eq? key 'user-interrupt) (apply throw key args))
-                                     `(("error" . ,body-str))))))
-        ;; OpenAI format translation to GAIA expected format
-        (let ((choices (assoc-ref json-response "choices")))
-          (if (and choices (> (vector-length choices) 0))
-              (let* ((first-choice (vector-ref choices 0))
-                     (message (assoc-ref first-choice "message"))
-                     (content (if message (assoc-ref message "content") #f))
-                     (reasoning (if message (assoc-ref message "reasoning_content") #f)))
-                (if content
-                    `(("payload" . (("content" . ,content)
-                                    ("reasoning" . ,(or reasoning "")))))
-                    json-response))
-              json-response))))))
+    (if stream-callback
+        ;; Asynchronous Streaming Path
+        (let ((s (open-socket-for-uri (string->uri url))))
+          (set-nonblocking! s)
+          (receive (response response-port)
+              (http-request url #:method 'POST #:body body #:headers headers #:streaming? #t #:port s)
+            (let ((status (response-code response)))
+            (if (not (= status 200))
+                (let ((err-body (read-string response-port)))
+                  (close-port response-port)
+                  `(("error" . ,err-body)))
+                (dynamic-wind
+                  (lambda () (set! *active-llm-port* response-port))
+                  (lambda ()
+                    (let loop ((accumulated-content '())
+                               (accumulated-reasoning '()))
+                      (check-interrupt!)
+                      (let ((line (read-line response-port)))
+                        (cond
+                         ((eof-object? line)
+                          (close-port response-port)
+                          `(("payload" . (("content" . ,(string-join (reverse accumulated-content) ""))
+                                          ("reasoning" . ,(string-join (reverse accumulated-reasoning) ""))))))
+                         ((string-prefix? "data: [DONE]" line)
+                          (close-port response-port)
+                          `(("payload" . (("content" . ,(string-join (reverse accumulated-content) ""))
+                                          ("reasoning" . ,(string-join (reverse accumulated-reasoning) ""))))))
+                         ((string-prefix? "data: " line)
+                          (let* ((json-str (string-trim-both (substring line 6)))
+                                 (json-scm (catch #t
+                                             (lambda () (json->scm json-str))
+                                             (lambda _ #f))))
+                            (if json-scm
+                                (let* ((choices (assoc-ref json-scm "choices"))
+                                       (first-choice (and choices (> (vector-length choices) 0) (vector-ref choices 0)))
+                                       (delta (and first-choice (assoc-ref first-choice "delta")))
+                                       (content (and delta (assoc-ref delta "content")))
+                                       (reasoning (and delta (assoc-ref delta "reasoning_content"))))
+                                  (when (and content (> (string-length content) 0))
+                                    (stream-callback `(token ,content)))
+                                  (when (and reasoning (> (string-length reasoning) 0))
+                                    (stream-callback `(thought ,reasoning)))
+                                  (loop (if content (cons content accumulated-content) accumulated-content)
+                                        (if reasoning (cons reasoning accumulated-reasoning) accumulated-reasoning)))
+                                (loop accumulated-content accumulated-reasoning))))
+                         (else
+                          (loop accumulated-content accumulated-reasoning))))))
+                  (lambda () (set! *active-llm-port* #f)))))))
+        ;; Synchronous Non-streaming Path
+        (let* ((result (interruptible-http-post url body headers))
+               (response-header (car result))
+               (response-body (cdr result)))
+          (let* ((body-str (if (string? response-body) response-body (utf8->string response-body)))
+                 (json-response (catch #t
+                                  (lambda () (json->scm body-str))
+                                  (lambda (key . args)
+                                    (when (eq? key 'user-interrupt) (apply throw key args))
+                                    `(("error" . ,body-str))))))
+            ;; OpenAI format translation to GAIA expected format
+            (let ((choices (assoc-ref json-response "choices")))
+              (if (and choices (> (vector-length choices) 0))
+                  (let* ((first-choice (vector-ref choices 0))
+                         (message (assoc-ref first-choice "message"))
+                         (content (if message (assoc-ref message "content") #f))
+                         (reasoning (if message (assoc-ref message "reasoning_content") #f)))
+                    (if content
+                        `(("payload" . (("content" . ,content)
+                                        ("reasoning" . ,(or reasoning "")))))
+                        json-response))
+                  json-response)))))))
 
 (define (get-models)
   "Fetches the list of available models from OpenAI compatible server."
