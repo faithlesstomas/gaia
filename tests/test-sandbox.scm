@@ -104,4 +104,20 @@
         (('ok val) val)
         (_ res)))))
 
+;; 9. Test Stateful Polyglot Python REPL with Multiline Indented Code
+(test-equal "stateful-python-repl-multiline"
+  "\"45\""
+  (let ((sb (make-test-sandbox #t)))
+    ;; Run multiline python block with loop
+    (sandbox-eval sb "(run-python \"
+total = 0
+for i in range(10):
+    total += i
+\")")
+    ;; Query result
+    (let ((res (sandbox-eval sb "(run-python \"print(total)\")")))
+      (match res
+        (('ok val) val)
+        (_ res)))))
+
 (test-end "gaia-sandbox-ocap-goblins")

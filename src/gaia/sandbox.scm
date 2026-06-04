@@ -154,20 +154,28 @@
 (define (run-python-code py-proc code)
   (match py-proc
     ((pid stdin stdout)
-     (display code stdin)
-     (newline stdin)
-     (display "print('__GAIA_PYTHON_DONE__')" stdin)
-     (newline stdin)
-     (force-output stdin)
-     (let loop ((output-lines '()))
-       (let ((line (read-line stdout)))
-         (cond
-          ((eof-object? line)
-           (string-join (reverse output-lines) "\n"))
-          ((string-prefix? "__GAIA_PYTHON_DONE__" line)
-           (string-join (reverse output-lines) "\n"))
-          (else
-           (loop (cons line output-lines)))))))))
+     (let ((tmp-file (format #f "/tmp/gaia_python_~a.py" pid)))
+       (catch #t
+         (lambda ()
+           (call-with-output-file tmp-file
+             (lambda (port)
+               (display code port))))
+         (lambda (key . args)
+           (error "Failed to write python code to temporary file" tmp-file)))
+       (display (format #f "exec(open('~a').read())\n" tmp-file) stdin)
+       (display "print('__GAIA_PYTHON_DONE__')\n" stdin)
+       (force-output stdin)
+       (let loop ((output-lines '()))
+         (let ((line (read-line stdout)))
+           (cond
+            ((eof-object? line)
+             (catch #t (lambda () (delete-file tmp-file)) (lambda _ #f))
+             (string-join (reverse output-lines) "\n"))
+            ((string-prefix? "__GAIA_PYTHON_DONE__" line)
+             (catch #t (lambda () (delete-file tmp-file)) (lambda _ #f))
+             (string-join (reverse output-lines) "\n"))
+            (else
+             (loop (cons line output-lines))))))))))
 
 ;; Sandbox Record holding state with persistent module
 (define-record-type <sandbox>
