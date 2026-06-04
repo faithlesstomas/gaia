@@ -29,8 +29,23 @@ ENV is an rlm-env record. Returns ('ok result) or ('error type message)."
    ;; Atoms (symbols, numbers, strings, etc.) are always safe
    (else #t)))
 
+(define *guix-container-supported* #t)
+(define *guix-checked* #f)
+
+(define (guix-container-supported?)
+  (unless *guix-checked*
+    (let* ((pipe (open-input-pipe "guix shell --container coreutils -- echo guix-container-ok 2>&1"))
+           (res (read-string pipe)))
+      (close-pipe pipe)
+      (set! *guix-container-supported*
+            (and (string? res)
+                 (string-contains res "guix-container-ok")
+                 #t))
+      (set! *guix-checked* #t)))
+  *guix-container-supported*)
+
 (define (guix-investigate s-expression-code)
-  "Executes the given S-expression code inside a guix shell container. Returns (ok result) or (error type message)."
+  "Executes the given S-expression code inside a guix shell container if supported, falling back locally otherwise."
   (let* ((wrapped-str (format #f "(begin ~a)" s-expression-code))
          ;; Parse locally to validate
          (parsed-sexp (catch #t
@@ -69,26 +84,24 @@ ENV is an rlm-env record. Returns ('ok result) or ('error type message)."
                      (guile-cmd-inner (format #f "guile --no-auto-compile -c ~a" (shell-quote container-command)))
 
                      ;; Level 2: Bash command runs guile command
-                     (bash-cmd (format #f "bash -c ~a" (shell-quote guile-cmd-inner)))
+                     (bash-cmd (format #f "bash -c ~a" (shell-quote guile-cmd-inner))))
 
-                     ;; Level 3: Guix Shell executes bash
-                     (command (format #f "guix shell --container --share=./=/workspace guile coreutils grep sed gawk bash git guix texinfo gzip -- ~a" bash-cmd))
-                     (port (open-input-pipe command))
-                     (result (read-string port))
-                     (exit-val (status:exit-val (close-pipe port))))
-                (if (eq? exit-val 0)
-                    (process-result result)
-                    (if (or (string-contains result "guix shell: błąd")
-                            (string-contains result "mount")
-                            (string-contains result "mount \"none\"")
-                            (string-null? result))
-                        ;; Fallback to local execution since guix shell container is restricted in this environment
-                        (let* ((local-cmd (format #f "guile --no-auto-compile -L src -c ~a" (shell-quote container-command)))
-                               (l-port (open-input-pipe local-cmd))
-                               (l-res (read-string l-port))
-                               (l-exit (status:exit-val (close-pipe l-port))))
-                          (if (eq? l-exit 0)
-                              (process-result l-res)
-                              (list 'error 'runtime (string-append "Error: Execution failed with exit code " (number->string l-exit) "\nOutput:\n" l-res))))
-                        (list 'error 'runtime (string-append "Error: Execution failed with exit code " (number->string exit-val)
-                                                             "\nOutput:\n" result))))))))))
+                (if (guix-container-supported?)
+                    ;; Level 3: Guix Shell executes bash
+                    (let* ((command (format #f "guix shell --container --share=./=/workspace guile coreutils grep sed gawk bash git guix texinfo gzip -- ~a" bash-cmd))
+                           (port (open-input-pipe command))
+                           (result (read-string port))
+                           (exit-val (status:exit-val (close-pipe port))))
+                      (if (eq? exit-val 0)
+                          (process-result result)
+                          (list 'error 'runtime (string-append "Error: Execution failed with exit code " (number->string exit-val)
+                                                               "\nOutput:\n" result))))
+                    ;; Fallback to local execution since guix shell container is restricted in this environment
+                    (let* ((local-cmd (format #f "guile --no-auto-compile -L src -c ~a" (shell-quote container-command)))
+                           (l-port (open-input-pipe local-cmd))
+                           (l-res (read-string l-port))
+                           (l-exit (status:exit-val (close-pipe l-port))))
+                      (if (eq? l-exit 0)
+                          (process-result l-res)
+                          (list 'error 'runtime (string-append "Error: Execution failed with exit code " (number->string l-exit)
+                                                               "\nOutput:\n" l-res)))))))))))

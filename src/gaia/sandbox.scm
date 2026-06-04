@@ -30,7 +30,7 @@
     ;; Lists
     list cons car cdr pair? null? list? length append reverse
     list-ref member memq memv assoc assq assv
-    map for-each filter fold append-map
+    map for-each filter
     
     ;; Strings
     string? string-length string-append substring string->number number->string
@@ -78,6 +78,9 @@
     ;; Pre-load ice-9 match and regex which are standard in GAIA
     (module-use! m (resolve-interface '(ice-9 match)))
     (module-use! m (resolve-interface '(ice-9 regex)))
+    
+    ;; Pre-load srfi-1 (List library) which includes fold, append-map, any, every, etc.
+    (module-use! m (resolve-interface '(srfi srfi-1)))
     
     ;; Inject capabilities as procedures
     (for-each (lambda (cap-pair)

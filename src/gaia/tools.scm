@@ -92,7 +92,7 @@
 
 (define (search-guile-manual pattern)
   "Searches the official Guile manual using the info command."
-  (run-cmd-with-output "bash" "-c" (string-append "info --output=- --subnodes guile 2>/dev/null | grep -i -C 5 '" pattern "' | head -n 50")))
+  (run-cmd-with-output (string-append "info --output=- --subnodes guile 2>/dev/null | grep -i -C 5 '" pattern "' | head -n 50")))
 
 (define (file-info path)
   "Returns 'stat' like info."
@@ -194,22 +194,28 @@
 
 ;; --- Sandbox Tool ---
 
+(define *guix-container-supported* #t)
+(define *guix-checked* #f)
+
+(define (guix-container-supported?)
+  (unless *guix-checked*
+    (let* ((res (run-cmd-with-output "guix" "shell" "--container" "coreutils" "--" "echo" "guix-container-ok")))
+      (set! *guix-container-supported*
+            (and (string? res)
+                 (string-contains res "guix-container-ok")
+                 #t))
+      (set! *guix-checked* #t)))
+  *guix-container-supported*)
+
 (define (run-in-sandbox cmd)
-  "Executes a shell command inside an ephemeral Guix container.
-The container is isolated from the host system, without network access,
-and only the current workspace is mapped as /workspace.
-Available tools include coreutils, git, bash, findutils, grep, sed, and gawk."
-  (let* ((workspace-path (getcwd))
-         ;; We use cd inside the container because guix shell doesn't have --workdir in all versions
-         (wrapped-cmd (string-append "cd /workspace && " cmd))
-         (res (run-cmd-with-output "guix" "shell" "--container"
-                                   (string-append "--share=" workspace-path "=/workspace")
-                                   "coreutils" "git" "bash" "findutils" "grep" "sed" "gawk"
-                                   "--" "bash" "-c" wrapped-cmd)))
-    (if (or (string-contains res "guix shell:")
-            (string-contains res "mount")
-            (string-contains res "dostę")
-            (string-null? res))
-        ;; Local fallback since guix shell is restricted in this environment
-        (run-cmd-with-output "bash" "-c" (string-append "cd " workspace-path " && " cmd))
-        res)))
+  "Executes a shell command inside an ephemeral Guix container if supported, falling back locally otherwise."
+  (let ((workspace-path (getcwd)))
+    (if (guix-container-supported?)
+        (let* ((wrapped-cmd (string-append "cd /workspace && " cmd))
+               (res (run-cmd-with-output "guix" "shell" "--container"
+                                         (string-append "--share=" workspace-path "=/workspace")
+                                         "coreutils" "git" "bash" "findutils" "grep" "sed" "gawk"
+                                         "--" "bash" "-c" wrapped-cmd)))
+          res)
+        ;; Local fallback since guix shell --container is restricted in this environment
+        (run-cmd-with-output "bash" "-c" (string-append "cd " workspace-path " && " cmd)))))
