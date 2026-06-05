@@ -17,6 +17,7 @@
   `((llm-url . "http://localhost:4000")
     (model . "gemma4:e2b")
     (base-model . "gemma4:e2b")
+    (thinking . #t)
     (system-prompt . #f))) ;; Default system prompt is usually hardcoded in core, but can be overridden
 
 (define *config* (make-parameter %default-config))

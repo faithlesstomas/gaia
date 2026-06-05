@@ -11,7 +11,7 @@
   #:use-module (srfi srfi-13)
   #:use-module (srfi srfi-43)
   #:use-module (gaia config)
-  #:export (start-gaia SYSTEM_PROMPT extract-code extract-final-signal extract-confidence rlm-loop *interrupted* check-interrupt! gaia-log))
+  #:export (start-gaia SYSTEM_PROMPT extract-code extract-final-signal extract-confidence rlm-loop *interrupted* check-interrupt! gaia-log clean-assistant-content))
 
 
 
@@ -312,7 +312,6 @@ Prefers the LAST code block to support LLM self-correction patterns."
 
 (define MAX-RECURSION-DEPTH 15)
 (define CONFIDENCE-THRESHOLD 95)
-(define thinking-enabled? #f) ;; Default thinking off
 
 (define (get-trajectory-file session-id)
   (let ((env-file (getenv "GAIA_TRAJECTORIES_FILE")))
@@ -396,6 +395,57 @@ Prefers the LAST code block to support LLM self-correction patterns."
                   remaining-entries))
            "\n")))))
 
+(define (strip-tag text start-tag end-tag)
+  (let loop ((t text))
+    (let ((start (string-contains t start-tag))
+          (end (string-contains t end-tag)))
+      (cond
+       ((and start end (> end start))
+        (loop (string-append (substring t 0 start)
+                             (substring t (+ end (string-length end-tag))))))
+       (start
+        (substring t 0 start))
+       (end
+        (string-append (substring t 0 end) (substring t (+ end (string-length end-tag)))))
+       (else t)))))
+
+(define (strip-code-blocks text)
+  (let loop ((t text))
+    (let ((start (string-contains t "```")))
+      (if start
+          (let ((end (string-contains t "```" (+ start 3))))
+            (if end
+                (loop (string-append (substring t 0 start)
+                                     (substring t (+ end 3))))
+                (substring t 0 start)))
+          t))))
+
+(define (strip-macros text)
+  (let* ((t (regexp-substitute/global #f "FINAL_VAR\\([^)]*\\)" text 'pre "" 'post))
+         (t (regexp-substitute/global #f "FINAL\\([^)]*\\)" t 'pre "" 'post))
+         (t (regexp-substitute/global #f "CONFIDENCE\\([^)]*\\)" t 'pre "" 'post)))
+    t))
+
+(define (strip-internal-tokens text)
+  (let* ((t (regexp-substitute/global #f "<channel\\|>" text 'pre "" 'post))
+         (t (regexp-substitute/global #f "<unused87>tool_code" text 'pre "" 'post))
+         (t (regexp-substitute/global #f "<unused88>" text 'pre "" 'post)))
+    t))
+
+(define (clean-assistant-content text)
+  "Strips thinking blocks, confidence scores, final signals, code blocks and internal tokens."
+  (if (not (string? text))
+      ""
+      (let* ((t text)
+             (t (strip-tag t "<think>" "</think>"))
+             (t (strip-tag t "<|think|>" "</|think|>"))
+             (t (strip-tag t "<thought>" "</thought>"))
+             (t (strip-tag t "<confidence>" "</confidence>"))
+             (t (strip-code-blocks t))
+             (t (strip-macros t))
+             (t (strip-internal-tokens t)))
+        (string-trim-both t))))
+
 (define (strip-blocks text)
   "Strips markdown code blocks, thought blocks, and internal tokens from text."
   (let loop ((t text))
@@ -447,7 +497,7 @@ Prefers the LAST code block to support LLM self-correction patterns."
           (let* ((response (catch #t
                             (lambda ()
                               (chat-with-llm session-id prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT)
-                                             #:think thinking-enabled?
+                                             #:think (get-config 'thinking)
                                              #:history history
                                              #:stream-callback (lambda (evt)
                                                                  (when event-handler
@@ -516,7 +566,7 @@ or provide FINAL(answer) if you have the answer."
                   (when event-handler (event-handler `(thought ,reasoning-text)))
                   (gaia-log (string-append C-GREY "[GAIA] Thinking asynchronously... (See monitor)" C-RESET "\n")))
 
-        (let ((prose (strip-blocks response-text)))
+        (let ((prose (clean-assistant-content response-text)))
                   (when (> (string-length prose) 0)
                     (when event-handler (event-handler `(analysis ,prose)))
                     (gaia-log (string-append C-BLUE "\n[GAIA] Analysis: " C-RESET (markdown->ansi prose) "\n"))))
@@ -691,7 +741,7 @@ Returns (list updated-history updated-env should-continue?)"
 
    ;; /thinking
    ((string=? input "/thinking")
-    (display (string-append "Current thinking mode: " (if thinking-enabled? "ON" "OFF") "\n"))
+    (display (string-append "Current thinking mode: " (if (get-config 'thinking) "ON" "OFF") "\n"))
     (list history env #t))
 
    ;; /thinking <on/off>
@@ -699,13 +749,13 @@ Returns (list updated-history updated-env should-continue?)"
     (let ((arg (string-trim-both (substring input 10))))
       (cond
        ((or (string=? arg "on") (string=? arg "1"))
-        (set! thinking-enabled? #t)
+        (set-config! 'thinking #t)
         (display (string-append C-CYAN "Thinking mode ENABLED." C-RESET "\n")))
        ((or (string=? arg "off") (string=? arg "0"))
-        (set! thinking-enabled? #f)
+        (set-config! 'thinking #f)
         (display (string-append C-YELLOW "Thinking mode DISABLED." C-RESET "\n")))
        (else
-        (display (string-append "Current thinking mode: " (if thinking-enabled? "ON" "OFF") "\n"))))
+        (display (string-append "Current thinking mode: " (if (get-config 'thinking) "ON" "OFF") "\n"))))
       (list history env #t)))
 
    ;; /base-model

@@ -344,6 +344,9 @@ fn dispatch(
             Ok(Action::Continue)
         }
         _ => {
+            // Drain any stale events in the channel
+            while rx.try_recv().is_ok() {}
+
             // Send everything else directly as raw string `(eval input)` to the server
             send_sexp(
                 stream,

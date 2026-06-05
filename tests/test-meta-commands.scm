@@ -83,6 +83,7 @@
        (send '(repl "(define should-disappear 1)"))
        (receive)
        (send '(clear))
+       (receive) ;; Consume the (final ...) event
        (send '(env))
        (let ((res (receive)))
          (match res

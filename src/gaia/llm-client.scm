@@ -144,16 +144,27 @@ Returns (response-header . response-body) or throws 'user-interrupt."
            (set! buffer ""))
          (stream-callback event))))))
 
+(define (model-supports-thinking? model)
+  "Checks if a model name indicates it supports reasoning output."
+  (let ((m (string-downcase model)))
+    (or (string-contains m "think")
+        (string-contains m "r1")
+        (string-contains m "gemma4")
+        (string-contains m "reasoning"))))
+
 (define* (chat-with-llm session-id input model system-prompt #:key (think #f) (history '()) (stream-callback #f))
   (let* ((host (get-config 'llm-url))
          (url (string-append host "/v1/chat/completions"))
          (messages-list (append (list `(("role" . "system") ("content" . ,system-prompt)))
                                 history
                                 (list `(("role" . "user") ("content" . ,input)))))
-         (body (scm->json `(("model" . ,model)
-                            ("messages" . ,(list->vector messages-list))
-                            ("think" . ,think)
-                            ("stream" . ,(if stream-callback #t #f)))))
+         (body-fields `(("model" . ,model)
+                        ("messages" . ,(list->vector messages-list))
+                        ("stream" . ,(if stream-callback #t #f))))
+         (body-fields (if (model-supports-thinking? model)
+                          (append body-fields `(("think" . ,think)))
+                          body-fields))
+         (body (scm->json body-fields))
          (headers '((content-type . (application/json)))))
     (if stream-callback
         ;; Asynchronous Streaming Path
