@@ -10,7 +10,8 @@
             sandbox-eval
             sandbox-definitions
             fork-sandbox
-            run-python-in-sandbox))
+            run-python-in-sandbox
+            auto-heal-escape-sequences))
 
 (define (safe-path? path)
   (and (not (string-contains path ".."))
@@ -135,6 +136,39 @@
     (if (> missing 0)
         (string-append code-string (make-string missing #\)))
         code-string)))
+
+(define (auto-heal-escape-sequences code-string)
+  "Scans the code-string for invalid escape sequences inside string literals and double-escapes them."
+  (let loop ((chars (string->list code-string))
+             (in-string? #f)
+             (in-comment? #f)
+             (escape? #f)
+             (result '()))
+    (if (null? chars)
+        (let ((final-res (if escape? (cons #\\ result) result)))
+          (list->string (reverse final-res)))
+        (let ((c (car chars))
+              (rest (cdr chars)))
+          (cond
+           (in-comment?
+            (if (char=? c #\newline)
+                (loop rest in-string? #f #f (cons c result))
+                (loop rest in-string? #t #f (cons c result))))
+           (in-string?
+            (if escape?
+                (let ((valid-escapes '(#\n #\t #\r #\" #\\ #\0 #\a #\b #\f #\v #\x #\u #\U #\newline)))
+                  (if (memv c valid-escapes)
+                      (loop rest #t #f #f (cons c (cons #\\ result)))
+                      (loop rest #t #f #f (cons c (cons #\\ (cons #\\ result))))))
+                (cond
+                 ((char=? c #\\) (loop rest #t #f #t result))
+                 ((char=? c #\") (loop rest #f #f #f (cons c result)))
+                 (else (loop rest #t #f #f (cons c result))))))
+           (else
+            (cond
+             ((char=? c #\;) (loop rest #f #t #f (cons c result)))
+             ((char=? c #\") (loop rest #t #f #f (cons c result)))
+             (else (loop rest #f #f #f (cons c result))))))))))
 
 ;; Python process management
 (define (make-python-process)
@@ -272,7 +306,8 @@
 ;; Sandbox execution engine
 (define* (sandbox-eval sandbox code-string #:key (permission-handler #f) (injected-bindings '()))
   "Evaluates Guile Scheme code securely in the persistent module, with rollback on error."
-  (let* ((healed (auto-heal-parentheses code-string))
+  (let* ((escapes-healed (auto-heal-escape-sequences code-string))
+         (healed (auto-heal-parentheses escapes-healed))
          (parsed (catch #t
                    (lambda ()
                      (with-input-from-string (string-append "(begin " healed ")")
@@ -287,7 +322,12 @@
                              (lambda _
                                (error 'syntax-error "Extra closing parentheses detected")))))))
                    (lambda (key . args)
-                     (list 'error 'syntax (format #f "Syntax Error: ~a ~a" key args))))))
+                     (let* ((arg-str (format #f "~a" args))
+                            (hint (if (and (eq? key 'read-error)
+                                           (string-contains arg-str "escape sequence"))
+                                      "\nLLM Hint: In Guile Scheme string literals, backslashes must only be used for standard escapes (like \\n, \\t, \\\\, \\\"). Do not escape other characters (like \\} or \\$). If you need a literal backslash, use double-backslash \\\\."
+                                      "")))
+                       (list 'error 'syntax (string-append "Syntax Error (" (symbol->string key) "): " arg-str hint)))))))
     (if (and (pair? parsed) (eq? (car parsed) 'error))
         parsed
         (let* ((m (sandbox-module sandbox))

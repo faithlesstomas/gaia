@@ -75,4 +75,34 @@
     100
     (extract-confidence "FINAL(Done) CONFIDENCE(100)")))
 
+(test-group "clean-assistant-content"
+  (test-equal "No formatting cleaning"
+    "Hello world"
+    (clean-assistant-content "Hello world"))
+
+  (test-equal "Strip confidence tags"
+    "Hello"
+    (clean-assistant-content "Hello <confidence>95</confidence>"))
+
+  (test-equal "Strip think tags"
+    "Hello"
+    (clean-assistant-content "<think>thinking</think>Hello"))
+
+  (test-equal "Strip |think| tags"
+    "Hello"
+    (clean-assistant-content "Hello<|think|>thinking</|think|>"))
+
+  (test-equal "Strip code blocks"
+    "Hello"
+    (clean-assistant-content "Hello\n```repl\n(display 42)\n```"))
+
+  (test-equal "Strip FINAL and CONFIDENCE macros"
+    "Hello"
+    (clean-assistant-content "Hello FINAL(42) CONFIDENCE(90)"))
+
+  (test-equal "Strip multiline mix"
+    "Real answer here"
+    (clean-assistant-content "<think>\nThinking hard\n</think>\nReal answer here\n```repl\n(write-file \"a.txt\" \"content\")\n```\nCONFIDENCE(98)\nFINAL(answer)")))
+
 (test-end "final-signal")
+

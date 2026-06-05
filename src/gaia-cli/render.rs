@@ -1,10 +1,15 @@
 use lexpr::Value;
 use pulldown_cmark::{Parser, Event, Tag, TagEnd};
-use regex::Regex;
 use syntect::easy::HighlightLines;
 use syntect::parsing::SyntaxSet;
 use syntect::highlighting::{ThemeSet, Style};
 use syntect::util::as_24_bit_terminal_escaped;
+use similar::{ChangeTag, TextDiff};
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
+use std::io::{self, Write};
 
 pub const BOLD: &str = "\x1b[1m";
 pub const DIM: &str = "\x1b[2m";
@@ -12,8 +17,6 @@ pub const RED: &str = "\x1b[31m";
 pub const GREEN: &str = "\x1b[32m";
 pub const YELLOW: &str = "\x1b[33m";
 pub const CYAN: &str = "\x1b[36m";
-pub const MAGENTA: &str = "\x1b[35m";
-pub const BLUE: &str = "\x1b[34m";
 pub const RESET: &str = "\x1b[0m";
 
 /// Print Scheme code with syntax highlighting inside a premium ASCII box
@@ -38,56 +41,12 @@ pub fn print_scheme(code: &str) {
 }
 
 
-pub fn print_status(msg: &str) {
-    eprint!("\r{}{}{}{}", DIM, msg, " ".repeat(10), RESET);
-}
-
 pub fn print_result(msg: &str) {
     println!("{}{}{}", GREEN, msg, RESET);
 }
 
 pub fn print_error(msg: &str) {
     println!("{}{}{}", RED, msg, RESET);
-}
-
-fn clean_assistant_content(text: &str) -> String {
-    let mut cleaned = text.to_string();
-
-    // 1. Strip <confidence>...</confidence> and CONFIDENCE(...)
-    if let Ok(re) = Regex::new(r"(?s)<confidence>\d+</confidence>") {
-        cleaned = re.replace_all(&cleaned, "").to_string();
-    }
-    if let Ok(re) = Regex::new(r"CONFIDENCE\(\d+\)") {
-        cleaned = re.replace_all(&cleaned, "").to_string();
-    }
-
-    // 2. Strip FINAL(...) and FINAL_VAR(...)
-    if let Ok(re) = Regex::new(r"(?s)FINAL\([^)]*\)") {
-        cleaned = re.replace_all(&cleaned, "").to_string();
-    }
-    if let Ok(re) = Regex::new(r"(?s)FINAL_VAR\([^)]*\)") {
-        cleaned = re.replace_all(&cleaned, "").to_string();
-    }
-
-    // 3. Strip Scheme code blocks entirely to keep conversation clean
-    if let Ok(re) = Regex::new(r"(?s)```repl.*?```") {
-        cleaned = re.replace_all(&cleaned, "").to_string();
-    }
-    if let Ok(re) = Regex::new(r"(?s)```scheme.*?```") {
-        cleaned = re.replace_all(&cleaned, "").to_string();
-    }
-
-    // 4. Strip <|think|>...</|think|> blocks
-    if let Ok(re) = Regex::new(r"(?s)<\|think\|>.*?</\|think\|>") {
-        cleaned = re.replace_all(&cleaned, "").to_string();
-    }
-
-    let trimmed = cleaned.trim().to_string();
-    if trimmed.is_empty() {
-        format!("{DIM}[State Update / Internal Execution]{RESET}")
-    } else {
-        trimmed
-    }
 }
 
 pub fn print_history(val: &Value) {
@@ -126,12 +85,7 @@ pub fn print_history(val: &Value) {
                 };
 
                 println!("{}{} >{} ", color, display_name, RESET);
-                let cleaned = if role == "assistant" {
-                    clean_assistant_content(&content)
-                } else {
-                    content
-                };
-                print_markdown(&cleaned);
+                print_markdown(&content);
                 println!("{}", "—".repeat(40));
 
                 current = pair.cdr().clone();
@@ -198,5 +152,92 @@ pub fn print_list(val: &Value) {
         _ => {
             println!("  {}", val);
         }
+    }
+}
+
+pub fn print_file_diff(path: &str, new_content: &str) {
+    let old_content = std::fs::read_to_string(path).unwrap_or_default();
+    let diff = TextDiff::from_lines(old_content.as_str(), new_content);
+    
+    println!("\n{}╭─ diff: {} ───────────────────────────────────────────────────────────{}", DIM, path, RESET);
+    for change in diff.iter_all_changes() {
+        match change.tag() {
+            ChangeTag::Delete => {
+                print!("{}{}- {}{}", RED, BOLD, change, RESET);
+            }
+            ChangeTag::Insert => {
+                print!("{}{}+ {}{}", GREEN, BOLD, change, RESET);
+            }
+            ChangeTag::Equal => {
+                print!("  {}", change);
+            }
+        }
+    }
+    println!("{}╰───────────────────────────────────────────────────────────────────{}\n", DIM, RESET);
+}
+
+pub struct Spinner {
+    active: Arc<AtomicBool>,
+    message: Arc<Mutex<String>>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl Spinner {
+    pub fn new() -> Self {
+        Self {
+            active: Arc::new(AtomicBool::new(false)),
+            message: Arc::new(Mutex::new(String::new())),
+            handle: None,
+        }
+    }
+
+    pub fn start(&mut self, initial_msg: &str) {
+        if self.active.load(Ordering::SeqCst) {
+            self.update(initial_msg);
+            return;
+        }
+
+        self.active.store(true, Ordering::SeqCst);
+        *self.message.lock().unwrap() = initial_msg.to_string();
+
+        let active = Arc::clone(&self.active);
+        let message = Arc::clone(&self.message);
+
+        let handle = thread::spawn(move || {
+            let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let mut i = 0;
+            while active.load(Ordering::SeqCst) {
+                let msg = message.lock().unwrap().clone();
+                eprint!("\r\x1b[36m{}\x1b[0m \x1b[2m{}\x1b[0m", frames[i], msg);
+                let _ = io::stderr().flush();
+                thread::sleep(Duration::from_millis(80));
+                i = (i + 1) % frames.len();
+            }
+            eprint!("\r\x1b[K");
+            let _ = io::stderr().flush();
+        });
+
+        self.handle = Some(handle);
+    }
+
+    pub fn update(&self, new_msg: &str) {
+        if self.active.load(Ordering::SeqCst) {
+            *self.message.lock().unwrap() = new_msg.to_string();
+        }
+    }
+
+    pub fn stop(&mut self) {
+        if self.active.load(Ordering::SeqCst) {
+            self.active.store(false, Ordering::SeqCst);
+            if let Some(handle) = self.handle.take() {
+                let _ = handle.join();
+            }
+        }
+    }
+}
+
+impl Drop for Spinner {
+    fn drop(&mut self) {
+        self.stop();
     }
 }

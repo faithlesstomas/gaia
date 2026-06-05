@@ -300,7 +300,7 @@ Prefers the LAST code block to support LLM self-correction patterns."
     ((or 'syntax 'parse-error 'syntax-error)
      (let* ((analysis (analyze-parentheses code))
             (hint (cdr analysis)))
-       (string-append "Syntax Error in your Scheme code: " message 
+       (string-append "Syntax Error in your Scheme code: " message
                       (if hint (string-append "\n" hint) "")
                       "\nPlease check parentheses and syntax. Remember: use (use-modules ...) NOT require.")))
     ('permission
@@ -543,13 +543,13 @@ or provide FINAL(answer) if you have the answer."
                                      (append history (list `(("role" . "user") ("content" . ,last-output))
                                                            `(("role" . "assistant") ("content" . ,response-text)))))
                                (rlm-loop-inner session-id (string-append "Sub-agent execution finished. Result: " sub-result)
-                                               depth env 
+                                               depth env
                                                (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                      `(("role" . "assistant") ("content" . ,response-text))))
                                                (+ step 1) updated-transcript #:event-handler event-handler #:permission-handler permission-handler))))
                         (_
                          (rlm-loop-inner session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")"
-                                         depth env 
+                                         depth env
                                          (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                `(("role" . "assistant") ("content" . ,response-text))))
                                          (+ step 1) updated-transcript #:event-handler event-handler #:permission-handler permission-handler)))))

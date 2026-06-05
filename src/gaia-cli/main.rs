@@ -131,6 +131,7 @@ fn main() -> Result<()> {
 fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
     let mut in_token_stream = false;
     let mut in_thought_stream = false;
+    let mut spinner = Spinner::new();
 
     loop {
         match protocol::receive_event(reader) {
@@ -138,6 +139,10 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                 if let Value::Cons(cons) = &event {
                     let tag = cons.car().as_symbol().unwrap_or("");
                     let cdr = cons.cdr();
+
+                    if tag != "status" && tag != "stream-log" && tag != "log" {
+                        spinner.stop();
+                    }
 
                     match tag {
                         // === STREAMING EVENTS ===
@@ -176,7 +181,7 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                         "status" => {
                             if let Value::Cons(c) = cdr {
                                 if let Some(msg) = c.car().as_str() {
-                                    print_status(msg);
+                                    spinner.start(msg);
                                 }
                             }
                         }
@@ -263,10 +268,12 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                 }
             }
             Ok(None) => {
+                spinner.stop();
                 let _ = tx.send(ServerEvent::Closed);
                 return;
             }
             Err(e) => {
+                spinner.stop();
                 eprintln!("{RED}Listener error: {}{RESET}", e);
                 let _ = tx.send(ServerEvent::Closed);
                 return;
@@ -283,150 +290,71 @@ fn truncate_output(s: &str, max: usize) -> String {
     }
 }
 
+fn edit_prompt_in_editor() -> Result<Option<String>> {
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
+    let temp_dir = std::env::temp_dir();
+    let temp_path = temp_dir.join("gaia_prompt.scm");
+    
+    // Create an empty file
+    std::fs::write(&temp_path, "")?;
+    
+    let status = std::process::Command::new(&editor)
+        .arg(&temp_path)
+        .status()?;
+        
+    if status.success() {
+        let content = std::fs::read_to_string(&temp_path)?;
+        let _ = std::fs::remove_file(&temp_path);
+        if content.trim().is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(content))
+        }
+    } else {
+        let _ = std::fs::remove_file(&temp_path);
+        Err(anyhow::anyhow!("Editor exited with error status"))
+    }
+}
+
 fn dispatch(
     input: &str,
     stream: &mut UnixStream,
     rx: &Receiver<ServerEvent>,
     current_session_id: &mut String,
 ) -> Result<Action> {
-    if input.starts_with('/') {
-        let parts: Vec<&str> = input.split_whitespace().collect();
-        let cmd = parts[0];
+    let parts: Vec<&str> = input.split_whitespace().collect();
+    if parts.is_empty() {
+        return Ok(Action::Continue);
+    }
+    let cmd = parts[0];
 
-        match cmd {
-            "/help" => {
-                show_help();
-                Ok(Action::Continue)
-            }
-            "/exit" | "/quit" => Ok(Action::Exit),
-
-            // --- Session management (no wait — info printed by listener) ---
-            "/session" => {
-                if parts.len() > 1 {
-                    let new_id = parts[1].to_string();
-                    *current_session_id = new_id.clone();
-                    send_sexp(
-                        stream,
-                        &Value::list(vec![
-                            Value::symbol("session"),
-                            Value::string(new_id),
-                        ]),
-                    )?;
-                    // Server sends (info ...) which listener prints directly
-                } else {
-                    println!("{BOLD}Current Session ID:{RESET} {}", current_session_id);
-                }
-                Ok(Action::Continue)
-            }
-            "/sessions" => {
-                send_sexp(stream, &Value::list(vec![Value::symbol("list-sessions")]))?;
-                wait_and_print(rx, stream)?;
-                Ok(Action::Continue)
-            }
-            "/history" => {
-                send_sexp(stream, &Value::list(vec![Value::symbol("get-history")]))?;
-                wait_and_print(rx, stream)?;
-                Ok(Action::Continue)
-            }
-            "/clear" => {
-                send_sexp(stream, &Value::list(vec![Value::symbol("clear")]))?;
-                // Server sends (info ...) which listener prints directly
-                Ok(Action::Continue)
-            }
-            "/env" => {
-                send_sexp(stream, &Value::list(vec![Value::symbol("env")]))?;
-                wait_and_print(rx, stream)?;
-                Ok(Action::Continue)
-            }
-            "/eval" => {
-                if parts.len() > 1 {
-                    let code = parts[1..].join(" ");
-                    send_sexp(
-                        stream,
-                        &Value::list(vec![
-                            Value::symbol("repl"),
-                            Value::string(code),
-                        ]),
-                    )?;
-                    wait_and_print(rx, stream)?;
-                } else {
-                    print_error("Usage: /eval <scheme code>");
-                }
-                Ok(Action::Continue)
-            }
-            "/ask" => {
-                if parts.len() > 1 {
-                    let query = parts[1..].join(" ");
-                    send_sexp(
-                        stream,
-                        &Value::list(vec![
-                            Value::symbol("ask"),
-                            Value::string(query),
-                        ]),
-                    )?;
-                    wait_and_print(rx, stream)?;
-                } else {
-                    print_error("Usage: /ask <query>");
-                }
-                Ok(Action::Continue)
-            }
-
-            // --- Model/thinking: set = fire-and-forget, get = wait ---
-            "/model" => {
-                if parts.len() > 1 {
-                    let model = parts[1];
-                    send_sexp(
-                        stream,
-                        &Value::list(vec![
-                            Value::symbol("set-model"),
-                            Value::string(model.to_string()),
-                        ]),
-                    )?;
-                    // Server sends (info ...) which listener prints directly
-                } else {
-                    send_sexp(stream, &Value::list(vec![Value::symbol("get-model")]))?;
-                    wait_and_print(rx, stream)?;
-                }
-                Ok(Action::Continue)
-            }
-            "/models" => {
-                send_sexp(stream, &Value::list(vec![Value::symbol("list-models")]))?;
-                wait_and_print(rx, stream)?;
-                Ok(Action::Continue)
-            }
-            "/thinking" => {
-                if parts.len() > 1 {
-                    let state = parts[1];
-                    send_sexp(
-                        stream,
-                        &Value::list(vec![
-                            Value::symbol("set-thinking"),
-                            Value::string(state.to_string()),
-                        ]),
-                    )?;
-                    // Server sends (info ...) which listener prints directly
-                } else {
-                    send_sexp(stream, &Value::list(vec![Value::symbol("get-thinking")]))?;
-                    wait_and_print(rx, stream)?;
-                }
-                Ok(Action::Continue)
-            }
-            _ => {
-                print_error(&format!("Unknown command: {}", cmd));
-                Ok(Action::Continue)
-            }
+    match cmd {
+        "/exit" | "/quit" => Ok(Action::Exit),
+        "/help" => {
+            show_help();
+            Ok(Action::Continue)
         }
-    } else {
-        // Standard query — send eval, wait for final/error
-        send_sexp(
-            stream,
-            &Value::list(vec![
-                Value::symbol("eval"),
-                Value::string(input.to_string()),
-            ]),
-        )?;
-        wait_and_print(rx, stream)?;
-        Ok(Action::Continue)
+        "/edit" | "/e" => {
+            if let Some(edited_prompt) = edit_prompt_in_editor()? {
+                let trimmed = edited_prompt.trim();
+                if !trimmed.is_empty() {
+                    dispatch(trimmed, stream, rx, current_session_id)?;
+                }
+            }
+            Ok(Action::Continue)
+        }
+        _ => {
+            // Send everything else directly as raw string `(eval input)` to the server
+            send_sexp(
+                stream,
+                &Value::list(vec![
+                    Value::symbol("eval"),
+                    Value::string(input.to_string()),
+                ]),
+            )?;
+            wait_and_print(rx, stream)?;
+            Ok(Action::Continue)
+        }
     }
 }
 
@@ -444,23 +372,45 @@ fn wait_and_print(rx: &Receiver<ServerEvent>, stream: &mut UnixStream) -> Result
                     match tag {
                         "permission-request" => {
                             if let Value::Cons(c) = cdr {
-                                if let Some(req) = c.car().as_str() {
-                                    println!("\n{BOLD}{YELLOW}Permission Request >{RESET} {}", req);
-                                    let mut input = String::new();
-                                    loop {
-                                        print!("Allow execution? (y/N): ");
-                                        use std::io::Write;
-                                        std::io::stdout().flush()?;
-                                        input.clear();
-                                        std::io::stdin().read_line(&mut input)?;
-                                        let ans = input.trim().to_lowercase();
-                                        if ans == "y" || ans == "yes" {
-                                            send_sexp(stream, &Value::list(vec![Value::symbol("permission-response"), Value::Bool(true)]))?;
-                                            break;
-                                        } else if ans == "" || ans == "n" || ans == "no" {
-                                            send_sexp(stream, &Value::list(vec![Value::symbol("permission-response"), Value::Bool(false)]))?;
-                                            break;
+                                let expr = c.car();
+                                
+                                let mut handled_diff = false;
+                                if let Value::Cons(expr_cons) = expr {
+                                    if let Some("write-file") = expr_cons.car().as_symbol() {
+                                        if let Value::Cons(path_cons) = expr_cons.cdr() {
+                                            if let Some(path) = path_cons.car().as_str() {
+                                                if let Value::Cons(content_cons) = path_cons.cdr() {
+                                                    if let Some(content) = content_cons.car().as_str() {
+                                                        println!("\n{BOLD}{YELLOW}Permission Request: Write File{RESET}");
+                                                        print_file_diff(path, content);
+                                                        handled_diff = true;
+                                                    }
+                                                }
+                                            }
                                         }
+                                    }
+                                }
+                                
+                                if !handled_diff {
+                                    println!("\n{BOLD}{YELLOW}Permission Request: Execute Scheme Expression{RESET}");
+                                    let expr_str = format!("{}", expr);
+                                    print_scheme(&expr_str);
+                                }
+
+                                let mut input = String::new();
+                                loop {
+                                    print!("Allow execution? (y/N): ");
+                                    use std::io::Write;
+                                    std::io::stdout().flush()?;
+                                    input.clear();
+                                    std::io::stdin().read_line(&mut input)?;
+                                    let ans = input.trim().to_lowercase();
+                                    if ans == "y" || ans == "yes" {
+                                        send_sexp(stream, &Value::list(vec![Value::symbol("permission-response"), Value::Bool(true)]))?;
+                                        break;
+                                    } else if ans == "" || ans == "n" || ans == "no" {
+                                        send_sexp(stream, &Value::list(vec![Value::symbol("permission-response"), Value::Bool(false)]))?;
+                                        break;
                                     }
                                 }
                             }

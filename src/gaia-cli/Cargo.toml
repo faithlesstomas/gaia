@@ -11,6 +11,8 @@ syntect = "5"
 pulldown-cmark = "0.11"
 ctrlc = "3.4"
 regex = "1"
+similar = "2.4"
+
 
 [[bin]]
 name = "gaia-cli"
