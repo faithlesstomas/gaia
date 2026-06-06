@@ -131,6 +131,8 @@ fn main() -> Result<()> {
 fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
     let mut in_token_stream = false;
     let mut in_thought_stream = false;
+    let mut has_streamed_tokens = false;
+    let mut has_streamed_thoughts = false;
     let mut spinner = Spinner::new();
 
     loop {
@@ -149,6 +151,7 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                         "token" => {
                             if let Value::Cons(c) = cdr {
                                 if let Some(msg) = c.car().as_str() {
+                                    has_streamed_tokens = true;
                                     if !in_token_stream {
                                         eprint!("\r\x1b[K"); // clear status
                                         println!("\n{BOLD}Analysis >{RESET}");
@@ -164,6 +167,7 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                         "thought" => {
                             if let Value::Cons(c) = cdr {
                                 if let Some(msg) = c.car().as_str() {
+                                    has_streamed_thoughts = true;
                                     if !in_thought_stream {
                                         eprint!("\r\x1b[K"); // clear status
                                         println!("\n{DIM}Thinking >{RESET}");
@@ -185,17 +189,32 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                                 }
                             }
                         }
+                        "thought-full" => {
+                            if let Value::Cons(c) = cdr {
+                                if let Some(msg) = c.car().as_str() {
+                                    if !has_streamed_thoughts {
+                                        eprint!("\r\x1b[K");
+                                        println!("\n{DIM}Thinking >{RESET}");
+                                        println!("{DIM}{}{RESET}", msg);
+                                    } else {
+                                        println!(); // finish the stream line
+                                    }
+                                    in_token_stream = false;
+                                    in_thought_stream = false;
+                                }
+                            }
+                        }
                         "analysis" => {
                             // Full analysis event (fallback or final summary)
                             if let Value::Cons(c) = cdr {
                                 if let Some(msg) = c.car().as_str() {
-                                    if !in_token_stream {
+                                    if !has_streamed_tokens {
                                         eprint!("\r\x1b[K");
                                         println!("\n{BOLD}Analysis >{RESET}");
+                                        print_markdown(msg);
                                     } else {
                                         println!(); // finish the stream line
                                     }
-                                    print_markdown(msg);
                                     in_token_stream = false;
                                     in_thought_stream = false;
                                 }
@@ -259,6 +278,8 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                             }
                             in_token_stream = false;
                             in_thought_stream = false;
+                            has_streamed_tokens = false;
+                            has_streamed_thoughts = false;
                         }
 
                         _ => {

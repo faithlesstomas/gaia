@@ -120,4 +120,10 @@ for i in range(10):
         (('ok val) val)
         (_ res)))))
 
+;; 10. Test cond expression with else clause
+(test-equal "cond-with-else"
+  '(ok "default-value")
+  (let ((sb (make-test-sandbox #t)))
+    (sandbox-eval sb "(cond (#f 'not-this) (else 'default-value))")))
+
 (test-end "gaia-sandbox-ocap-goblins")

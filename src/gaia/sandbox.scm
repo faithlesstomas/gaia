@@ -44,7 +44,7 @@
     vector? vector-length vector-ref vector-set! make-vector vector
     
     ;; Control Flow
-    if cond case begin let let* letrec lambda define set!
+    if cond else => case begin let let* letrec lambda define set!
     do while
     quote quasiquote unquote unquote-splicing
     

@@ -563,7 +563,7 @@ or provide FINAL(answer) if you have the answer."
                                        (cons "assistant" (truncate-for-transcript response-text)))))))
 
                 (when (and reasoning-text (> (string-length reasoning-text) 0))
-                  (when event-handler (event-handler `(thought ,reasoning-text)))
+                  (when event-handler (event-handler `(thought-full ,reasoning-text)))
                   (gaia-log (string-append C-GREY "[GAIA] Thinking asynchronously... (See monitor)" C-RESET "\n")))
 
         (let ((prose (clean-assistant-content response-text)))
