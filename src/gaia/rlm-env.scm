@@ -10,7 +10,11 @@
             rlm-env-history
             rlm-env-module
             rlm-env-user-bindings
-            analyze-parentheses))
+            analyze-parentheses
+            rlm-env?
+            %make-rlm-env
+            rlm-env-sandbox
+            rlm-env-injected-bindings))
 
 ;; Record type for the RLM environment wrapping sandbox
 (define-record-type <rlm-env>

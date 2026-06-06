@@ -82,4 +82,7 @@
       (test-assert "output contains defined variable"
         (if (string-contains output "my-test-var = 42") #t #f)))))
 
-(test-end "gaia-history")
+(let* ((runner (test-runner-current))
+       (fail (if runner (test-runner-fail-count runner) 0)))
+  (test-end "gaia-history")
+  (exit (if (> fail 0) 1 0)))

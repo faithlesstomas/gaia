@@ -104,5 +104,8 @@
     "Real answer here"
     (clean-assistant-content "<think>\nThinking hard\n</think>\nReal answer here\n```repl\n(write-file \"a.txt\" \"content\")\n```\nCONFIDENCE(98)\nFINAL(answer)")))
 
-(test-end "final-signal")
+(let* ((runner (test-runner-current))
+       (fail (if runner (test-runner-fail-count runner) 0)))
+  (test-end "final-signal")
+  (exit (if (> fail 0) 1 0)))
 

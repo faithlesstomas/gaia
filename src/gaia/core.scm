@@ -11,7 +11,11 @@
   #:use-module (srfi srfi-13)
   #:use-module (srfi srfi-43)
   #:use-module (gaia config)
-  #:export (start-gaia SYSTEM_PROMPT extract-code extract-final-signal extract-confidence rlm-loop *interrupted* check-interrupt! gaia-log clean-assistant-content))
+  #:export (start-gaia SYSTEM_PROMPT extract-code extract-final-signal extract-confidence
+            extract-delegation markdown->ansi MAX-RECURSION-DEPTH CONFIDENCE-THRESHOLD
+            C-RESET C-BOLD C-RED C-GREEN C-YELLOW C-BLUE C-CYAN C-GREY
+            start-gaia rlm-loop *interrupted* check-interrupt! gaia-log clean-assistant-content
+            format-transcript truncate-for-transcript))
 
 
 

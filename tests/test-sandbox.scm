@@ -126,4 +126,7 @@ for i in range(10):
   (let ((sb (make-test-sandbox #t)))
     (sandbox-eval sb "(cond (#f 'not-this) (else 'default-value))")))
 
-(test-end "gaia-sandbox-ocap-goblins")
+(let* ((runner (test-runner-current))
+       (fail (if runner (test-runner-fail-count runner) 0)))
+  (test-end "gaia-sandbox-ocap-goblins")
+  (exit (if (> fail 0) 1 0)))

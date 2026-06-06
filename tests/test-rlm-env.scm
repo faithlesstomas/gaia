@@ -182,4 +182,7 @@
       2
       (length (rlm-env-history env)))))
 
-(test-end "rlm-env")
+(let* ((runner (test-runner-current))
+       (fail (if runner (test-runner-fail-count runner) 0)))
+  (test-end "rlm-env")
+  (exit (if (> fail 0) 1 0)))

@@ -110,4 +110,7 @@
 ;;   (let ((res (run-safe-code '(procedure? get-recent-logs))))
 ;;     (eq? res #t)))
 
-(test-end "gaia-tools")
+(let* ((runner (test-runner-current))
+       (fail (if runner (test-runner-fail-count runner) 0)))
+  (test-end "gaia-tools")
+  (exit (if (> fail 0) 1 0)))

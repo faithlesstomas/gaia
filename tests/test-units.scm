@@ -17,4 +17,7 @@
     (let ((result (guix-investigate "(display (+ 2 2))")))
        result)))
 
-(test-end "gaia-core")
+(let* ((runner (test-runner-current))
+       (fail (if runner (test-runner-fail-count runner) 0)))
+  (test-end "gaia-core")
+  (exit (if (> fail 0) 1 0)))

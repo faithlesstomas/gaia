@@ -88,7 +88,7 @@
        (let ((res (receive)))
          (match res
            (('env-list '()) #t)
-           (_ #f))))))
+           (_ (begin (display (format #f "[DEBUG] Received res: ~s\n" res)) #f)))))))
 
   (test-assert "/model returns current model"
     (with-test-client
@@ -100,6 +100,7 @@
            (('model-info _) #t)
            (_ #f)))))))
 
-(test-end "gaia-meta-commands")
-
-(exit 0)
+(let* ((runner (test-runner-current))
+       (fail (if runner (test-runner-fail-count runner) 0)))
+  (test-end "gaia-meta-commands")
+  (exit (if (> fail 0) 1 0)))

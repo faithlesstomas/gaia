@@ -11,7 +11,11 @@
             sandbox-definitions
             fork-sandbox
             run-python-in-sandbox
-            auto-heal-escape-sequences))
+            auto-heal-escape-sequences
+            sandbox-module
+            sandbox-initial-symbols
+            backup-module
+            restore-module!))
 
 (define (safe-path? path)
   (and (not (string-contains path ".."))

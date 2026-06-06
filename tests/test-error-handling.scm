@@ -41,4 +41,7 @@
 (test-assert "Handle Runtime Error"
   (string-contains (handle-error 'runtime "Division by zero" "(/ 1 0)" 0) "Runtime Error"))
 
-(test-end "core-error-handling")
+(let* ((runner (test-runner-current))
+       (fail (if runner (test-runner-fail-count runner) 0)))
+  (test-end "core-error-handling")
+  (exit (if (> fail 0) 1 0)))

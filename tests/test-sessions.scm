@@ -50,8 +50,10 @@
           (('ok "123") #t)
           (_ (begin (display (format #f "[DEBUG] Unexpected eval result: ~a\n" res)) #f)))))))
 
-(test-end "gaia-sessions")
-
-;; Cleanup
-(when (file-exists? "sessions/test-id.json")
-  (delete-file "sessions/test-id.json"))
+(let* ((runner (test-runner-current))
+       (fail (if runner (test-runner-fail-count runner) 0)))
+  (test-end "gaia-sessions")
+  ;; Cleanup
+  (when (file-exists? "sessions/test-id.json")
+    (delete-file "sessions/test-id.json"))
+  (exit (if (> fail 0) 1 0)))
