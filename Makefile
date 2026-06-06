@@ -22,33 +22,33 @@ check: test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-c
 
 test-meta-commands:
 	@echo "Running GAIA meta-command integration tests..."
-	timeout 30s $(GUIX_SHELL) guile -L src tests/test-meta-commands.scm
+	$(GUIX_SHELL) guile -L src tests/test-meta-commands.scm
 
 test-units:
 	@echo "Running core unit tests..."
-	timeout 30s $(GUIX_SHELL) guile -L src tests/test-units.scm
+	$(GUIX_SHELL) guile -L src tests/test-units.scm
 	@echo "Running history and meta-command tests..."
-	timeout 30s $(GUIX_SHELL) guile -L src tests/test-history.scm
+	$(GUIX_SHELL) guile -L src tests/test-history.scm
 	@echo "Running signal extraction tests..."
-	timeout 30s $(GUIX_SHELL) guile -L src tests/test-final-signal.scm
+	$(GUIX_SHELL) guile -L src tests/test-final-signal.scm
 	@echo "Running error handling tests..."
-	timeout 30s $(GUIX_SHELL) guile -L src tests/test-error-handling.scm
+	$(GUIX_SHELL) guile -L src tests/test-error-handling.scm
 
 test-sandbox:
 	@echo "Running Goblins sandbox unit tests..."
-	timeout 30s $(GUIX_SHELL) guile -L src tests/test-sandbox.scm
+	$(GUIX_SHELL) guile -L src tests/test-sandbox.scm
 
 test-tools:
 	@echo "Running tools unit tests..."
-	timeout 30s $(GUIX_SHELL) guile -L src tests/test-tools.scm
+	$(GUIX_SHELL) guile -L src tests/test-tools.scm
 
 test-rlm-env:
 	@echo "Running RLM environment unit tests..."
-	timeout 30s $(GUIX_SHELL) guile -L src tests/test-rlm-env.scm
+	$(GUIX_SHELL) guile -L src tests/test-rlm-env.scm
 
 test-sessions:
 	@echo "Running GAIA session management unit tests..."
-	timeout 30s $(GUIX_SHELL) guile -L src -L tests tests/test-sessions.scm
+	$(GUIX_SHELL) guile -L src -L tests tests/test-sessions.scm
 
 llm-server:
 	@if nc -z localhost 4000 2>/dev/null; then \

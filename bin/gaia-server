@@ -1,4 +1,6 @@
-#!/usr/bin/env -S guile -L src
+#!/bin/sh
+eval "$(guix shell -m guix.scm --search-paths 2>/dev/null || true)"
+exec guile -L src -s "$0" "$@"
 !#
 (use-modules (gaia server))
 
