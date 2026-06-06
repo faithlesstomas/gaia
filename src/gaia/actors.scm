@@ -7,6 +7,8 @@
   #:use-module (goblins actor-lib methods)
   #:use-module (goblins actor-lib joiners)
   #:use-module (srfi srfi-11)
+  #:use-module (ice-9 suspendable-ports)
+  #:use-module (ice-9 threads)
   #:use-module (gaia sandbox)
   #:use-module (gaia executor)
   #:use-module (gaia rlm-env)
@@ -88,26 +90,54 @@
            (cloned-env (%make-rlm-env cloned-sb (rlm-env-history env) (rlm-env-injected-bindings env))))
       (spawn ^repl-sandbox-from-env cloned-env) ) ] ) )
 
+(define (clear-goblins-context!)
+  "Reset Goblins parameters in the current fiber's dynamic environment."
+  (let ((current-syscaller (false-if-exception (@@ (goblins core) current-syscaller)))
+        (current-sleep-profile (false-if-exception (@@ (goblins core) current-sleep-profile)))
+        (current-vat (false-if-exception (@@ (goblins repl) current-vat)))
+        (current-repl-vat (false-if-exception (@@ (goblins vrun) current-repl-vat))))
+    (when current-syscaller (current-syscaller #f))
+    (when current-sleep-profile (current-sleep-profile #f))
+    (when current-vat (current-vat #f))
+    (when current-repl-vat (current-repl-vat #f))))
+
 ;; 2. LLM Client Actor
-(define-actor (^llm-client bcom session-vat client-dynamic-state)
+(define-actor (^llm-client bcom session-vat)
   (methods
    [(chat session-id prompt model system-prompt think history stream-callback)
     (let-values (((promo resolver) (spawn-promise-and-resolver)))
-      (spawn-fiber
-       (lambda ()
-         (with-dynamic-state client-dynamic-state
-           (lambda ()
+      (let ((channel (make-channel)))
+        ;; Spawn a POSIX thread to handle the synchronous HTTP request
+        (call-with-new-thread
+         (lambda ()
+           (parameterize ((current-read-waiter (@@ (ice-9 suspendable-ports) default-read-waiter))
+                          (current-write-waiter (@@ (ice-9 suspendable-ports) default-write-waiter)))
              (catch #t
                (lambda ()
                  (let ((res (chat-with-llm session-id prompt model system-prompt
                                            #:think think
                                            #:history history
-                                           #:stream-callback stream-callback)))
-                   (with-vat session-vat
-                     ($ resolver 'fulfill res))))
+                                           #:stream-callback (lambda (evt)
+                                                               (put-message channel `(stream ,evt))))))
+                   (put-message channel `(done ,res))))
                (lambda (key . args)
-                 (with-vat session-vat
-                   ($ resolver 'fulfill `(("error" . ,(format #f "Exception inside spawned fiber: ~a ~a" key args)))))))))))
+                 (put-message channel `(error ,(format #f "~s ~s" key args))))))))
+        
+        ;; Spawn a fiber to read from the channel and fulfill the resolver
+        (spawn-fiber
+         (lambda ()
+           (clear-goblins-context!)
+           (let loop ()
+             (let ((msg (get-message channel)))
+               (match msg
+                 (('stream evt)
+                  (when stream-callback
+                    (stream-callback evt))
+                  (loop))
+                 (('done res)
+                  (<-np-extern resolver 'fulfill res))
+                 (('error err)
+                  (<-np-extern resolver 'fulfill `(("error" . ,err))))))))))
       promo)]))
 
 

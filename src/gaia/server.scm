@@ -87,8 +87,7 @@
 (define (handle-client client-socket)
   (set-port-encoding! client-socket "UTF-8")
   (set-nonblocking! client-socket)
-  (let ((client-dynamic-state (current-dynamic-state))
-        (channel (make-channel)))
+  (let ((channel (make-channel)))
     ;; Spawn the asynchronous socket reader fiber
     (spawn-fiber
      (lambda ()
@@ -137,7 +136,7 @@
            (orchestrator
             (with-vat session-vat
               (let* ((sandbox-actor (spawn ^repl-sandbox session-id event-sink permission-sink history))
-                     (llm-client (spawn ^llm-client session-vat client-dynamic-state))
+                     (llm-client (spawn ^llm-client session-vat))
                      (agent-actor (spawn ^agent-actor session-id sandbox-actor llm-client event-sink permission-sink)))
                 (spawn ^session-orchestrator session-id client-socket channel sandbox-actor agent-actor llm-client history)))))
       (gaia-log (format #f "[SERVER] Session initialized (Goblins Vat): ~a" session-id))

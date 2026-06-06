@@ -28,8 +28,9 @@
          (result #f))
     (run-fibers
      (lambda ()
-       (let* ((clean-state (current-dynamic-state))
-              (llm-client (with-vat session-vat (spawn ^llm-client session-vat clean-state))))
+       ;; Clear Goblins parameters for the current fiber (since run-fibers might inherit them,
+       ;; or we want to simulate the environment of the actor-spawned fiber)
+       (let ((llm-client (with-vat session-vat (spawn ^llm-client session-vat))))
          (with-vat session-vat
            (let ((p (<- llm-client 'chat "session-1" "hello" "gemma" "sys" #f '() (lambda (evt) #t))))
              (on p
@@ -48,8 +49,7 @@
          (let loop ()
            (unless done?
              (sleep 0.01)
-             (loop))))
-       )
+             (loop)))))
      #:drain? #t)
     (display (format #f "[TEST] done?: ~s, result: ~s\n" done? result))
     (and done?
