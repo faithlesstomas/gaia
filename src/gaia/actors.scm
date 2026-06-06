@@ -89,13 +89,27 @@
       (spawn ^repl-sandbox-from-env cloned-env) ) ] ) )
 
 ;; 2. LLM Client Actor
-(define-actor (^llm-client bcom)
+(define-actor (^llm-client bcom session-vat client-dynamic-state)
   (methods
    [(chat session-id prompt model system-prompt think history stream-callback)
-    (chat-with-llm session-id prompt model system-prompt
-                   #:think think
-                   #:history history
-                   #:stream-callback stream-callback)]))
+    (let-values (((promo resolver) (spawn-promise-and-resolver)))
+      (spawn-fiber
+       (lambda ()
+         (with-dynamic-state client-dynamic-state
+           (lambda ()
+             (catch #t
+               (lambda ()
+                 (let ((res (chat-with-llm session-id prompt model system-prompt
+                                           #:think think
+                                           #:history history
+                                           #:stream-callback stream-callback)))
+                   (with-vat session-vat
+                     ($ resolver 'fulfill res))))
+               (lambda (key . args)
+                 (with-vat session-vat
+                   ($ resolver 'fulfill `(("error" . ,(format #f "Exception inside spawned fiber: ~a ~a" key args)))))))))))
+      promo)]))
+
 
 ;; 3. Agent Actor (Recursive Language Model Loop)
 (define-actor (^agent-actor bcom session-id sandbox llm-client event-handler permission-handler)
@@ -113,7 +127,7 @@
     (if (> depth MAX-RECURSION-DEPTH)
         (begin
           (gaia-log "\n[GAIA] Max recursion depth reached. Returning current state.\n")
-          (resolve-promise (cons last-output history)))
+          (<- resolve-promise 'fulfill (cons last-output history)))
         (begin
           (when event-handler (event-handler `(status ,(format #f "Agent Depth ~a (Step ~a)..." depth step))))
           (let* ((prompt (if (null? transcript)
@@ -190,7 +204,7 @@
                                            (gaia-log (string-append C-BOLD C-GREEN "\n[GAIA] Sub-Agent completed.\n" C-RESET "Result length: "
                                                                    (number->string (string-length sub-ans)) " chars\n"))
                                            (if final-sig
-                                               (resolve-promise (cons (match final-sig (('final ans) ans) (('final-var var) var) (_ "Sub-agent executed successfully"))
+                                               (<- resolve-promise 'fulfill (cons (match final-sig (('final ans) ans) (('final-var var) var) (_ "Sub-agent executed successfully"))
                                                                       (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                                             `(("role" . "assistant") ("content" . ,response-text))))))
                                                (<- self 'solve-step task depth
@@ -240,7 +254,7 @@
                                                         (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                               `(("role" . "assistant") ("content" . ,response-text))))
                                                         (+ step 1) updated-transcript err-str resolve-promise))))))
-                                (resolve-promise (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
+                                (<- resolve-promise 'fulfill (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                                            `(("role" . "assistant") ("content" . ,response-text))))))))
                            
                            ;; Case C: Final Signal
@@ -250,25 +264,25 @@
                               (if (equal? (car final-sig) 'final)
                                   (gaia-log (string-append C-BOLD "[GAIA] Final Answer: " C-RESET (markdown->ansi answer) "\n"))
                                   (gaia-log (string-append C-BOLD "[GAIA] Answer stored in: " C-RESET answer "\n")))
-                              (resolve-promise (cons answer (append history (list `(("role" . "user") ("content" . ,last-output))
+                              (<- resolve-promise 'fulfill (cons answer (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                                  `(("role" . "assistant") ("content" . ,response-text))))))))
                            
                            ;; Case D: High confidence
                            ((and conf-val (>= conf-val CONFIDENCE-THRESHOLD))
                             (when event-handler (event-handler `(final ,response-text)))
                             (gaia-log (string-append C-GREEN "\n[GAIA] ✓ High confidence (" (number->string conf-val) "%) - stopping." C-RESET "\n"))
-                            (resolve-promise (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
+                            (<- resolve-promise 'fulfill (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                                       `(("role" . "assistant") ("content" . ,response-text)))))))
                            
                            ;; Case E: Fallback
                            (else
                             (when event-handler (event-handler `(final ,response-text)))
-                            (resolve-promise (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
+                            (<- resolve-promise 'fulfill (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                                       `(("role" . "assistant") ("content" . ,response-text)))))))))))
                   #:catch (lambda (err)
                             (let ((err-msg (format #f "LLM Call Error: ~a" err)))
                               (gaia-log (string-append C-RED err-msg C-RESET "\n"))
-                              (resolve-promise (cons err-msg history) ) ) ) ) ) ) ) ) ) ] ) )
+                              (<- resolve-promise 'fulfill (cons err-msg history) ) ) ) ) ) ) ) ) ) ] ) )
 
 ;; 4. Session Orchestrator Actor
 (define-actor (^session-orchestrator bcom session-id client-socket channel sandbox-actor agent-actor llm-client history)
