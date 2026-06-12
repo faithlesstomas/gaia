@@ -122,7 +122,7 @@
                    (put-message channel `(done ,res))))
                (lambda (key . args)
                  (put-message channel `(error ,(format #f "~s ~s" key args))))))))
-        
+
         ;; Spawn a fiber to read from the channel and fulfill the resolver
         (spawn-fiber
          (lambda ()
@@ -191,15 +191,15 @@
                            (reasoning-text (if payload (assoc-ref payload "reasoning") ""))
                            (prose (clean-assistant-content response-text))
                            (conf-val (extract-confidence response-text)))
-                      
+
                       (when (and reasoning-text (> (string-length reasoning-text) 0))
                         (when event-handler (event-handler `(thought-full ,reasoning-text)))
                         (gaia-log (string-append C-GREY "[GAIA] Thinking Complete." C-RESET "\n")))
-                      
+
                       (when (> (string-length prose) 0)
                         (when event-handler (event-handler `(analysis ,prose)))
                         (gaia-log (string-append C-BLUE "\n[GAIA] Analysis: " C-RESET (markdown->ansi prose) "\n")))
-                      
+
                       (let* ((updated-transcript
                               (append transcript
                                       (if (= step 1)
@@ -208,7 +208,7 @@
                                                 (cons "user" last-output))
                                           (list (cons "user" last-output)
                                                 (cons "assistant" (truncate-for-transcript response-text)))))))
-                        
+
                         (let ((action-code (extract-code response-text))
                               (action-delegate (extract-delegation response-text))
                               (final-sig (extract-final-signal response-text)))
@@ -252,7 +252,7 @@
                                    (append history (list `(("role" . "user") ("content" . ,last-output))
                                                          `(("role" . "assistant") ("content" . ,response-text))))
                                    (+ step 1) updated-transcript "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")" resolve-promise))))
-                           
+
                            ;; Case B: Code execution
                            (action-code
                             (if (and action-code (> (string-length action-code) 0) (not (string=? action-code response-text)))
@@ -286,7 +286,7 @@
                                                         (+ step 1) updated-transcript err-str resolve-promise))))))
                                 (<- resolve-promise 'fulfill (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                                            `(("role" . "assistant") ("content" . ,response-text))))))))
-                           
+
                            ;; Case C: Final Signal
                            ((and final-sig (match final-sig (('final ans) ans) (('final-var var) var) (_ #f))) =>
                             (lambda (answer)
@@ -296,14 +296,14 @@
                                   (gaia-log (string-append C-BOLD "[GAIA] Answer stored in: " C-RESET answer "\n")))
                               (<- resolve-promise 'fulfill (cons answer (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                                  `(("role" . "assistant") ("content" . ,response-text))))))))
-                           
+
                            ;; Case D: High confidence
                            ((and conf-val (>= conf-val CONFIDENCE-THRESHOLD))
                             (when event-handler (event-handler `(final ,response-text)))
                             (gaia-log (string-append C-GREEN "\n[GAIA] ✓ High confidence (" (number->string conf-val) "%) - stopping." C-RESET "\n"))
                             (<- resolve-promise 'fulfill (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                                       `(("role" . "assistant") ("content" . ,response-text)))))))
-                           
+
                            ;; Case E: Fallback
                            (else
                             (when event-handler (event-handler `(final ,response-text)))
@@ -326,14 +326,14 @@
       ('eof
        (gaia-log (format #f "[SERVER] Client disconnected (session: ~a)." session-id))
        (close-port client-socket))
-      
+
       ('interrupt
        ;; Reset interrupted flag
        (let ((core-mod (resolve-module '(gaia core) #:ensure #f)))
          (when core-mod
            (module-set! core-mod '*interrupted* #f)))
        'ok)
-      
+
       (('eval task)
        (gaia-log (format #f "[SERVER] Received EVAL request: ~a" task))
        (let-values (((solve-promise resolve-solve) (new-promise-pair)))
@@ -351,7 +351,7 @@
                        (let ((err-msg (format #f "Engine Error: ~a" err)))
                          (gaia-log (format #f "[SERVER] EVAL error: ~a" err-msg))
                          (send-event client-socket `(error ,err-msg)))))))
-      
+
       (('repl code)
        (gaia-log (format #f "[SERVER] Received REPL code execution request."))
        (let ((eval-promise (<- sandbox-actor 'eval code)))
@@ -361,7 +361,7 @@
                  (('ok val-str)
                   (gaia-log (format #f "[SERVER] REPL success. Result: ~a" val-str))
                   (let ((updated-history (append history
-                                                 (list `(("role" . "assistant") 
+                                                 (list `(("role" . "assistant")
                                                          ("content" . ,(string-append "```repl\n" code "\n```")))
                                                        `(("role" . "user")
                                                          ("content" . ,(string-append "Result:\n" val-str)))))))
@@ -376,14 +376,14 @@
                        (let ((err-msg (format #f "REPL Crash: ~a" err)))
                          (gaia-log (format #f "[SERVER] REPL crash: ~a" err-msg))
                          (send-event client-socket `(error ,err-msg)))))))
-      
+
       (('env)
        (gaia-log "[SERVER] Client requested current environment variables.")
        (let ((bindings-promise (<- sandbox-actor 'definitions)))
          (on bindings-promise
              (lambda (bindings)
                (send-event client-socket `(env-list ,bindings))))))
-      
+
       (('clear)
        (gaia-log (format #f "[SERVER] Clearing session ~a environment and history." session-id))
        (save-session session-id '())
@@ -402,29 +402,29 @@
               (new-agent-actor (spawn ^agent-actor session-id new-sb-actor llm-client event-sink permission-sink)))
          (send-event client-socket '(final "Environment and history cleared."))
          (bcom (^session-orchestrator bcom session-id client-socket channel new-sb-actor new-agent-actor llm-client '()) 'ok)))
-      
+
       (('get-model)
        (send-event client-socket `(model-info ,(get-config 'model))))
-      
+
       (('set-model new-model)
        (gaia-log (format #f "[SERVER] Hot-swapping model to: ~a" new-model))
        (set-config! 'model new-model)
        (send-event client-socket `(final ,(string-append "Model switched to: " new-model))))
-      
+
       (('list-models)
        (let ((models '("gemma4:e2b" "gpt-4o" "claude-3.5-sonnet" "ollama/llama3" "local/ministral")))
          (send-event client-socket `(models-list ,models))))
-      
+
       (('get-thinking)
        (let ((thinking (if (get-config 'thinking) "on" "off")))
          (send-event client-socket `(thinking-info ,thinking))))
-      
+
       (('set-thinking state)
        (gaia-log (format #f "[SERVER] Set thinking mode to: ~a" state))
        (let* ((on? (or (eq? state #t) (string=? (format #f "~a" state) "on"))))
          (set-config! 'thinking on?)
          (send-event client-socket `(final ,(string-append "Thinking mode set to: " (if on? "on" "off"))))))
-      
+
       (('ask query)
        (gaia-log (format #f "[SERVER] Received direct ASK request: ~a" query))
        (let* ((event-sink (lambda (event) (send-event client-socket event)))
@@ -443,7 +443,7 @@
                    (<- self 'update-history new-history))))
              #:catch (lambda (err)
                        (send-event client-socket `(error ,(format #f "Ask Error: ~a" err)))))))
-      
+
       (('session new-id)
        (if (string-null? new-id)
            (send-event client-socket `(final ,(string-append "Current session ID: " session-id)))
@@ -466,7 +466,7 @@
                (with-output-to-file ".last_session" (lambda () (display new-id)))
                (send-event client-socket `(final ,(string-append "Session switched to: " new-id)))
                (bcom (^session-orchestrator bcom new-id client-socket channel new-sb-actor new-agent-actor llm-client new-history) 'ok)))))
-      
+
       (('list-sessions)
        (let ((sessions (if (file-exists? "sessions")
                            (let ((files (scandir "sessions")))
@@ -475,10 +475,10 @@
                                           files)))
                            '())))
          (send-event client-socket `(session-list ,sessions))))
-      
+
       (('get-history)
        (send-event client-socket `(history-list ,(clean-history history))))
-      
+
       (other
        (gaia-log (format #f "[SERVER] Unknown request command: ~s. Terminating socket." other))
        (close-port client-socket)))] ) )

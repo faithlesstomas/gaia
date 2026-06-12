@@ -14,7 +14,7 @@
   #:use-module (fibers channels)
   #:use-module (goblins)
   #:use-module (gaia actors)
-  #:export (start-server replay-history)
+  #:export (start-server replay-history parse-slash-command handle-client)
   #:re-export (save-session load-session))
 
 

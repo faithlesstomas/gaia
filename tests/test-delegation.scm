@@ -1,21 +1,18 @@
-
 (add-to-load-path (string-append (dirname (current-filename)) "/../src"))
 
 (use-modules (gaia core)
              (gaia executor)
              (gaia llm-client)
+             (srfi srfi-64)
              (ice-9 match))
 
-(display "[TEST] Starting RLM Delegation Test...\n")
+(test-begin "gaia-delegation")
 
 ;; Mock for chat-with-llm to simulate specific responses
-;; We use a simple counter to return different responses based on the call count
 (define call-count 0)
 
-(define* (mock-chat-with-llm session-id input model prompt #:key (think #f) (history '()))
+(define* (mock-chat-with-llm session-id input model prompt #:key (think #f) (history '()) (stream-callback #f))
   (set! call-count (+ call-count 1))
-  (display (format #f "  DEBUG: Mock called. Session: ~a, Count: ~a\n" session-id call-count))
-  
   (cond
     ;; First call: The "Core" agent decides to delegate
     ((= call-count 1)
@@ -24,34 +21,29 @@
     ;; Second call: The "Sub" agent (new session) works on the task
     ((= call-count 2)
      (if (string-contains session-id "-sub-")
-         (begin
-            (display "  PASS: New session ID detected for sub-agent.\n")
-            `(("payload" . (("content" . "I found 3 errors.")))))
-         (begin
-            (display "  FAIL: Expected sub-session ID.\n")
-            `(("payload" . (("content" . "Error")))))))
+         `(("payload" . (("content" . "I found 3 errors."))))
+         `(("payload" . (("content" . "Error"))))))
 
     ;; Third call: Back to "Core" agent, receiving the result
     ((= call-count 3)
-     (display "  PASS: Control returned to parent agent.\n")
-     `(("payload" . (("content" . "Final Answer: The sub-agent found errors.")))))
+     `(("payload" . (("content" . "FINAL(The sub-agent found errors.)")))))
 
     (else
      `(("payload" . (("content" . "Stop")))))))
 
-;; Override the real function with our mock in both modules that might have bound it
+;; Override the real function with our mock in both modules
 (let ((m-core (resolve-module '(gaia core)))
       (m-llm (resolve-module '(gaia llm-client))))
   (module-set! m-core 'chat-with-llm mock-chat-with-llm)
   (module-set! m-llm 'chat-with-llm mock-chat-with-llm))
 
-;; Run the test
-;; We need to expose rlm-loop or just import it if it was exported.
-;; Since rlm-loop is not exported, we might need a workaround or test start-gaia logic if possible.
-;; However, core.scm exports start-gaia. Let's try to run a modified loop or just ensure we can call it.
-;; Actually, to properly test rlm-loop which is internal, we should probably temporarily export it or use (@@ (gaia core) rlm-loop).
+(test-assert "Delegation flow works with correct return to parent and FINAL signal"
+  (let* ((result-pair ((@@ (gaia core) rlm-loop) "test-session-1" "Start Task" 0 '()))
+         (answer (car result-pair)))
+    (and (string-contains answer "The sub-agent found errors.")
+         (= call-count 3))))
 
-(display "[TEST] Invoking rlm-loop...\n")
-(car ((@@ (gaia core) rlm-loop) "test-session-1" "Start Task" 0 '()))
-
-(display "[TEST] Finished.\n")
+(let* ((runner (test-runner-current))
+       (fail (if runner (test-runner-fail-count runner) 0)))
+  (test-end "gaia-delegation")
+  (exit (if (> fail 0) 1 0)))

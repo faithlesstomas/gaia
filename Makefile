@@ -6,7 +6,7 @@ export GAIA_LLM_URL
 export GAIA_MODEL
 export GAIA_BASE_MODEL
 
-.PHONY: run repl check test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop clean-trajectories monitor client server
+.PHONY: run repl check test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-actors test-server test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop clean-trajectories monitor client server
 
 GUIX_SHELL = guix shell -m guix.scm --
 
@@ -18,11 +18,23 @@ run: llm-server
 repl:
 	$(GUIX_SHELL) guile -L src
 
-check: test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands
+check: test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-actors test-server test-curator
+
+test-server:
+	@echo "Running GAIA server unit tests..."
+	$(GUIX_SHELL) guile -L src tests/test-server.scm
+
+test-curator:
+	@echo "Running GAIA curator unit tests..."
+	$(GUIX_SHELL) guile -L src tests/test-curator.scm
 
 test-meta-commands:
 	@echo "Running GAIA meta-command integration tests..."
 	$(GUIX_SHELL) guile -L src tests/test-meta-commands.scm
+
+test-actors:
+	@echo "Running GAIA Goblins actors unit tests..."
+	$(GUIX_SHELL) guile -L src tests/test-actors.scm
 
 test-units:
 	@echo "Running core unit tests..."
@@ -33,6 +45,16 @@ test-units:
 	$(GUIX_SHELL) guile -L src tests/test-final-signal.scm
 	@echo "Running error handling tests..."
 	$(GUIX_SHELL) guile -L src tests/test-error-handling.scm
+	@echo "Running static safety validator tests..."
+	$(GUIX_SHELL) guile -L src tests/test-safety.scm
+	@echo "Running RLM delegation tests..."
+	$(GUIX_SHELL) guile -L src tests/test-delegation.scm
+	@echo "Running interrupt handler tests..."
+	$(GUIX_SHELL) guile -L src tests/test-interrupts.scm
+	@echo "Running error traceback capture tests..."
+	$(GUIX_SHELL) guile -L src tests/test-traceback.scm
+	@echo "Running curator tests..."
+	$(GUIX_SHELL) guile -L src tests/test-curator.scm
 
 test-sandbox:
 	@echo "Running Goblins sandbox unit tests..."
@@ -49,6 +71,20 @@ test-rlm-env:
 test-sessions:
 	@echo "Running GAIA session management unit tests..."
 	$(GUIX_SHELL) guile -L src -L tests tests/test-sessions.scm
+
+test-coverage:
+	@echo "Cleaning compilation cache..."
+	rm -rf ~/.cache/guile/ccache
+	@echo "Warming up compilation cache with debug info..."
+	GAIA_NO_COVERAGE=1 $(GUIX_SHELL) guile --debug -L src tests/run-coverage.scm
+	@echo "Running full GAIA test suite with code coverage..."
+	$(GUIX_SHELL) guile --debug -L src tests/run-coverage.scm
+	@if command -v genhtml >/dev/null 2>&1; then \
+		echo "Generating HTML coverage report under coverage-html/..."; \
+		genhtml coverage.info --output-directory coverage-html; \
+	else \
+		echo "genhtml not found. For visual HTML reports, install lcov package."; \
+	fi
 
 llm-server:
 	@if nc -z localhost 4000 2>/dev/null; then \

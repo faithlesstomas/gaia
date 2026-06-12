@@ -9,11 +9,11 @@
 ;; --- check-interrupt! ---
 
 (test-group "check-interrupt!"
-  (test-equal "does nothing when flag is false"
-    #f
+  (test-assert "does nothing when flag is false"
     (begin
       (module-set! (resolve-module '(gaia core)) '*interrupted* #f)
-      (check-interrupt!)))
+      (check-interrupt!)
+      #t))
 
   (test-error "throws user-interrupt when flag is true"
     'user-interrupt

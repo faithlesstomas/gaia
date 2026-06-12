@@ -28,36 +28,36 @@
     ;; Arithmetic
     + - * / = > < >= <= quotient remainder modulo
     positive? negative? zero? odd? even? abs max min
-    
+
     ;; Booleans
     not and or boolean?
-    
+
     ;; Lists
     list cons car cdr pair? null? list? length append reverse
     list-ref member memq memv assoc assq assv
     map for-each filter
-    
+
     ;; Strings
     string? string-length string-append substring string->number number->string
     string=? string<? string>? string-suffix? string-prefix? string-contains
-    
+
     ;; Symbols
     symbol? symbol->string string->symbol
-    
+
     ;; Vectors
     vector? vector-length vector-ref vector-set! make-vector vector
-    
+
     ;; Control Flow
     if cond else => case begin let let* letrec lambda define set!
     do while
     quote quasiquote unquote unquote-splicing
-    
+
     ;; Basic I/O (Stdout only)
     display newline format write read
-    
+
     ;; Exceptions (Basic)
     catch throw error
-    
+
     ;; Ports (String only)
     open-input-string open-output-string get-output-string
     call-with-input-string call-with-output-string
@@ -79,14 +79,14 @@
   (let ((m (make-module))
         (safe-interface (make-safe-module-interface)))
     (module-use! m safe-interface)
-    
+
     ;; Pre-load ice-9 match and regex which are standard in GAIA
     (module-use! m (resolve-interface '(ice-9 match)))
     (module-use! m (resolve-interface '(ice-9 regex)))
-    
+
     ;; Pre-load srfi-1 (List library) which includes fold, append-map, any, every, etc.
     (module-use! m (resolve-interface '(srfi srfi-1)))
-    
+
     ;; Inject capabilities as procedures
     (for-each (lambda (cap-pair)
                 (module-define! m (car cap-pair) (cdr cap-pair)))
@@ -465,12 +465,12 @@
                  ;; Fork capability
                  (cons 'fork-sandbox (lambda () (fork-sandbox sandbox)))
                  )))
-          
+
           ;; Inject capabilities and injected bindings into the persistent module
           (for-each (lambda (cap-pair)
                       (module-define! m (car cap-pair) (cdr cap-pair)))
                     (append caps injected-bindings))
-          
+
           (catch #t
             (lambda ()
               ;; Evaluate expression, capturing stdout

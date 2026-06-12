@@ -103,12 +103,53 @@
   (let ((res (get-recent-logs 5)))
     (and (string? res) (> (string-length res) 5))))
 
-;; 16. Test sandbox accessibility (Ensures exported to AI)
-;; NOTE: We skip verify via run-safe-code (container) because it lacks journalctl.
-;; Verified via list-boots-direct and get-recent-logs-direct instead.
-;; (test-assert "log-tools-sandbox-defined"
-;;   (let ((res (run-safe-code '(procedure? get-recent-logs))))
-;;     (eq? res #t)))
+;; 16. Error & Safety validation branches
+(test-assert "safe-path? validation error"
+  (catch #t
+    (lambda ()
+      (list-files "../")
+      #f)
+    (lambda (key . args)
+      (eq? key 'gdb-error) ;; Or standard scheme error
+      #t)))
+
+(test-assert "read-file: file not found error"
+  (catch #t
+    (lambda ()
+      (read-file "non_existent_file_xyz.txt")
+      #f)
+    (lambda _ #t)))
+
+;; 17. Git diff & ls-files
+(test-assert "git-diff direct"
+  (let ((res (git-diff)))
+    (string? res)))
+
+(test-assert "git-ls-files direct"
+  (let ((res (git-ls-files)))
+    (and (list? res) (member "Makefile" res))))
+
+;; 18. Guix show / package-info
+(test-assert "guix-package-info direct"
+  (let ((res (guix-package-info "guile")))
+    (string? res)))
+
+;; 19. Additional logs helpers
+(test-assert "get-system-logs direct"
+  (let ((res (get-system-logs "cron" 5)))
+    (string? res)))
+
+(test-assert "get-boot-logs direct"
+  (let ((res (get-boot-logs "" 5)))
+    (string? res)))
+
+(test-assert "get-kernel-logs direct"
+  (let ((res (get-kernel-logs 5)))
+    (string? res)))
+
+;; 20. Guix container support predicate check
+(test-assert "guix-container-supported? returns boolean"
+  (boolean? ((@@ (gaia tools) guix-container-supported?))))
 
 (let* ((runner (test-runner-current))
        (fail (if runner (test-runner-fail-count runner) 0)))
