@@ -19,7 +19,10 @@
   #:export (^repl-sandbox
             ^llm-client
             ^agent-actor
-            ^session-orchestrator))
+            ^session-orchestrator
+            current-<-np-extern))
+
+(define current-<-np-extern (make-parameter <-np-extern))
 
 ;; Helpers
 (define (clean-history history)
@@ -135,9 +138,9 @@
                     (stream-callback evt))
                   (loop))
                  (('done res)
-                  (<-np-extern resolver 'fulfill res))
+                  ((current-<-np-extern) resolver 'fulfill res))
                  (('error err)
-                  (<-np-extern resolver 'fulfill `(("error" . ,err))))))))))
+                  ((current-<-np-extern) resolver 'fulfill `(("error" . ,err))))))))))
       promo)]))
 
 

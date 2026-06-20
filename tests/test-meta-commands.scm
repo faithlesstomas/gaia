@@ -46,19 +46,24 @@
         (force-output client-port))
 
       (define (receive)
-        "Read next non-info event from server (skipping info acks)."
-        (let loop ((msg (read client-port)))
-          (match msg
-            (('info . _) (loop (read client-port)))
-            (('stream-log . _) (loop (read client-port)))
-            (_ msg))))
+        "Read next non-info event from server (skipping info acks) with a 30s timeout."
+        (let loop ()
+          (let ((res (select (list client-port) '() '() 30)))
+            (if (null? (car res))
+                (throw 'timeout-error "Receive timed out after 30 seconds")
+                (let ((msg (read client-port)))
+                  (match msg
+                    (('info . _) (loop))
+                    (('stream-log . _) (loop))
+                    (_ msg)))))))
 
       (dynamic-wind
         (lambda () #t)
         (lambda () (proc send receive))
         (lambda ()
           (usleep 100000) ;; Give server 100ms to settle
-          (close-port client-port))))))
+          (close-port client-port)
+          (join-thread server-thread))))))
 
 (test-group "Meta-Command Protocol"
   

@@ -12,7 +12,8 @@
              (gaia executor)
              (gaia rlm-env)
              (gaia llm-client)
-             (gaia utils))
+             (gaia utils)
+             (goblins core-types))
 
 (test-begin "gaia-actors")
 
@@ -222,5 +223,229 @@
          (string-contains output-val "thinking-info")
          (string-contains output-val "history-list"))))
 
-(test-end "gaia-actors")
+(define (run-direct-coverage-tests)
+  (let* ((gcore (resolve-module '(goblins core)))
+         (goblins-mod (resolve-module '(goblins)))
+         (actors-mod (resolve-module '(gaia actors)))
+         
+         ;; Create a real transactormap and syscaller
+         (am (make-transactormap (make-whactormap)))
+         (sys ((@@ (goblins core) make-syscaller) am #f))
+         
+         ;; Save original actors bindings
+         (orig-call-with-vat (module-ref goblins-mod 'call-with-vat))
+         (orig-spawn-vat (module-ref actors-mod 'spawn-vat)))
+    
+    (define (run-turns-synchronously)
+      (sleep 0.05)
+      (let loop ()
+        (let ((msgs ((@@ (goblins core) syscaller-new-msgs) sys)))
+          (unless (null? msgs)
+            ((@@ (goblins core) set-syscaller-new-msgs!) sys '())
+            (for-each
+             (lambda (msg)
+               (let-values (((result buffer-am new-msgs)
+                             ((@@ (goblins core) actormap-turn-message)
+                              ((@@ (goblins core) syscaller-actormap) sys) msg #:catch-errors? #t)))
+                 (unless ((@@ (goblins core-types) transactormap-merged?) buffer-am)
+                   ((@@ (goblins core) transactormap-buffer-merge!) buffer-am))
+                 (for-each (lambda (m) ((@@ (goblins core) syscaller-queue-new-msg!) sys m))
+                           new-msgs)))
+             (reverse msgs))
+            (loop)))))
 
+    (define (mock-binding! mod symbol new-value)
+      (let ((var (module-variable mod symbol)))
+        (if var
+            (variable-set! var new-value)
+            (module-define! mod symbol new-value))))
+    
+    (run-fibers
+     (lambda ()
+       (dynamic-wind
+      (lambda ()
+        ;; Install actors mocks
+        (mock-binding! actors-mod 'spawn-vat
+                       (lambda () 'mock-sub-vat))
+        
+        (mock-binding! goblins-mod 'call-with-vat
+                       (lambda (vat thunk)
+                         (thunk))))
+      
+      (lambda ()
+        (parameterize (((@@ (goblins core) current-syscaller) sys)
+                       (current-<-np-extern
+                        (lambda (refr . args)
+                          (parameterize (((@@ (goblins core) current-syscaller) sys))
+                            (apply <-np refr args)))))
+          
+          ;; 1. Test repl-sandbox behavior directly
+          (let* ((sandbox (spawn ^repl-sandbox "direct-session" (lambda _ #t) (lambda _ #t) '())))
+            
+            (test-assert "direct-sandbox: eval"
+              (let* ((vow (<- sandbox 'eval "(define x-direct 100) (+ x-direct 5)"))
+                     (res #f))
+                (run-turns-synchronously)
+                (on vow (lambda (val) (set! res val)))
+                (run-turns-synchronously)
+                (match res
+                  (('ok "105") #t)
+                  (other (begin (display (format #f "eval failed: ~s\n" other)) #f)))))
+            
+            (test-assert "direct-sandbox: definitions"
+              (let* ((vow (<- sandbox 'definitions))
+                     (res #f))
+                (run-turns-synchronously)
+                (on vow (lambda (val) (set! res val)))
+                (run-turns-synchronously)
+                (and (list? res) (assq 'x-direct res))))
+            
+            (test-assert "direct-sandbox: save/restore checkpoint"
+              (let* ((vow-cp (<- sandbox 'save-checkpoint))
+                     (cp #f))
+                (run-turns-synchronously)
+                (on vow-cp (lambda (val) (set! cp val)))
+                (run-turns-synchronously)
+                (<- sandbox 'eval "(define x-direct 200)")
+                (run-turns-synchronously)
+                (<- sandbox 'restore-checkpoint cp)
+                (run-turns-synchronously)
+                (let* ((vow-val (<- sandbox 'eval "x-direct"))
+                       (final-val #f))
+                  (run-turns-synchronously)
+                  (on vow-val (lambda (val) (set! final-val val)))
+                  (run-turns-synchronously)
+                  (match final-val
+                    (('ok "100") #t)
+                    (_ #f)))))
+            
+            (test-assert "direct-sandbox: fork"
+              (let* ((vow-fork (<- sandbox 'fork))
+                     (forked-sandbox #f))
+                (run-turns-synchronously)
+                (on vow-fork (lambda (val) (set! forked-sandbox val)))
+                (run-turns-synchronously)
+                (let* ((vow-val (<- forked-sandbox 'eval "x-direct"))
+                       (final-val #f))
+                  (run-turns-synchronously)
+                  (on vow-val (lambda (val) (set! final-val val)))
+                  (run-turns-synchronously)
+                  (match final-val
+                    (('ok "100") #t)
+                    (_ #f))))))
+          
+          ;; 2. Test llm-client behavior directly
+          (let* ((orig-chat (@@ (gaia llm-client) chat-with-llm))
+                 (llm-mod (resolve-module '(gaia llm-client))))
+            (dynamic-wind
+              (lambda ()
+                (module-set! llm-mod 'chat-with-llm
+                             (lambda* (session-id prompt model system-prompt #:key think history stream-callback)
+                               `(("payload" . (("content" . "Hello! I am a mocked response.")
+                                               ("reasoning" . "Thinking...")))))))
+              (lambda ()
+                (let* ((llm (spawn ^llm-client #f))
+                       (vow (<- llm 'chat "session-id" "prompt" "model" "system" #f '() #f))
+                       (res #f))
+                  (run-turns-synchronously)
+                  (on vow (lambda (val) (set! res val)))
+                  (run-turns-synchronously)
+                  (test-assert "direct-llm-client: chat"
+                    (equal? (assoc-ref res "payload")
+                            '(("content" . "Hello! I am a mocked response.")
+                              ("reasoning" . "Thinking..."))))))
+              (lambda ()
+                (module-set! llm-mod 'chat-with-llm orig-chat))))
+          
+          ;; 3. Test agent-actor behavior directly
+          (let* ((sandbox (spawn ^repl-sandbox "direct-agent-session" (lambda _ #t) (lambda _ #t) '()))
+                 (resp-ptr 0)
+                 (llm-responses
+                  '("```delegate\n(delegate \"Sub-task\" \"Some context\")\n```"
+                    "I will write code.\n```repl\n(define foo-agent 999)\n```"
+                    "FINAL(The agent value is 999) CONFIDENCE(100)"
+                    "FINAL(The agent value is 999) CONFIDENCE(100)"))
+                 (mock-llm
+                  (spawn
+                   (lambda (bcom)
+                     (methods
+                      [(chat session-id prompt model system-prompt think history stream-callback)
+                       (let ((resp (list-ref llm-responses resp-ptr)))
+                         (set! resp-ptr (+ resp-ptr 1))
+                         (let-values (((promo resolver) (spawn-promise-and-resolver)))
+                           (<-np resolver 'fulfill
+                                 `(("payload" . (("content" . ,resp)
+                                                 ("reasoning" . "Thinking...")))))
+                           promo))]))))
+                 (agent (spawn ^agent-actor "direct-agent-session" sandbox mock-llm (lambda _ #t) (lambda _ #t)))
+                 (resolved? #f)
+                 (result-val #f)
+                 (resolver
+                  (spawn
+                   (lambda (bcom)
+                     (methods
+                      [(fulfill val)
+                       (set! resolved? #t)
+                       (set! result-val val)]
+                      [(break err)
+                       (set! resolved? #t)
+                       (set! result-val err)])))))
+            
+            (<- agent 'solve "What is the agent value?" 0 '() resolver)
+            (run-turns-synchronously)
+            (test-assert "direct-agent-actor: solve recursive loop"
+              (and resolved? (equal? (car result-val) "The agent value is 999"))))
+          
+          ;; 4. Test session-orchestrator behavior directly
+          (let* ((sandbox (spawn ^repl-sandbox "direct-orch-session" (lambda _ #t) (lambda _ #t) '()))
+                 (mock-llm
+                  (spawn
+                   (lambda (bcom)
+                     (methods
+                      [(chat session-id prompt model system-prompt think history stream-callback)
+                       (let-values (((promo resolver) (spawn-promise-and-resolver)))
+                         (<-np resolver 'fulfill
+                               `(("payload" . (("content" . "Mocked answer")
+                                               ("reasoning" . "Thinking...")))))
+                         promo)]))))
+                 (agent (spawn ^agent-actor "direct-orch-session" sandbox mock-llm (lambda _ #t) (lambda _ #t)))
+                 (mock-socket (open-output-string))
+                 (mock-channel #f)
+                 (orch (spawn ^session-orchestrator "direct-orch-session" mock-socket mock-channel sandbox agent mock-llm '())))
+            
+            (test-assert "direct-orchestrator: handle-message commands"
+              (begin
+                (<- orch 'handle-message '(get-model))
+                (run-turns-synchronously)
+                (<- orch 'handle-message '(set-model "new-model-name"))
+                (run-turns-synchronously)
+                (<- orch 'handle-message '(list-models))
+                (run-turns-synchronously)
+                (<- orch 'handle-message '(get-thinking))
+                (run-turns-synchronously)
+                (<- orch 'handle-message '(set-thinking "on"))
+                (run-turns-synchronously)
+                (<- orch 'handle-message 'interrupt)
+                (run-turns-synchronously)
+                (<- orch 'handle-message '(get-history))
+                (run-turns-synchronously)
+                (<- orch 'handle-message '(session ""))
+                (run-turns-synchronously)
+                (<- orch 'handle-message '(session "new-session-id"))
+                (run-turns-synchronously)
+                (<- orch 'handle-message '(list-sessions))
+                (run-turns-synchronously)
+                (<- orch 'handle-message 'eof)
+                (run-turns-synchronously)
+                (port-closed? mock-socket))))))
+      
+      (lambda ()
+        ;; Restore original actors bindings
+        (mock-binding! goblins-mod 'call-with-vat orig-call-with-vat)
+        (mock-binding! actors-mod 'spawn-vat orig-spawn-vat))))
+     #:drain? #t)))
+
+(test-group "Direct Thread Coverage"
+  (run-direct-coverage-tests))
+
+(test-end "gaia-actors")

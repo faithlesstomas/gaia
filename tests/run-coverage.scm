@@ -35,7 +35,8 @@
          "test-delegation.scm"
          "test-interrupts.scm"
          "test-traceback.scm"
-         "test-curator.scm")))
+         "test-curator.scm"
+         "test-llm-client.scm")))
 
 (define failed-tests '())
 

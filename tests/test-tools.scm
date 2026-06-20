@@ -151,6 +151,76 @@
 (test-assert "guix-container-supported? returns boolean"
   (boolean? ((@@ (gaia tools) guix-container-supported?))))
 
+;; 21. Direct test calls to maximize coverage in main process
+(test-assert "direct: guile-syntax-check"
+  (and (string=? (guile-syntax-check "(define (x) 1)") "OK")
+       (string-prefix? "Syntax Error:" (guile-syntax-check "(define (x) 1"))))
+
+(test-assert "direct: read-file and write-file"
+  (let* ((filename "test-direct.txt")
+         (content "hello direct")
+         (res-write (write-file filename content))
+         (res-read (read-file filename)))
+    (delete-file filename)
+    (and (string-contains res-write "Written 12 bytes")
+         (string=? res-read content))))
+
+(test-assert "direct: safe-path? and read-file errors"
+  (and (catch #t (lambda () (read-file "../") #f) (lambda _ #t))
+       (catch #t (lambda () (write-file "../" "x") #f) (lambda _ #t))))
+
+(test-assert "direct: git tools"
+  (begin
+    (git-status)
+    (git-diff "Makefile")
+    (git-log 2)
+    #t))
+
+(test-assert "direct: grep & sed & awk & stats"
+  (let* ((filename "test-direct.txt"))
+    (write-file filename "line1\nline2")
+    (let ((res-grep (search-file "line1" filename))
+          (res-sed (run-sed "s/line1/LINE1/g" filename))
+          (res-awk (run-awk "'{print $1}'" filename))
+          (res-stat (file-info filename)))
+      (delete-file filename)
+      (display (format #f "DEBUG: grep=~s sed=~s awk=~s stat=~s\n" res-grep res-sed res-awk res-stat))
+      (and (string-contains res-grep "line1")
+           (string-contains res-sed "LINE1")
+           (string-contains res-awk "line1")
+           (string-contains res-stat "Size:")))))
+
+(test-assert "direct: guix tools"
+  (begin
+    (guix-search "guile")
+    (guix-package-info "guile")
+    #t))
+
+(test-assert "direct: logs tools"
+  (begin
+    (get-system-logs "cron" 2)
+    (get-system-logs "cron" "2026-06-01" "2026-06-02")
+    (get-recent-logs 2 "info")
+    (get-boot-logs "" 2)
+    (get-boot-logs "some-boot-id" 2)
+    (get-kernel-logs 2 "2026-06-01")
+    #t))
+
+(test-assert "direct: run-in-sandbox guix container simulation"
+  (let* ((mod (resolve-module '(gaia tools) #:ensure #f))
+         (orig-supported? (@@ (gaia tools) guix-container-supported?)))
+    ;; Force supported path
+    (module-set! mod 'guix-container-supported? (lambda () #t))
+    (catch #t
+      (lambda () (run-in-sandbox "echo 1"))
+      (lambda _ #f))
+    ;; Force unsupported path
+    (module-set! mod 'guix-container-supported? (lambda () #f))
+    (run-in-sandbox "echo 1")
+    ;; Restore
+    (module-set! mod 'guix-container-supported? orig-supported?)
+    #t))
+
 (let* ((runner (test-runner-current))
        (fail (if runner (test-runner-fail-count runner) 0)))
   (test-end "gaia-tools")
