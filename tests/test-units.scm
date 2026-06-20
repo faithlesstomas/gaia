@@ -163,7 +163,11 @@
 
     (test-equal "clean-assistant-content: code blocks and final signals"
       ""
-      (clean-assistant-content "```repl\n(+ 1 2)\n``` FINAL(42) CONFIDENCE(100)")))
+      (clean-assistant-content "```repl\n(+ 1 2)\n``` FINAL(42) CONFIDENCE(100)"))
+
+    (test-equal "clean-assistant-content: multiple think thoughts and regex tags"
+      "hello world"
+      (clean-assistant-content "<think>thought1</think><thought>thought2</thought>hello world <|think|>")))
 
   (test-group "formatting"
     (test-equal "markdown->ansi"
@@ -191,6 +195,10 @@
                            ("user" . "4") ("assistant" . "4")
                            ("user" . "5") ("assistant" . "5")))))
 
+    (test-equal "truncate-for-transcript: long text"
+      (string-append (make-string 300 #\a) "\n... [truncated] ...\n" (make-string 100 #\b))
+      (truncate-for-transcript (string-append (make-string 300 #\a) (make-string 200 #\c) (make-string 100 #\b))))
+
   (test-group "error-handling"
     (test-assert "handle-error: syntax"
       (string-contains ((@@ (gaia core) handle-error) 'syntax "unmatched parens" "(+ 1" 0) "Syntax Error"))
@@ -199,8 +207,40 @@
     (test-assert "handle-error: runtime"
       (string-contains ((@@ (gaia core) handle-error) 'runtime "failure" "(+)" 0) "Runtime Error"))
     (test-assert "handle-error: unknown"
-      (string-contains ((@@ (gaia core) handle-error) 'other "crash" "" 0) "Unknown Error"))
-  ))
+      (string-contains ((@@ (gaia core) handle-error) 'other "crash" "" 0) "Unknown Error")))
+
+  (test-group "rlm-loop-edge-cases"
+    (test-assert "rlm-loop: max recursion depth reached"
+      (let ((res ((@@ (gaia core) rlm-loop) "session-depth-limit" "Task" 16 '())))
+        (and (list? res)
+             (string=? (car res) "Task")
+             (null? (cdr res)))))
+
+    (test-assert "rlm-loop: empty/error LLM response recovery paths"
+      (let* ((llm-mod (resolve-module '(gaia llm-client) #:ensure #f))
+             (orig-chat (module-ref llm-mod 'chat-with-llm))
+             (env (make-rlm-env "session-error-recover"))
+             (calls 0))
+        ;; 1. Mock empty response to test retry and subsequent success
+        (module-set! llm-mod 'chat-with-llm
+                     (lambda args
+                       (set! calls (+ calls 1))
+                       (if (= calls 1)
+                           '(("payload" . (("content" . ""))))
+                           '(("payload" . (("content" . "FINAL(Finished)") ("confidence" . 100)))))))
+        (let ((res ((@@ (gaia core) rlm-loop) "session-empty" "Task" 4 '() env)))
+          (test-equal "empty response retried and succeeded" "Finished" (car res)))
+        
+        ;; 2. Mock error response to test API error handling
+        (module-set! llm-mod 'chat-with-llm (lambda args '(("error" . "API failed"))))
+        (let ((res ((@@ (gaia core) rlm-loop) "session-err" "Task" 4 '() env)))
+          ;; Should fail and return the error message
+          (test-assert "error response handled" (string-contains (car res) "API failed")))
+        
+        ;; Restore mock
+        (module-set! llm-mod 'chat-with-llm orig-chat)
+        #t)))
+)
 
   (test-group "handle-command-slash-commands"
     (let* ((env (make-rlm-env "test-handle-command"))

@@ -5,6 +5,7 @@
              (ice-9 rdelim)
              (ice-9 threads)
              (ice-9 match)
+             (ice-9 suspendable-ports)
              (fibers)
              (gaia server)
              (gaia core)
@@ -12,6 +13,8 @@
              (gaia executor)
              (gaia utils)
              (gaia llm-client))
+
+(install-suspendable-ports!)
 
 (test-begin "gaia-server")
 
@@ -70,55 +73,71 @@
            (s1 (car sockets))
            (s2 (cdr sockets)))
       
-      (let ((server-thread (call-with-new-thread
-                            (lambda ()
-                              (catch #t
-                                (lambda ()
-                                  (run-fibers
-                                   (lambda ()
-                                     (handle-client s1))
-                                   #:drain? #t))
-                                (lambda (key . args)
-                                  (display (format #f "SERVER THREAD ERROR: ~s ~s\n" key args))
-                                  #f))))))
+      (run-fibers
+       (lambda ()
+         ;; Set non-blocking on both sides of the socketpair
+         (fcntl s1 F_SETFL (logior O_NONBLOCK (fcntl s1 F_GETFL)))
+         (setvbuf s1 'none)
+         (fcntl s2 F_SETFL (logior O_NONBLOCK (fcntl s2 F_GETFL)))
+         (setvbuf s2 'none)
 
-        (define (send-msg msg)
-          (write msg s2)
-          (newline s2)
-          (force-output s2))
-
-        (define (receive-msg)
-          (let ((res (select (list s2) '() '() 30)))
-            (if (null? (car res))
-                (throw 'timeout-error "Receive timed out")
-                (let ((line (read-line s2)))
-                  (if (eof-object? line)
-                      line
-                      (with-input-from-string line read))))))
-
-        (catch #t
+         ;; Keep scheduler alive
+         (spawn-fiber
           (lambda ()
-            (send-msg '(session "session-server-test"))
-            (send-msg '(get-model))
-            ;; Read response
-            (let loop ((i 0))
-              (when (< i 5)
-                (let ((msg (receive-msg)))
-                  (unless (eof-object? msg)
-                    (set! client-received (cons msg client-received))
-                    (match msg
-                      (('model-info _)
-                       (set! done? #t))
-                      (_ (loop (+ i 1)))))))))
-          (lambda (key . args)
-            (display (format #f "CLIENT ERROR: ~s ~s\n" key args))))
+            (let loop ()
+              (unless done?
+                (sleep 0.05)
+                (loop)))))
 
-        ;; Clean up client socket
-        (close-port s2)
-        (join-thread server-thread)
+         ;; Spawn server connection handler on s1
+         (spawn-fiber (lambda ()
+                        (display "SERVER: starting handle-client\n")
+                        (handle-client s1)
+                        (display "SERVER: handle-client finished\n")))
 
-        (begin
-          (display (format #f "TEST DEBUG: done?=~s client-received=~s\n" done? client-received))
-          (and done? (port-closed? s2)))))))
+         ;; Spawn client fiber interacting with s2
+         (spawn-fiber
+          (lambda ()
+            (define (send-msg msg)
+              (display (format #f "CLIENT: sending msg ~s\n" msg))
+              (write msg s2)
+              (newline s2)
+              (force-output s2))
+            
+            (define (receive-msg)
+              (display "CLIENT: waiting to receive line\n")
+              (let ((line (read-line s2)))
+                (display (format #f "CLIENT: received line ~s\n" line))
+                (if (eof-object? line)
+                    line
+                    (catch #t
+                      (lambda () (with-input-from-string line read))
+                      (lambda _ 'error)))))
+
+            (catch #t
+              (lambda ()
+                (send-msg '(session "session-server-test"))
+                (send-msg '(get-model))
+                ;; Read response
+                (let loop ((i 0))
+                  (when (< i 5)
+                    (let ((msg (receive-msg)))
+                      (unless (eof-object? msg)
+                        (set! client-received (cons msg client-received))
+                        (match msg
+                          (('model-info _)
+                           (display "CLIENT: received model-info, setting done\n")
+                           (set! done? #t))
+                          (_ (loop (+ i 1)))))))))
+              (lambda (key . args)
+                (display (format #f "CLIENT FIBER ERROR: ~s ~s\n" key args))))
+            
+            ;; Clean up client socket when done
+            (close-port s2))))
+       #:drain? #t)
+
+      (begin
+        (display (format #f "TEST DEBUG: done?=~s client-received=~s\n" done? client-received))
+        (and done? (port-closed? s2))))))
 
 (test-end "gaia-server")
