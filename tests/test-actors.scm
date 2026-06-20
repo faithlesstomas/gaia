@@ -227,6 +227,7 @@
   (let* ((gcore (resolve-module '(goblins core)))
          (goblins-mod (resolve-module '(goblins)))
          (actors-mod (resolve-module '(gaia actors)))
+         (threads-mod (resolve-module '(ice-9 threads) #:ensure #f))
          
          ;; Create a real transactormap and syscaller
          (am (make-transactormap (make-whactormap)))
@@ -234,7 +235,8 @@
          
          ;; Save original actors bindings
          (orig-call-with-vat (module-ref goblins-mod 'call-with-vat))
-         (orig-spawn-vat (module-ref actors-mod 'spawn-vat)))
+         (orig-spawn-vat (module-ref actors-mod 'spawn-vat))
+         (orig-call-with-new-thread (and threads-mod (module-ref threads-mod 'call-with-new-thread))))
     
     (define (run-turns-synchronously)
       (sleep 0.05)
@@ -270,7 +272,12 @@
         
         (mock-binding! goblins-mod 'call-with-vat
                        (lambda (vat thunk)
-                         (thunk))))
+                         (thunk)))
+        
+        ;; Replace POSIX thread with fiber so VM coverage hook captures it
+        (when threads-mod
+          (mock-binding! threads-mod 'call-with-new-thread
+                         (lambda (thunk) (spawn-fiber thunk) #f))))
       
       (lambda ()
         (parameterize (((@@ (goblins core) current-syscaller) sys)
@@ -442,7 +449,9 @@
       (lambda ()
         ;; Restore original actors bindings
         (mock-binding! goblins-mod 'call-with-vat orig-call-with-vat)
-        (mock-binding! actors-mod 'spawn-vat orig-spawn-vat))))
+        (mock-binding! actors-mod 'spawn-vat orig-spawn-vat)
+        (when (and threads-mod orig-call-with-new-thread)
+          (mock-binding! threads-mod 'call-with-new-thread orig-call-with-new-thread)))))
      #:drain? #t)))
 
 (test-group "Direct Thread Coverage"

@@ -18,7 +18,7 @@ run: llm-server
 repl:
 	$(GUIX_SHELL) guile -L src
 
-check: test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-actors test-server test-curator
+check: test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-actors test-server test-curator test-llm-client
 
 test-server:
 	@echo "Running GAIA server unit tests..."
@@ -27,6 +27,10 @@ test-server:
 test-curator:
 	@echo "Running GAIA curator unit tests..."
 	$(GUIX_SHELL) guile -L src tests/test-curator.scm
+
+test-llm-client:
+	@echo "Running GAIA LLM client unit tests..."
+	$(GUIX_SHELL) guile -L src tests/test-llm-client.scm
 
 test-meta-commands:
 	@echo "Running GAIA meta-command integration tests..."
