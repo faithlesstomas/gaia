@@ -140,4 +140,125 @@
         (display (format #f "TEST DEBUG: done?=~s client-received=~s\n" done? client-received))
         (and done? (port-closed? s2))))))
 
+;; --- 5. Test handle-client: invalid s-expression gets handled ---
+
+(test-assert "handle-client: invalid payload triggers error event and server continues"
+  (let* ((got-error-event #f)
+         (done? #f))
+    (let* ((sockets (socketpair AF_UNIX SOCK_STREAM 0))
+           (s1 (car sockets))
+           (s2 (cdr sockets)))
+      (run-fibers
+       (lambda ()
+         (fcntl s1 F_SETFL (logior O_NONBLOCK (fcntl s1 F_GETFL)))
+         (setvbuf s1 'none)
+         (fcntl s2 F_SETFL (logior O_NONBLOCK (fcntl s2 F_GETFL)))
+         (setvbuf s2 'none)
+
+         (spawn-fiber
+          (lambda ()
+            (let loop ()
+              (unless done? (sleep 0.05) (loop)))))
+
+         (spawn-fiber (lambda () (handle-client s1)))
+
+         (spawn-fiber
+          (lambda ()
+            (catch #t
+              (lambda ()
+                ;; Establish session
+                (write '(session "session-invalid-payload") s2)
+                (newline s2) (force-output s2)
+                ;; Send invalid s-expression
+                (display "{{not valid scheme}}\n" s2)
+                (force-output s2)
+                ;; Read events — server should send error about unknown command
+                ;; then close the connection
+                (let loop ((i 0))
+                  (when (< i 10)
+                    (let ((line (read-line s2)))
+                      (cond
+                        ((eof-object? line)
+                         ;; Server closed connection — this is expected
+                         (set! got-error-event #t)
+                         (set! done? #t))
+                        (else
+                         (catch #t
+                           (lambda ()
+                             (let ((msg (with-input-from-string line read)))
+                               (match msg
+                                 (('error _)
+                                  (set! got-error-event #t)
+                                  (set! done? #t))
+                                 (_ (loop (+ i 1))))))
+                           (lambda _ (loop (+ i 1))))))))))
+              (lambda (key . args)
+                (set! done? #t)))
+            (catch #t (lambda () (close-port s2)) (lambda _ #t)))))
+       #:drain? #t)
+      got-error-event)))
+
+
+;; --- 6. Test handle-client: (interrupt) message ---
+
+(test-assert "handle-client: (interrupt) message sends error event back"
+  (let* ((got-interrupt-event #f)
+         (done? #f)
+         (core-mod (resolve-module '(gaia core) #:ensure #f)))
+    ;; Reset interrupted flag
+    (when core-mod (module-set! core-mod '*interrupted* #f))
+
+    (let* ((sockets (socketpair AF_UNIX SOCK_STREAM 0))
+           (s1 (car sockets))
+           (s2 (cdr sockets)))
+      (run-fibers
+       (lambda ()
+         (fcntl s1 F_SETFL (logior O_NONBLOCK (fcntl s1 F_GETFL)))
+         (setvbuf s1 'none)
+         (fcntl s2 F_SETFL (logior O_NONBLOCK (fcntl s2 F_GETFL)))
+         (setvbuf s2 'none)
+
+         (spawn-fiber
+          (lambda ()
+            (let loop ()
+              (unless done? (sleep 0.05) (loop)))))
+
+         (spawn-fiber (lambda () (handle-client s1)))
+
+         (spawn-fiber
+          (lambda ()
+            (catch #t
+              (lambda ()
+                ;; Establish session
+                (write '(session "session-interrupt-test") s2)
+                (newline s2) (force-output s2)
+                (sleep 0.1)
+                ;; Send interrupt
+                (write '(interrupt) s2)
+                (newline s2) (force-output s2)
+                ;; Read response — should get (error "Interrupted")
+                (let loop ((i 0))
+                  (when (< i 10)
+                    (let ((line (read-line s2)))
+                      (cond
+                        ((eof-object? line) (set! done? #t))
+                        (else
+                         (catch #t
+                           (lambda ()
+                             (let ((msg (with-input-from-string line read)))
+                               (match msg
+                                 (('error "Interrupted")
+                                  (set! got-interrupt-event #t)
+                                  ;; Now close cleanly
+                                  (set! done? #t))
+                                 (_ (loop (+ i 1))))))
+                           (lambda _ (loop (+ i 1)))))))))
+                ;; Close to trigger eof on server side
+                (close-port s2))
+              (lambda (key . args)
+                (set! done? #t))))))
+       #:drain? #t)
+      got-interrupt-event)))
+
+
 (test-end "gaia-server")

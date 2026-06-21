@@ -6,6 +6,7 @@
              (gaia rlm-env)
              (fibers)
              (ice-9 match)
+             (srfi srfi-1)
              (srfi srfi-64))
 
 (test-begin "gaia-core")
@@ -239,8 +240,125 @@
         
         ;; Restore mock
         (module-set! llm-mod 'chat-with-llm orig-chat)
-        #t)))
-)
+        #t))
+
+    ;; strip-blocks: covers core.scm lines 453-471
+    (test-group "strip-blocks"
+      (test-equal "strip-blocks: removes thought tags"
+        "hello world"
+        ((@@ (gaia core) strip-blocks) "<thought>internal</thought>hello world"))
+
+      (test-equal "strip-blocks: removes code fences"
+        "before  after"
+        ((@@ (gaia core) strip-blocks) "before ```(define x 1)``` after"))
+
+      (test-equal "strip-blocks: removes internal tokens"
+        "clean  text"
+        ((@@ (gaia core) strip-blocks) "clean <channel|> text <unused87>tool_code <unused88>"))
+
+      (test-equal "strip-blocks: unterminated code fence left as-is"
+        "before ```dangling"
+        ((@@ (gaia core) strip-blocks) "before ```dangling")))
+
+    ;; llm-query injected capability: covers core.scm lines 330-334
+    (test-assert "rlm-loop: llm-query sandbox capability is injected and callable"
+      (let* ((llm-mod (resolve-module '(gaia llm-client) #:ensure #f))
+             (orig-chat (module-ref llm-mod 'chat-with-llm))
+             (env (make-rlm-env "session-llm-query"))
+             (query-called? #f))
+        ;; The outer loop mock: first returns a repl block calling llm-query,
+        ;; second call returns the final answer
+        (module-set! llm-mod 'chat-with-llm
+                     (let ((n 0))
+                       (lambda* (session-id prompt model system #:key think history stream-callback)
+                         (set! n (+ n 1))
+                         (cond
+                           ;; Sub-session call from llm-query itself
+                           ((string-contains session-id "-sub-")
+                            (set! query-called? #t)
+                            '(("payload" . (("content" . "sub-answer") ("reasoning" . "")))))
+                           ;; First outer call: run llm-query from repl
+                           ((= n 1)
+                            '(("payload" . (("content" . "```repl\n(llm-query \"inner question\")\n```")
+                                             ("reasoning" . "")))))
+                           ;; Second outer call: finish
+                           (else
+                            '(("payload" . (("content" . "FINAL(done)") ("reasoning" . "")))))))))
+        (let ((res ((@@ (gaia core) rlm-loop) "session-llm-query" "Task" 1 '() env)))
+          (module-set! llm-mod 'chat-with-llm orig-chat)
+          (and query-called? (string=? "done" (car res))))))
+
+    ;; chat-with-llm exception handling: covers core.scm lines 501-514
+    (test-assert "rlm-loop: generic exception in chat-with-llm is re-thrown"
+      (let* ((llm-mod (resolve-module '(gaia llm-client) #:ensure #f))
+             (orig-chat (module-ref llm-mod 'chat-with-llm))
+             (env (make-rlm-env "session-exception")))
+        (module-set! llm-mod 'chat-with-llm
+                     (lambda args (throw 'my-test-error "boom")))
+        (let ((caught #f))
+          (catch 'my-test-error
+            (lambda ()
+              ((@@ (gaia core) rlm-loop) "session-exc" "Task" 1 '() env))
+            (lambda (key . args)
+              (set! caught #t)))
+          (module-set! llm-mod 'chat-with-llm orig-chat)
+          caught)))
+
+    (test-assert "rlm-loop: user-interrupt in chat-with-llm is re-thrown"
+      (let* ((llm-mod (resolve-module '(gaia llm-client) #:ensure #f))
+             (orig-chat (module-ref llm-mod 'chat-with-llm))
+             (env (make-rlm-env "session-interrupt")))
+        (module-set! llm-mod 'chat-with-llm
+                     (lambda args (throw 'user-interrupt "interrupted by user")))
+        (let ((caught #f))
+          (catch 'user-interrupt
+            (lambda ()
+              ((@@ (gaia core) rlm-loop) "session-intr" "Task" 1 '() env))
+            (lambda (key . args)
+              (set! caught #t)))
+          (module-set! llm-mod 'chat-with-llm orig-chat)
+          caught)))
+
+    ;; Empty response at step > 1: covers core.scm lines 549-551 (append transcript path)
+    (test-assert "rlm-loop: empty response at step>1 appends to existing transcript"
+      (let* ((llm-mod (resolve-module '(gaia llm-client) #:ensure #f))
+             (orig-chat (module-ref llm-mod 'chat-with-llm))
+             (env (make-rlm-env "session-empty-step2"))
+             (call-n 0))
+        (module-set! llm-mod 'chat-with-llm
+                     (lambda args
+                       (set! call-n (+ call-n 1))
+                       (cond
+                         ;; First outer call: return repl to execute (advances to step 2)
+                         ((= call-n 1)
+                          '(("payload" . (("content" . "```repl\n(+ 1 1)\n```") ("reasoning" . "")))))
+                         ;; Second outer call (step 2): return empty to trigger append-transcript path
+                         ((= call-n 2)
+                          '(("payload" . (("content" . "") ("reasoning" . "")))))
+                         ;; Third call: finish
+                         (else
+                          '(("payload" . (("content" . "FINAL(step2-done)") ("reasoning" . ""))))))))
+        (let ((res ((@@ (gaia core) rlm-loop) "session-empty-step2" "Task" 1 '() env)))
+          (module-set! llm-mod 'chat-with-llm orig-chat)
+          (string=? "step2-done" (car res)))))
+
+    ;; Case D: High confidence stopping: covers core.scm lines 647-651
+    (test-assert "rlm-loop: high confidence response stops without final signal"
+      (let* ((llm-mod (resolve-module '(gaia llm-client) #:ensure #f))
+             (orig-chat (module-ref llm-mod 'chat-with-llm))
+             (env (make-rlm-env "session-high-conf"))
+             (events '()))
+        (module-set! llm-mod 'chat-with-llm
+                     (lambda args
+                       ;; Return high-confidence response without FINAL() marker
+                       '(("payload" . (("content" . "The answer is 42. CONFIDENCE(95)")
+                                        ("reasoning" . ""))))))
+        (let ((res ((@@ (gaia core) rlm-loop) "session-high-conf" "Task" 1 '() env
+                     #:event-handler (lambda (evt) (set! events (cons evt events))))))
+          (module-set! llm-mod 'chat-with-llm orig-chat)
+          (and (string-contains (car res) "42")
+               ;; event-handler should have been called with (final ...)
+               (any (lambda (e) (and (pair? e) (eq? (car e) 'final))) events))))))
 
   (test-group "handle-command-slash-commands"
     (let* ((env (make-rlm-env "test-handle-command"))
@@ -345,7 +463,7 @@
           ;; Restore mocks
           (module-set! llm-mod 'chat-with-llm orig-chat)
           (module-set! llm-mod 'get-models orig-models))
-        (module-set! guile-mod 'system* orig-system*))))
+        (module-set! guile-mod 'system* orig-system*)))))
 
 (let* ((runner (test-runner-current))
        (fail (if runner (test-runner-fail-count runner) 0)))

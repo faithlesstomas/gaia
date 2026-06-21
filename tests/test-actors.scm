@@ -223,6 +223,42 @@
          (string-contains output-val "thinking-info")
          (string-contains output-val "history-list"))))
 
+
+;; --- 5. Test actors.scm clean-history and replay-history helpers ---
+
+(test-group "actors helpers"
+  (test-assert "clean-history: strips assistant think tags, preserves user content"
+    (let* ((history `((("role" . "user")      ("content" . "Hello <think>leak</think>"))
+                      (("role" . "assistant") ("content" . "<think>thinking...</think>Yes, hello."))))
+           (cleaned ((@@ (gaia actors) clean-history) history)))
+      (and
+       ;; User content left intact (including think tag)
+       (string-contains (assoc-ref (car cleaned) "content") "<think>")
+       ;; Assistant content cleaned
+       (string=? (assoc-ref (cadr cleaned) "content") "Yes, hello."))))
+
+  (test-assert "clean-history: strips assistant code blocks"
+    (let* ((history `((("role" . "assistant") ("content" . "```repl\n(define x 1)\n``` FINAL(done)"))))
+           (cleaned ((@@ (gaia actors) clean-history) history)))
+      ;; clean-assistant-content strips code blocks and final signals
+      (string=? (assoc-ref (car cleaned) "content") "")))
+
+  (test-assert "replay-history: executes repl blocks from assistant turns"
+    (let* ((env (make-rlm-env "session-replay-actors"))
+           (history `((("role" . "user")      ("content" . "Set x"))
+                      (("role" . "assistant") ("content" . "```repl\n(define replayed-actors-var 777)\n```")))))
+      ((@@ (gaia actors) replay-history) env history)
+      (equal? (rlm-eval! env "replayed-actors-var") '(ok "777"))))
+
+  (test-assert "replay-history: skips non-assistant turns"
+    (let* ((env (make-rlm-env "session-replay-skip"))
+           (history `((("role" . "user") ("content" . "```repl\n(define should-not-run 999)\n```")))))
+      ((@@ (gaia actors) replay-history) env history)
+      ;; user turn repl block should NOT be executed
+      (match (rlm-eval! env "should-not-run")
+        (('error . _) #t)
+        (_ #f)))))
+
 (define (run-direct-coverage-tests)
   (let* ((gcore (resolve-module '(goblins core)))
          (goblins-mod (resolve-module '(goblins)))
