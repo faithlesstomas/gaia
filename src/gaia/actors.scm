@@ -54,6 +54,14 @@
 ;; 1. Sandbox Actor
 (define-actor (^repl-sandbox bcom session-id event-handler permission-handler history)
   (let ((env (make-rlm-env session-id event-handler permission-handler)))
+    (rlm-inject! env 'llm-query
+      (lambda (prompt)
+        (let* ((sub-session (string-append session-id "-sub-" (number->string (random 1000000000))))
+               (response (chat-with-llm sub-session prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT) #:history '()))
+               (payload (assoc-ref response "payload")))
+          (if payload
+              (assoc-ref payload "content")
+              "Error: No response from sub-LLM"))))
     (when (and history (not (null? history)))
       (replay-history env history))
     (methods
