@@ -26,7 +26,7 @@ enum Action {
 /// by the listener thread to keep the socket drained at all times.
 enum ServerEvent {
     /// A terminal event that ends a wait_and_print() call
-    Terminal(Value),
+    Terminal(Value, bool),
     /// Server closed the connection
     Closed,
 }
@@ -133,6 +133,7 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
     let mut in_thought_stream = false;
     let mut has_streamed_tokens = false;
     let mut has_streamed_thoughts = false;
+    let mut accumulated_tokens = String::new();
     let mut spinner = Spinner::new();
 
     loop {
@@ -152,9 +153,10 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                             if let Value::Cons(c) = cdr {
                                 if let Some(msg) = c.car().as_str() {
                                     has_streamed_tokens = true;
+                                    accumulated_tokens.push_str(msg);
                                     if !in_token_stream {
                                         eprint!("\r\x1b[K"); // clear status
-                                        println!("\n{BOLD}Analysis >{RESET}");
+                                        println!("\n{BOLD}AI >{RESET}");
                                         in_token_stream = true;
                                         in_thought_stream = false;
                                     }
@@ -210,7 +212,7 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                                 if let Some(msg) = c.car().as_str() {
                                     if !has_streamed_tokens {
                                         eprint!("\r\x1b[K");
-                                        println!("\n{BOLD}Analysis >{RESET}");
+                                        println!("\n{BOLD}AI >{RESET}");
                                         print_markdown(msg);
                                     } else {
                                         println!(); // finish the stream line
@@ -271,15 +273,28 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                             if in_token_stream || in_thought_stream {
                                 println!();
                             }
+                            let mut should_print_final = true;
+                            if tag == "final" {
+                                if let Value::Cons(c) = cdr {
+                                    if let Some(ans) = c.car().as_str() {
+                                        let trimmed_accum = accumulated_tokens.trim();
+                                        let trimmed_ans = ans.trim();
+                                        if !trimmed_ans.is_empty() && (trimmed_accum == trimmed_ans || trimmed_accum.ends_with(trimmed_ans)) {
+                                            should_print_final = false;
+                                        }
+                                    }
+                                }
+                            }
                             // Clear any residual status line before forwarding
                             eprint!("\r\x1b[K");
-                            if tx.send(ServerEvent::Terminal(event.clone())).is_err() {
+                            if tx.send(ServerEvent::Terminal(event.clone(), should_print_final)).is_err() {
                                 return;
                             }
                             in_token_stream = false;
                             in_thought_stream = false;
                             has_streamed_tokens = false;
                             has_streamed_thoughts = false;
+                            accumulated_tokens.clear();
                         }
 
                         _ => {
@@ -388,7 +403,7 @@ fn dispatch(
 fn wait_and_print(rx: &Receiver<ServerEvent>, stream: &mut UnixStream) -> Result<()> {
     loop {
         match rx.recv()? {
-            ServerEvent::Terminal(event) => {
+            ServerEvent::Terminal(event, should_print_final) => {
                 if let Value::Cons(cons) = &event {
                     let tag = cons.car().as_symbol().unwrap_or("");
                     let cdr = cons.cdr();
@@ -449,10 +464,12 @@ fn wait_and_print(rx: &Receiver<ServerEvent>, stream: &mut UnixStream) -> Result
                             break;
                         }
                         "final" => {
-                            if let Value::Cons(c) = cdr {
-                                if let Some(ans) = c.car().as_str() {
-                                    println!("\n{BOLD}Final Answer:{RESET}");
-                                    print_markdown(ans);
+                            if should_print_final {
+                                if let Value::Cons(c) = cdr {
+                                    if let Some(ans) = c.car().as_str() {
+                                        println!("\n{BOLD}Final Answer:{RESET}");
+                                        print_markdown(ans);
+                                    }
                                 }
                             }
                             break;

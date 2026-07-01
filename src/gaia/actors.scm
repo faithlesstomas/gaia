@@ -7,6 +7,7 @@
   #:use-module (goblins actor-lib methods)
   #:use-module (goblins actor-lib joiners)
   #:use-module (srfi srfi-11)
+  #:use-module (srfi srfi-1)
   #:use-module (ice-9 suspendable-ports)
   #:use-module (ice-9 threads)
   #:use-module (gaia sandbox)
@@ -41,11 +42,21 @@
 (define (replay-history env history)
   (for-each (lambda (turn)
               (let ((role (or (assoc-ref turn 'role) (assoc-ref turn "role")))
-                    (content (or (assoc-ref turn 'content) (assoc-ref turn "content"))))
-                (when (and role (string=? (format #f "~a" role) "assistant") content)
-                  (let ((code (extract-code content)))
-                    (when code
-                      (rlm-eval! env code))))))
+                    (trajectory (or (assoc-ref turn 'trajectory) (assoc-ref turn "trajectory"))))
+                (if trajectory
+                    (for-each (lambda (step)
+                                (let ((step-role (or (assoc-ref step 'role) (assoc-ref step "role")))
+                                      (step-content (or (assoc-ref step 'content) (assoc-ref step "content"))))
+                                  (when (and step-role (string=? (format #f "~a" step-role) "assistant") step-content)
+                                    (let ((code (extract-code step-content)))
+                                      (when code
+                                        (rlm-eval! env code #:permission-handler (lambda (_) #t)))))))
+                              (if (vector? trajectory) (vector->list trajectory) trajectory))
+                    (let ((content (or (assoc-ref turn 'content) (assoc-ref turn "content"))))
+                      (when (and role (string=? (format #f "~a" role) "assistant") content)
+                        (let ((code (extract-code content)))
+                          (when code
+                            (rlm-eval! env code #:permission-handler (lambda (_) #t)))))))))
             history))
 
 (define (new-promise-pair)
@@ -114,8 +125,9 @@
 
 ;; 2. LLM Client Actor
 (define-actor (^llm-client bcom session-vat)
+  #:self self
   (methods
-   [(chat session-id prompt model system-prompt think history stream-callback)
+   [(chat session-id prompt model system-prompt think history stream-callback #:optional (role "user"))
     (let-values (((promo resolver) (spawn-promise-and-resolver)))
       (let ((channel (make-channel)))
         ;; Spawn a POSIX thread to handle the synchronous HTTP request
@@ -128,6 +140,7 @@
                  (let ((res (chat-with-llm session-id prompt model system-prompt
                                            #:think think
                                            #:history history
+                                           #:role role
                                            #:stream-callback (lambda (evt)
                                                                (put-message channel `(stream ,evt))))))
                    (put-message channel `(done ,res))))
@@ -157,39 +170,29 @@
   #:self self
   (methods
    [(solve task depth current-history resolve-promise)
-    (let ((initial-history (if (null? current-history)
-                               (list `(("role" . "system") ("content" . ,(or (get-config 'system-prompt) SYSTEM_PROMPT))))
-                               current-history)))
-      (<- self 'solve-step task depth initial-history 1 '() task resolve-promise)
-      'ok)]
+    (<- self 'solve-step task depth current-history current-history 1 '() task resolve-promise)
+    'ok]
 
-   [(solve-step task depth history step transcript last-output resolve-promise)
+   [(solve-step task depth outer-history history step transcript last-output resolve-promise)
     (check-interrupt!)
     (if (> depth MAX-RECURSION-DEPTH)
         (begin
           (gaia-log "\n[GAIA] Max recursion depth reached. Returning current state.\n")
-          (<- resolve-promise 'fulfill (cons last-output history)))
+          (let* ((loop-steps (drop history (length outer-history)))
+                 (clean-history (append outer-history
+                                        (list `(("role" . "user") ("content" . ,task))
+                                              `(("role" . "assistant") ("content" . ,last-output) ("trajectory" . ,(list->vector loop-steps)))))))
+            (<- resolve-promise 'fulfill (cons last-output clean-history))))
         (begin
           (when event-handler (event-handler `(status ,(format #f "Agent Depth ~a (Step ~a)..." depth step))))
-          (let* ((prompt (if (null? transcript)
-                             last-output
-                             (let ((original-task (assoc-ref transcript "original-task"))
-                                   (history-text (format-transcript transcript)))
-                               (string-append
-                                "=== ORIGINAL TASK ===\n"
-                                (if original-task original-task "Unknown task")
-                                "\n\n=== EXECUTION LOG (steps so far) ===\n"
-                                history-text
-                                "\n\n=== LATEST ===\n"
-                                last-output
-                                "\n\nContinue working on the original task. "
-                                "Write your next ```repl code block or provide FINAL(answer)."))))
+          (let* ((prompt last-output)
                  (stream-callback (lambda (evt)
                                     (when event-handler
                                       (event-handler evt)))))
             (let ((chat-promise (<- llm-client 'chat session-id prompt (get-config 'model)
                                     (or (get-config 'system-prompt) SYSTEM_PROMPT)
-                                    (get-config 'thinking) history stream-callback)))
+                                    (get-config 'thinking) history stream-callback
+                                    (if (null? transcript) "user" "system"))))
               (on chat-promise
                   (lambda (response)
                     (let* ((payload (assoc-ref response "payload"))
@@ -245,22 +248,26 @@
                                            (gaia-log (string-append C-BOLD C-GREEN "\n[GAIA] Sub-Agent completed.\n" C-RESET "Result length: "
                                                                    (number->string (string-length sub-ans)) " chars\n"))
                                            (if final-sig
-                                               (<- resolve-promise 'fulfill (cons (match final-sig (('final ans) ans) (('final-var var) var) (_ "Sub-agent executed successfully"))
-                                                                      (append history (list `(("role" . "user") ("content" . ,last-output))
-                                                                                            `(("role" . "assistant") ("content" . ,response-text))))))
-                                               (<- self 'solve-step task depth
-                                                   (append history (list `(("role" . "user") ("content" . ,last-output))
+                                               (let* ((loop-steps (drop history (length outer-history)))
+                                                      (clean-history (append outer-history
+                                                                             (list `(("role" . "user") ("content" . ,task))
+                                                                                   `(("role" . "assistant") ("content" . ,(match final-sig (('final ans) ans) (('final-var var) var) (_ "Sub-agent executed successfully")))
+                                                                                         ("trajectory" . ,(list->vector loop-steps)))))))
+                                                 (<- resolve-promise 'fulfill (cons (match final-sig (('final ans) ans) (('final-var var) var) (_ "Sub-agent executed successfully"))
+                                                                                    clean-history)))
+                                               (<- self 'solve-step task depth outer-history
+                                                   (append history (list `(("role" . "system") ("content" . ,last-output))
                                                                          `(("role" . "assistant") ("content" . ,response-text))))
                                                    (+ step 1) updated-transcript formatted-sub-output resolve-promise))))
                                        #:catch (lambda (err)
                                                  (let ((err-str (format #f "Sub-agent failed: ~a" err)))
-                                                   (<- self 'solve-step task depth
-                                                       (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                   (<- self 'solve-step task depth outer-history
+                                                       (append history (list `(("role" . "system") ("content" . ,last-output))
                                                                              `(("role" . "assistant") ("content" . ,response-text))))
                                                        (+ step 1) updated-transcript err-str resolve-promise)))))))
                               (_
-                               (<- self 'solve-step task depth
-                                   (append history (list `(("role" . "user") ("content" . ,last-output))
+                               (<- self 'solve-step task depth outer-history
+                                   (append history (list `(("role" . "system") ("content" . ,last-output))
                                                          `(("role" . "assistant") ("content" . ,response-text))))
                                    (+ step 1) updated-transcript "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")" resolve-promise))))
 
@@ -277,26 +284,29 @@
                                             (('ok result)
                                              (when event-handler (event-handler `(result ,result)))
                                              (gaia-log (string-append C-GREEN "\n[REPL] Success:\n" C-RESET result "\n"))
-                                             (<- self 'solve-step task depth
-                                                 (append history (list `(("role" . "user") ("content" . ,last-output))
+                                             (<- self 'solve-step task depth outer-history
+                                                 (append history (list `(("role" . "system") ("content" . ,last-output))
                                                                        `(("role" . "assistant") ("content" . ,response-text))))
                                                  (+ step 1) updated-transcript (string-append "Code executed successfully. Result:\n" result) resolve-promise))
                                             (('error type msg)
                                              (let ((feedback (string-append "Runtime Error (" (symbol->string type) "): " msg)))
                                                (when event-handler (event-handler `(repl-error feedback)))
                                                (gaia-log (string-append C-RED "\n[REPL] Runtime Error:\n" C-RESET feedback "\n"))
-                                               (<- self 'solve-step task depth
-                                                   (append history (list `(("role" . "user") ("content" . ,last-output))
+                                               (<- self 'solve-step task depth outer-history
+                                                   (append history (list `(("role" . "system") ("content" . ,last-output))
                                                                          `(("role" . "assistant") ("content" . ,response-text))))
                                                    (+ step 1) updated-transcript feedback resolve-promise)))))
                                         #:catch (lambda (err)
                                                   (let ((err-str (format #f "Sandbox evaluation crash: ~a" err)))
-                                                    (<- self 'solve-step task depth
-                                                        (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                    (<- self 'solve-step task depth outer-history
+                                                        (append history (list `(("role" . "system") ("content" . ,last-output))
                                                                               `(("role" . "assistant") ("content" . ,response-text))))
                                                         (+ step 1) updated-transcript err-str resolve-promise))))))
-                                (<- resolve-promise 'fulfill (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
-                                                                                           `(("role" . "assistant") ("content" . ,response-text))))))))
+                                (let* ((loop-steps (drop history (length outer-history)))
+                                       (clean-history (append outer-history
+                                                              (list `(("role" . "user") ("content" . ,task))
+                                                                    `(("role" . "assistant") ("content" . ,response-text) ("trajectory" . ,(list->vector loop-steps)))))))
+                                  (<- resolve-promise 'fulfill (cons response-text clean-history)))))
 
                            ;; Case C: Final Signal
                            ((and final-sig (match final-sig (('final ans) ans) (('final-var var) var) (_ #f))) =>
@@ -305,32 +315,42 @@
                               (if (equal? (car final-sig) 'final)
                                   (gaia-log (string-append C-BOLD "[GAIA] Final Answer: " C-RESET (markdown->ansi answer) "\n"))
                                   (gaia-log (string-append C-BOLD "[GAIA] Answer stored in: " C-RESET answer "\n")))
-                              (<- resolve-promise 'fulfill (cons answer (append history (list `(("role" . "user") ("content" . ,last-output))
-                                                                                 `(("role" . "assistant") ("content" . ,response-text))))))))
+                              (let* ((loop-steps (drop history (length outer-history)))
+                                     (clean-history (append outer-history
+                                                            (list `(("role" . "user") ("content" . ,task))
+                                                                  `(("role" . "assistant") ("content" . ,answer) ("trajectory" . ,(list->vector loop-steps)))))))
+                                (<- resolve-promise 'fulfill (cons answer clean-history)))))
 
                            ;; Case D: High confidence
                            ((and conf-val (>= conf-val CONFIDENCE-THRESHOLD))
                             (when event-handler (event-handler `(final ,response-text)))
                             (gaia-log (string-append C-GREEN "\n[GAIA] ✓ High confidence (" (number->string conf-val) "%) - stopping." C-RESET "\n"))
-                            (<- resolve-promise 'fulfill (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
-                                                                                      `(("role" . "assistant") ("content" . ,response-text)))))))
+                            (let* ((loop-steps (drop history (length outer-history)))
+                                   (clean-history (append outer-history
+                                                          (list `(("role" . "user") ("content" . ,task))
+                                                                `(("role" . "assistant") ("content" . ,response-text) ("trajectory" . ,(list->vector loop-steps)))))))
+                              (<- resolve-promise 'fulfill (cons response-text clean-history))))
 
                            ;; Case E: Fallback
                            (else
                             (when event-handler (event-handler `(final ,response-text)))
-                            (<- resolve-promise 'fulfill (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
-                                                                                      `(("role" . "assistant") ("content" . ,response-text)))))))))))
+                            (let* ((loop-steps (drop history (length outer-history)))
+                                   (clean-history (append outer-history
+                                                          (list `(("role" . "user") ("content" . ,task))
+                                                                `(("role" . "assistant") ("content" . ,response-text) ("trajectory" . ,(list->vector loop-steps)))))))
+                              (<- resolve-promise 'fulfill (cons response-text clean-history)))))))))
                   #:catch (lambda (err)
                             (let ((err-msg (format #f "LLM Call Error: ~a" err)))
                               (gaia-log (string-append C-RED err-msg C-RESET "\n"))
-                              (<- resolve-promise 'fulfill (cons err-msg history) ) ) ) ) ) ) ) ) ) ] ) )
+                              (<- resolve-promise 'fulfill (cons err-msg history) ) ) ) ) ) ) ) ) ] ) )
+
 
 ;; 4. Session Orchestrator Actor
-(define-actor (^session-orchestrator bcom session-id client-socket channel sandbox-actor agent-actor llm-client history)
+(define-actor (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history)
   #:self self
   (methods
    [(update-history new-history)
-    (bcom (^session-orchestrator bcom session-id client-socket channel sandbox-actor agent-actor llm-client new-history) 'ok)]
+    (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client new-history) 'ok)]
 
    [(handle-message msg)
     (match msg
@@ -347,21 +367,75 @@
 
       (('eval task)
        (gaia-log (format #f "[SERVER] Received EVAL request: ~a" task))
-       (let-values (((solve-promise resolve-solve) (new-promise-pair)))
-         (<- agent-actor 'solve task 0 history resolve-solve)
-         (on solve-promise
-             (lambda (res-pair)
-               (let ((answer (car res-pair))
-                     (updated-history (cdr res-pair)))
-                 (gaia-log (format #f "[SERVER] EVAL completed. Saving session ~a." session-id))
-                 (save-session session-id updated-history)
-                 (with-output-to-file ".last_session" (lambda () (display session-id)))
-                 (send-event client-socket `(final ,answer))
-                 (<- self 'update-history updated-history)))
+       (let* ((event-sink (lambda (event) (send-event client-socket event)))
+              (chat-promise (<- llm-client 'chat session-id task (get-config 'model)
+                                (or (get-config 'system-prompt) SYSTEM_PROMPT)
+                                (get-config 'thinking) history event-sink)))
+         (on chat-promise
+             (lambda (response)
+               (let* ((payload (assoc-ref response "payload"))
+                      (response-text (if payload
+                                         (assoc-ref payload "content")
+                                         "Error: No payload in response"))
+                      (action-code (extract-code response-text)))
+                 (if action-code
+                     ;; If the LLM outputted a repl block, enter Task-Solving mode
+                     (begin
+                       (gaia-log "[SERVER] LLM initiated code execution. Spawning agent-actor solver.")
+                       ;; 1. Send the code block event to the client so it gets displayed
+                       (send-event client-socket `(code ,action-code))
+                       (gaia-log (string-append C-BOLD C-CYAN "\n[GAIA] Executing Scheme Code:\n" C-RESET action-code "\n"))
+                       ;; 2. Execute the code in the sandbox
+                       (let ((eval-promise (<- sandbox-actor 'eval action-code)))
+                         (on eval-promise
+                             (lambda (eval-res)
+                               (let* ((result-str (match eval-res
+                                                    (('ok res)
+                                                     (send-event client-socket `(result ,res))
+                                                     (gaia-log (string-append C-GREEN "\n[REPL] Success:\n" C-RESET res "\n"))
+                                                     (string-append "Code executed successfully. Result:\n" res))
+                                                    (('error type msg)
+                                                     (let ((err-msg (string-append "Runtime Error (" (symbol->string type) "): " msg)))
+                                                       (send-event client-socket `(repl-error err-msg))
+                                                       (gaia-log (string-append C-RED "\n[REPL] Runtime Error:\n" C-RESET err-msg "\n"))
+                                                       err-msg))))
+                                      (step-history (append history
+                                                            (list `(("role" . "user") ("content" . ,task))
+                                                                  `(("role" . "assistant") ("content" . ,response-text)))))
+                                      (step-transcript (list (cons "original-task" task)
+                                                             (cons "assistant" (truncate-for-transcript response-text))
+                                                             (cons "user" task))))
+                                 (let-values (((solve-promise resolve-solve) (new-promise-pair)))
+                                   (<- agent-actor 'solve-step task 0 history step-history 2 step-transcript result-str resolve-solve)
+                                   (on solve-promise
+                                       (lambda (res-pair)
+                                         (let ((answer (car res-pair))
+                                               (updated-history (cdr res-pair)))
+                                           (gaia-log (format #f "[SERVER] EVAL completed. Saving session ~a." session-id))
+                                           (save-session session-id updated-history)
+                                           (with-output-to-file ".last_session" (lambda () (display session-id)))
+                                           (send-event client-socket `(final ,answer))
+                                           (<- self 'update-history updated-history)))
+                                       #:catch (lambda (err)
+                                                 (send-event client-socket `(error ,(format #f "Solver Error: ~a" err))))))))
+                             #:catch (lambda (err)
+                                       (send-event client-socket `(error ,(format #f "Initial code execution crash: ~a" err)))))))
+                     ;; If the LLM did not output a repl block, it's a conversational reply
+                     (let* ((prose (clean-assistant-content response-text))
+                            (final-sig (extract-final-signal response-text))
+                            (final-ans (if final-sig
+                                           (match final-sig (('final ans) ans) (('final-var var) var) (_ prose))
+                                           prose))
+                            (updated-history (append history
+                                                     (list `(("role" . "user") ("content" . ,task))
+                                                           `(("role" . "assistant") ("content" . ,response-text))))))
+                       (gaia-log "[SERVER] LLM responded conversationally.")
+                       (send-event client-socket `(final ,final-ans))
+                       (save-session session-id updated-history)
+                       (with-output-to-file ".last_session" (lambda () (display session-id)))
+                       (<- self 'update-history updated-history)))))
              #:catch (lambda (err)
-                       (let ((err-msg (format #f "Engine Error: ~a" err)))
-                         (gaia-log (format #f "[SERVER] EVAL error: ~a" err-msg))
-                         (send-event client-socket `(error ,err-msg)))))))
+                       (send-event client-socket `(error ,(format #f "LLM request failed: ~a" err)))))))
 
       (('repl code)
        (gaia-log (format #f "[SERVER] Received REPL code execution request."))
@@ -399,20 +473,10 @@
        (gaia-log (format #f "[SERVER] Clearing session ~a environment and history." session-id))
        (save-session session-id '())
        (let* ((event-sink (lambda (event) (send-event client-socket event)))
-              (permission-sink (lambda (expr)
-                                 (send-event client-socket `(permission-request ,expr))
-                                 (let loop ()
-                                   (let ((msg (get-message channel)))
-                                     (match msg
-                                       (('permission-response #t) #t)
-                                       (('permission-response #f) #f)
-                                       ('interrupt (throw 'user-interrupt))
-                                       ('eof (throw 'user-interrupt))
-                                       (_ (loop)))))))
               (new-sb-actor (spawn ^repl-sandbox session-id event-sink permission-sink '()))
               (new-agent-actor (spawn ^agent-actor session-id new-sb-actor llm-client event-sink permission-sink)))
          (send-event client-socket '(final "Environment and history cleared."))
-         (bcom (^session-orchestrator bcom session-id client-socket channel new-sb-actor new-agent-actor llm-client '()) 'ok)))
+         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client '()) 'ok)))
 
       (('get-model)
        (send-event client-socket `(model-info ,(get-config 'model))))
@@ -462,21 +526,11 @@
              (gaia-log (format #f "[SERVER] Swapping session to: ~a" new-id))
              (let* ((new-history (load-session new-id))
                     (event-sink (lambda (event) (send-event client-socket event)))
-                    (permission-sink (lambda (expr)
-                                       (send-event client-socket `(permission-request ,expr))
-                                       (let loop ()
-                                         (let ((msg (get-message channel)))
-                                           (match msg
-                                             (('permission-response #t) #t)
-                                             (('permission-response #f) #f)
-                                             ('interrupt (throw 'user-interrupt))
-                                             ('eof (throw 'user-interrupt))
-                                             (_ (loop)))))))
                     (new-sb-actor (spawn ^repl-sandbox new-id event-sink permission-sink new-history))
                     (new-agent-actor (spawn ^agent-actor new-id new-sb-actor llm-client event-sink permission-sink)))
                (with-output-to-file ".last_session" (lambda () (display new-id)))
                (send-event client-socket `(final ,(string-append "Session switched to: " new-id)))
-               (bcom (^session-orchestrator bcom new-id client-socket channel new-sb-actor new-agent-actor llm-client new-history) 'ok)))))
+               (bcom (^session-orchestrator bcom new-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client new-history) 'ok)))))
 
       (('list-sessions)
        (let ((sessions (if (file-exists? "sessions")

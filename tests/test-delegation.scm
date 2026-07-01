@@ -11,7 +11,7 @@
 ;; Mock for chat-with-llm to simulate specific responses
 (define call-count 0)
 
-(define* (mock-chat-with-llm session-id input model prompt #:key (think #f) (history '()) (stream-callback #f))
+(define* (mock-chat-with-llm session-id input model prompt #:key (think #f) (history '()) (stream-callback #f) (role "user"))
   (set! call-count (+ call-count 1))
   (cond
     ;; First call: The "Core" agent decides to delegate

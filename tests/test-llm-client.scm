@@ -1,0 +1,111 @@
+(add-to-load-path (string-append (dirname (current-filename)) "/../src"))
+
+(use-modules (srfi srfi-64)
+             (srfi srfi-11)
+             (ice-9 receive)
+             (gaia llm-client)
+             (gaia config))
+
+;; Reload gaia llm-client to purge any mocks left by previous test files running in the same process
+(let ((llm-mod (resolve-module '(gaia llm-client) #:ensure #f))
+      (abs-path (canonicalize-path (string-append (dirname (current-filename)) "/../src/gaia/llm-client.scm"))))
+  (when llm-mod
+    (save-module-excursion
+      (lambda ()
+        (set-current-module llm-mod)
+        (load abs-path)))))
+
+;; Mock the (web client) and (web response) modules
+(let ((client-mod (resolve-module '(web client) #:ensure #f))
+      (resp-mod (resolve-module '(web response) #:ensure #f)))
+
+  ;; Mock http-post
+  (module-set! client-mod 'http-post
+               (lambda* (url #:key body headers)
+                 (cond
+                  ((string-contains url "/v1/chat/completions")
+                   (values 'mock-hdr "{\"choices\": [{\"message\": {\"content\": \"Sync Hello\", \"reasoning_content\": \"Thinking hard\"}}]}"))
+                  (else
+                   (values 'mock-hdr "{}")))))
+
+  ;; Mock http-get
+  (module-set! client-mod 'http-get
+               (lambda (url)
+                 (cond
+                  ((string-contains url "/v1/models")
+                   (values 'mock-hdr "{\"data\": [{\"id\": \"gemma4:e2b\"}, {\"id\": \"gpt-4o\"}]}"))
+                  (else
+                   (values 'mock-hdr "{}")))))
+
+  ;; Mock open-socket-for-uri
+  (module-set! client-mod 'open-socket-for-uri
+               (lambda (uri)
+                 (car (pipe))))
+
+  ;; Mock http-request
+  (module-set! client-mod 'http-request
+               (lambda* (url #:key method body headers streaming? port)
+                 (let ((build-resp (module-ref resp-mod 'build-response)))
+                   (cond
+                    ((string-contains url "error")
+                     (values (build-resp #:code 500) (open-input-string "Error message from server")))
+                    (else
+                     (values (build-resp #:code 200)
+                             (open-input-string
+                              "data: {\"choices\": [{\"delta\": {\"content\": \"Hello\", \"reasoning_content\": \"Thinking\"}}]}\n\ndata: {\"choices\": [{\"delta\": {\"content\": \" world\", \"reasoning_content\": \"\"}}]}\n\ndata: [DONE]\n"))))))))
+
+(test-begin "gaia-llm-client")
+
+;; 1. Test get-models
+(test-equal "get-models returns ids list"
+  '("gemma4:e2b" "gpt-4o")
+  (get-models))
+
+;; 2. Test chat-with-llm synchronous non-streaming
+(test-equal "chat-with-llm synchronous"
+  '(("payload" . (("content" . "Sync Hello") ("reasoning" . "Thinking hard"))))
+  (chat-with-llm "session-sync" "Hello sync" "gpt-4o" "System prompt"))
+
+;; 3. Test chat-with-llm streaming path
+(test-assert "chat-with-llm streaming"
+  (let* ((tokens '())
+         (thoughts '())
+         (callback (lambda (evt)
+                     (case (car evt)
+                       ((token) (set! tokens (cons (cadr evt) tokens)))
+                       ((thought) (set! thoughts (cons (cadr evt) thoughts))))))
+         (res (chat-with-llm "session-stream" "Hello stream" "gemma4:e2b" "System prompt"
+                             #:stream-callback callback)))
+    (and (equal? res '(("payload" . (("content" . "Hello world") ("reasoning" . "Thinking")))))
+         (equal? (reverse tokens) '("Hello" " world"))
+         (equal? (reverse thoughts) '("Thinking")))))
+
+;; 4. Test chat-with-llm streaming error path
+(test-assert "chat-with-llm streaming error"
+  (let* ((old-url (get-config 'llm-url))
+         (dummy (set-config! 'llm-url "http://localhost:4000/error"))
+         (res (chat-with-llm "session-error" "Hello error" "gemma-error" "System prompt"
+                             #:stream-callback (lambda (_) #t)))
+         (dummy2 (set-config! 'llm-url old-url)))
+    (and (list? res)
+         (string-contains (assoc-ref res "error") "Error message from server"))))
+
+;; 5. Test model-supports-thinking?
+(test-assert "model-supports-thinking?"
+  (and ((@@ (gaia llm-client) model-supports-thinking?) "gemma4")
+       ((@@ (gaia llm-client) model-supports-thinking?) "r1-reasoning")
+       (not ((@@ (gaia llm-client) model-supports-thinking?) "gpt-4o"))))
+
+;; 6. Test stream filter process-buffer! edge cases
+(test-assert "make-stream-filter process-buffer!"
+  (let* ((output '())
+         (cb (lambda (evt) (set! output (cons evt output))))
+         (filter (make-stream-filter cb)))
+    (filter '(token "Hello <think>secret</think>world"))
+    (filter '(flush))
+    (equal? (reverse output)
+            '((token "Hello ")
+              (thought "secret")
+              (token "world")))))
+
+(test-end "gaia-llm-client")

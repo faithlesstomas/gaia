@@ -24,10 +24,14 @@ to prevent blocking the Fibers scheduler, yielding control cooperatively."
                     (set! done? #t)))))
     (let ((interrupted? (lambda ()
                           (module-ref (resolve-module '(gaia core)) '*interrupted*)))
-          (yield (catch #t
-                   (lambda ()
-                     (module-ref (resolve-module '(fibers scheduler)) 'yield-current-task))
-                   (lambda _ #f))))
+          (fibers-sleep (lambda (t)
+                          (let ((sleep-proc (catch #t
+                                              (lambda ()
+                                                (module-ref (resolve-module '(fibers) #:ensure #f) 'sleep))
+                                              (lambda _ #f))))
+                            (if sleep-proc
+                                (sleep-proc t)
+                                (usleep (inexact->exact (round (* t 1000000)))))))))
       (let loop ()
         (cond
          ((interrupted?)
@@ -38,9 +42,7 @@ to prevent blocking the Fibers scheduler, yielding control cooperatively."
               (apply throw (car result-err) (cdr result-err))
               result-val))
          (else
-          (if yield
-              (yield)
-              (usleep 10000)) ;; Fallback if not running inside fibers
+          (fibers-sleep 0.01)
           (loop)))))))
 
 (define BANNED-PRIMITIVES '(system system* delete-file rmdir rename-file chmod))

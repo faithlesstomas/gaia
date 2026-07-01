@@ -24,14 +24,27 @@
   (let ((history-list (if (vector? history) (vector->list history) history)))
     (for-each (lambda (turn)
                 (let ((role (or (assoc-ref turn 'role) (assoc-ref turn "role")))
-                      (content (or (assoc-ref turn 'content) (assoc-ref turn "content"))))
-                  (when (and role (string=? (format #f "~a" role) "assistant") content)
-                    (let ((code (or (extract-code content)
-                                    (if (or (string-prefix? "(" content)
-                                            (string-prefix? ";" content))
-                                        content #f))))
-                      (when code
-                        (rlm-eval! env code #:permission-handler (lambda (_) #t)))))))
+                      (trajectory (or (assoc-ref turn 'trajectory) (assoc-ref turn "trajectory"))))
+                  (if trajectory
+                      (for-each (lambda (step)
+                                  (let ((step-role (or (assoc-ref step 'role) (assoc-ref step "role")))
+                                        (step-content (or (assoc-ref step 'content) (assoc-ref step "content"))))
+                                    (when (and step-role (string=? (format #f "~a" step-role) "assistant") step-content)
+                                      (let ((code (or (extract-code step-content)
+                                                      (if (or (string-prefix? "(" step-content)
+                                                              (string-prefix? ";" step-content))
+                                                          step-content #f))))
+                                        (when code
+                                          (rlm-eval! env code #:permission-handler (lambda (_) #t)))))))
+                                (if (vector? trajectory) (vector->list trajectory) trajectory))
+                      (let ((content (or (assoc-ref turn 'content) (assoc-ref turn "content"))))
+                        (when (and role (string=? (format #f "~a" role) "assistant") content)
+                          (let ((code (or (extract-code content)
+                                          (if (or (string-prefix? "(" content)
+                                                  (string-prefix? ";" content))
+                                              content #f))))
+                            (when code
+                              (rlm-eval! env code #:permission-handler (lambda (_) #t)))))))))
               history-list)))
 
 (define (set-nonblocking! port)
@@ -87,7 +100,11 @@
 (define (handle-client client-socket)
   (set-port-encoding! client-socket "UTF-8")
   (set-nonblocking! client-socket)
-  (let ((channel (make-channel)))
+  (let ((channel (make-channel))
+        (perm-mutex (make-mutex))
+        (perm-cond (make-condition-variable))
+        (perm-state-box (make-vector 1 'idle))
+        (perm-value-box (make-vector 1 #f)))
     ;; Spawn the asynchronous socket reader fiber
     (spawn-fiber
      (lambda ()
@@ -102,7 +119,10 @@
                            (lambda _ 'error)))))
            (cond
             ((eof-object? line)
-             (put-message channel 'eof))
+             (put-message channel 'eof)
+             (with-mutex perm-mutex
+               (vector-set! perm-state-box 0 'eof)
+               (signal-condition-variable perm-cond)))
             ((equal? msg '(interrupt))
              ;; Set the global *interrupted* flag in core
              (let ((core-mod (resolve-module '(gaia core) #:ensure #f)))
@@ -112,6 +132,15 @@
              (abort-active-llm-calls!)
              (send-event client-socket '(error "Interrupted"))
              (put-message channel 'interrupt)
+             (with-mutex perm-mutex
+               (vector-set! perm-state-box 0 'interrupted)
+               (signal-condition-variable perm-cond))
+             (loop))
+            ((and (pair? msg) (eq? (car msg) 'permission-response))
+             (with-mutex perm-mutex
+               (vector-set! perm-state-box 0 'resolved)
+               (vector-set! perm-value-box 0 (cadr msg))
+               (signal-condition-variable perm-cond))
              (loop))
             (else
              (put-message channel msg)
@@ -119,14 +148,20 @@
     (let* ((event-sink (lambda (event) (send-event client-socket event)))
            (permission-sink (lambda (expr)
                               (send-event client-socket `(permission-request ,expr))
-                              (let loop ()
-                                (let ((msg (get-message channel)))
-                                  (match msg
-                                    (('permission-response #t) #t)
-                                    (('permission-response #f) #f)
-                                    ('interrupt (throw 'user-interrupt))
-                                    ('eof (throw 'user-interrupt))
-                                    (_ (loop)))))))
+                              (with-mutex perm-mutex
+                                (vector-set! perm-state-box 0 'pending)
+                                (let loop ()
+                                  (let ((state (vector-ref perm-state-box 0)))
+                                    (cond
+                                     ((eq? state 'resolved)
+                                      (vector-ref perm-value-box 0))
+                                     ((eq? state 'interrupted)
+                                      (throw 'user-interrupt))
+                                     ((eq? state 'eof)
+                                      (throw 'user-interrupt))
+                                     (else
+                                       (wait-condition-variable perm-cond perm-mutex)
+                                       (loop))))))))
            (first-msg (get-message channel))
            (session-id (match first-msg
                          (('session id) id)
@@ -138,7 +173,7 @@
               (let* ((sandbox-actor (spawn ^repl-sandbox session-id event-sink permission-sink history))
                      (llm-client (spawn ^llm-client session-vat))
                      (agent-actor (spawn ^agent-actor session-id sandbox-actor llm-client event-sink permission-sink)))
-                (spawn ^session-orchestrator session-id client-socket channel sandbox-actor agent-actor llm-client history)))))
+                (spawn ^session-orchestrator session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history)))))
       (gaia-log (format #f "[SERVER] Session initialized (Goblins Vat): ~a" session-id))
       (with-output-to-file ".last_session" (lambda () (display session-id)))
       (let loop ()

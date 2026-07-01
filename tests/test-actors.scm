@@ -134,7 +134,7 @@
             (spawn
              (lambda (bcom)
                (methods
-                [(chat session-id prompt model system-prompt think history stream-callback)
+                [(chat session-id prompt model system-prompt think history stream-callback #:optional (role "user"))
                  (let ((resp (list-ref llm-responses resp-ptr)))
                    (set! resp-ptr (+ resp-ptr 1))
                    (let-values (((promo resolver) (spawn-promise-and-resolver)))
@@ -191,7 +191,7 @@
          (set! sandbox-actor (spawn ^repl-sandbox "session-orch-test" (lambda (evt) #t) (lambda (expr) #t) '()))
          (set! llm-client (spawn ^llm-client session-vat))
          (set! agent-actor (spawn ^agent-actor "session-orch-test" sandbox-actor llm-client (lambda (evt) #t) (lambda (expr) #t)))
-         (set! orchestrator (spawn ^session-orchestrator "session-orch-test" mock-socket channel sandbox-actor agent-actor llm-client '())))
+         (set! orchestrator (spawn ^session-orchestrator "session-orch-test" mock-socket channel (lambda (expr) #t) sandbox-actor agent-actor llm-client '())))
 
        (with-vat session-vat
          ;; 1. Test handle-message: get-model
@@ -383,7 +383,7 @@
             (dynamic-wind
               (lambda ()
                 (module-set! llm-mod 'chat-with-llm
-                             (lambda* (session-id prompt model system-prompt #:key think history stream-callback)
+                             (lambda* (session-id prompt model system-prompt #:key think history stream-callback #:allow-other-keys)
                                `(("payload" . (("content" . "Hello! I am a mocked response.")
                                                ("reasoning" . "Thinking...")))))))
               (lambda ()
@@ -412,7 +412,7 @@
                   (spawn
                    (lambda (bcom)
                      (methods
-                      [(chat session-id prompt model system-prompt think history stream-callback)
+                      [(chat session-id prompt model system-prompt think history stream-callback #:optional (role "user"))
                        (let ((resp (list-ref llm-responses resp-ptr)))
                          (set! resp-ptr (+ resp-ptr 1))
                          (let-values (((promo resolver) (spawn-promise-and-resolver)))
@@ -444,17 +444,17 @@
                  (mock-llm
                   (spawn
                    (lambda (bcom)
-                     (methods
-                      [(chat session-id prompt model system-prompt think history stream-callback)
-                       (let-values (((promo resolver) (spawn-promise-and-resolver)))
-                         (<-np resolver 'fulfill
-                               `(("payload" . (("content" . "Mocked answer")
-                                               ("reasoning" . "Thinking...")))))
-                         promo)]))))
+                      (methods
+                       [(chat session-id prompt model system-prompt think history stream-callback #:optional (role "user"))
+                        (let-values (((promo resolver) (spawn-promise-and-resolver)))
+                          (<-np resolver 'fulfill
+                                `(("payload" . (("content" . "Mocked answer")
+                                                ("reasoning" . "Thinking...")))))
+                          promo)]))))
                  (agent (spawn ^agent-actor "direct-orch-session" sandbox mock-llm (lambda _ #t) (lambda _ #t)))
                  (mock-socket (open-output-string))
                  (mock-channel #f)
-                 (orch (spawn ^session-orchestrator "direct-orch-session" mock-socket mock-channel sandbox agent mock-llm '())))
+                 (orch (spawn ^session-orchestrator "direct-orch-session" mock-socket mock-channel (lambda (expr) #t) sandbox agent mock-llm '())))
             
             (test-assert "direct-orchestrator: handle-message commands"
               (begin

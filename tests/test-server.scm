@@ -261,4 +261,75 @@
       got-interrupt-event)))
 
 
+
+;; --- 7. Test handle-client: permission-request and permission-response ---
+
+(test-assert "handle-client: permission-request and permission-response flow"
+  (let* ((got-permission-request #f)
+         (got-eval-success #f)
+         (done? #f))
+    (let* ((sockets (socketpair AF_UNIX SOCK_STREAM 0))
+           (s1 (car sockets))
+           (s2 (cdr sockets)))
+      (run-fibers
+       (lambda ()
+         (fcntl s1 F_SETFL (logior O_NONBLOCK (fcntl s1 F_GETFL)))
+         (setvbuf s1 'none)
+         (fcntl s2 F_SETFL (logior O_NONBLOCK (fcntl s2 F_GETFL)))
+         (setvbuf s2 'none)
+
+         (spawn-fiber
+          (lambda ()
+            (let loop ()
+              (unless done? (sleep 0.05) (loop)))))
+
+         (spawn-fiber (lambda () (handle-client s1)))
+
+         (spawn-fiber
+          (lambda ()
+            (catch #t
+              (lambda ()
+                ;; Establish session
+                (write '(session "session-permission-test") s2)
+                (newline s2) (force-output s2)
+                (sleep 0.05)
+                ;; Send eval request that requires permission
+                (write `(repl "(write-file \"test-hitl.txt\" \"hello\")") s2)
+                (newline s2) (force-output s2)
+
+                ;; Read response loop
+                (let loop ((i 0))
+                  (when (< i 10)
+                    (let ((line (read-line s2)))
+                      (cond
+                        ((eof-object? line) (set! done? #t))
+                        (else
+                         (catch #t
+                           (lambda ()
+                             (let ((msg (with-input-from-string line read)))
+                               (match msg
+                                 (('permission-request expr)
+                                  (set! got-permission-request #t)
+                                  ;; Send permission response back
+                                  (write '(permission-response #t) s2)
+                                  (newline s2) (force-output s2)
+                                  (loop (+ i 1)))
+                                 (('repl-result res)
+                                  (set! got-eval-success #t)
+                                  (set! done? #t))
+                                 (('error msg)
+                                  (set! done? #t))
+                                 (_ (loop (+ i 1))))))
+                           (lambda _ (loop (+ i 1)))))))))
+                ;; Close cleanly
+                (close-port s2))
+              (lambda (key . args)
+                (set! done? #t))))))
+       #:drain? #t)
+      (begin
+        ;; Clean up test file if it was created
+        (when (file-exists? "test-hitl.txt") (delete-file "test-hitl.txt"))
+        (and got-permission-request got-eval-success)))))
+
+
 (test-end "gaia-server")

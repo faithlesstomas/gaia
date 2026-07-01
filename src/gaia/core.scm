@@ -143,8 +143,9 @@ and spawning auxiliary sub-agents (via `delegate` blocks) to divide and conquer 
 - CHEATSHEET: If you are repeatedly failing checks, read the common gotchas via `(read-file \"docs/guile-gotchas.md\")`.
 
 # HOW TO WRITE CODE
-CRITICAL: ALL code and tool calls (like `llm-query`) MUST be wrapped in a ```repl block!
-Think in STATE: Variables you define in one step survive to the next.
+- CRITICAL: ALL code and tool calls (like `llm-query`) that you want the system to AUTOMATICALLY execute in the REPL (to fetch data, run commands, or solve tasks) MUST be wrapped in a ```repl block!
+- ILLUSTRATIONS & EXAMPLES: If you want to show the user a code example to read or copy-paste without running it automatically, wrap it in a ```scheme block. The system will NOT execute ```scheme blocks.
+- Think in STATE: Variables you define in one step survive to the next.
 Example of stateful reasoning:
 Step 1:
 ```repl
@@ -238,21 +239,15 @@ CONFIDENCE(100)
           last-idx))))
 
 (define (extract-code response)
-  "Extracts Scheme code from the LLM response (```repl or ```scheme code block).
+  "Extracts Scheme code from the LLM response (```repl code block).
 Prefers the LAST code block to support LLM self-correction patterns."
   (let ((str (if (string? response) response (scm->json response))))
     (let ((raw-code
            (cond
-            ;; Prefer ```repl blocks (RLM style)
+            ;; Only match ```repl blocks for code execution (no fallback to ```scheme)
             ((string-contains-last str "```repl")
              => (lambda (idx)
                   (let* ((start (+ idx 7))
-                         (end (string-contains str "```" start)))
-                    (if end (substring str start end) #f))))
-            ;; Fallback: ```scheme blocks
-            ((string-contains-last str "```scheme")
-             => (lambda (idx)
-                  (let* ((start (+ idx 9))
                          (end (string-contains str "```" start)))
                     (if end (substring str start end) #f))))
             (else #f))))
@@ -496,19 +491,7 @@ Prefers the LAST code block to support LLM self-correction patterns."
     t))
 
 (define* (rlm-loop-inner session-id last-output depth env history step transcript #:key (event-handler #f) (permission-handler #f))
-  (let ((prompt (if (null? transcript)
-                   last-output
-                   (let ((original-task (assoc-ref transcript "original-task"))
-                         (history-text (format-transcript transcript)))
-                     (string-append
-                      "=== ORIGINAL TASK ===\n"
-                      (if original-task original-task "Unknown task")
-                      "\n\n=== EXECUTION LOG (steps so far) ===\n"
-                      history-text
-                      "\n\n=== LATEST ===\n"
-                      last-output
-                      "\n\nContinue working on the original task. "
-                      "Write your next ```repl code block or provide FINAL(answer).")))))
+  (let ((prompt last-output))
     (when event-handler (event-handler `(status ,(format #f "Agent Depth ~a (Step ~a)..." depth step))))
     (check-interrupt!)
     (if (> depth MAX-RECURSION-DEPTH)
@@ -522,6 +505,7 @@ Prefers the LAST code block to support LLM self-correction patterns."
                               (chat-with-llm session-id prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT)
                                              #:think (get-config 'thinking)
                                              #:history history
+                                             #:role (if (null? transcript) "user" "system")
                                              #:stream-callback (lambda (evt)
                                                                  (when event-handler
                                                                    (event-handler evt)))))
@@ -640,7 +624,7 @@ or provide FINAL(answer) if you have the answer."
                                (rlm-loop-inner session-id (string-append "Code executed successfully. Result:\n" result)
                                                depth env
                                                (append history
-                                                       (list `(("role" . "user") ("content" . ,last-output))
+                                                       (list `(("role" . "system") ("content" . ,last-output))
                                                              `(("role" . "assistant") ("content" . ,response-text))))
                                                (+ step 1) updated-transcript #:event-handler event-handler #:permission-handler permission-handler))
                               (('error et msg . rest)
@@ -648,10 +632,10 @@ or provide FINAL(answer) if you have the answer."
                                  (when event-handler (event-handler `(repl-error ,feedback)))
                                  (gaia-log (string-append C-RED "\n[REPL] Runtime Error:\n" C-RESET feedback "\n"))
                                  (rlm-loop-inner session-id feedback depth env
-                                                 (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                 (append history (list `(("role" . "system") ("content" . ,last-output))
                                                                        `(("role" . "assistant") ("content" . ,response-text))))
                                                  (+ step 1) updated-transcript #:event-handler event-handler #:permission-handler permission-handler)))))
-                          (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
+                          (cons response-text (append history (list `(("role" . "system") ("content" . ,last-output))
                                                                     `(("role" . "assistant") ("content" . ,response-text))))))))
 
                    ((and final-sig (match final-sig (('final ans) ans) (('final-var var) var) (_ #f))) =>
@@ -660,19 +644,19 @@ or provide FINAL(answer) if you have the answer."
                       (if (equal? (car final-sig) 'final)
                           (gaia-log (string-append C-BOLD "[GAIA] Final Answer: " C-RESET (markdown->ansi answer) "\n"))
                           (gaia-log (string-append C-BOLD "[GAIA] Answer stored in: " C-RESET answer "\n")))
-                      (cons answer (append history (list `(("role" . "user") ("content" . ,last-output))
+                      (cons answer (append history (list `(("role" . "system") ("content" . ,last-output))
                                                          `(("role" . "assistant") ("content" . ,response-text)))))))
 
                    ((and conf-val (>= conf-val CONFIDENCE-THRESHOLD))
                     (when event-handler (event-handler `(final ,response-text)))
                     (gaia-log (string-append C-GREEN "\n[GAIA] ✓ High confidence (" (number->string conf-val) "%) - stopping." C-RESET "\n"))
-                    (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
+                    (cons response-text (append history (list `(("role" . "system") ("content" . ,last-output))
                                                               `(("role" . "assistant") ("content" . ,response-text))))))
 
                    (else
                     (when event-handler (event-handler `(final ,response-text)))
                     (gaia-log (string-append C-RED "\n[GAIA] ⚠ No actionable output. Treating as final answer (unless low confidence)." C-RESET "\n"))
-                    (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
+                    (cons response-text (append history (list `(("role" . "system") ("content" . ,last-output))
                                                               `(("role" . "assistant") ("content" . ,response-text))))))))))))))))
 
 (define (handle-command input session-id history env)

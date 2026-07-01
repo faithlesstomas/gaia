@@ -114,7 +114,7 @@
       (extract-code "```repl\n(+ 1 2)\n```"))
     
     (test-equal "extract-code: scheme block"
-      "(* 3 4)"
+      #f
       (extract-code "```scheme\n(* 3 4)\n```"))
     
     (test-equal "extract-code: no block"
@@ -270,7 +270,7 @@
         ;; second call returns the final answer
         (module-set! llm-mod 'chat-with-llm
                      (let ((n 0))
-                       (lambda* (session-id prompt model system #:key think history stream-callback)
+                       (lambda* (session-id prompt model system #:key think history stream-callback (role "user"))
                          (set! n (+ n 1))
                          (cond
                            ;; Sub-session call from llm-query itself

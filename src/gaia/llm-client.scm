@@ -152,12 +152,21 @@ Returns (response-header . response-body) or throws 'user-interrupt."
         (string-contains m "gemma4")
         (string-contains m "reasoning"))))
 
-(define* (chat-with-llm session-id input model system-prompt #:key (think #f) (history '()) (stream-callback #f))
+(define (clean-history-for-llm history)
+  "Strips extra fields like trajectory from the history turns to ensure OpenAI API compliance."
+  (map (lambda (turn)
+         (filter (lambda (pair)
+                   (member (car pair) '("role" role "content" content)))
+                 turn))
+       history))
+
+(define* (chat-with-llm session-id input model system-prompt #:key (think #f) (history '()) (stream-callback #f) (role "user"))
   (let* ((host (get-config 'llm-url))
          (url (string-append host "/v1/chat/completions"))
+         (clean-history (clean-history-for-llm history))
          (messages-list (append (list `(("role" . "system") ("content" . ,system-prompt)))
-                                history
-                                (list `(("role" . "user") ("content" . ,input)))))
+                                clean-history
+                                (list `(("role" . ,role) ("content" . ,input)))))
          (body-fields `(("model" . ,model)
                         ("messages" . ,(list->vector messages-list))
                         ("stream" . ,(if stream-callback #t #f))))

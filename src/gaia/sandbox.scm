@@ -49,7 +49,7 @@
 
     ;; Control Flow
     if cond else => case begin let let* letrec lambda define set!
-    do while
+    do while when unless
     quote quasiquote unquote unquote-splicing
 
     ;; Basic I/O (Stdout only)
@@ -490,6 +490,14 @@
             (lambda (key . args)
               ;; Automatic rollback (restore the module state to backup!)
               (restore-module! m initial-symbols backup)
-              (if (eq? key 'user-interrupt)
-                  (apply throw key args)
-                  (list 'error 'runtime (format #f "Runtime Error: ~a ~a" key args)))))))))
+              (cond
+               ((eq? key 'user-interrupt)
+                (apply throw key args))
+               ((eq? key 'syntax-error)
+                (match args
+                  ((subr msg loc expr . rest)
+                   (list 'error 'syntax (format #f "Syntax Error: ~a\nIn expression: ~s" msg expr)))
+                  (_
+                   (list 'error 'syntax (format #f "Syntax Error: ~a" args)))))
+               (else
+                (list 'error 'runtime (format #f "Runtime Error: ~a ~a" key args))))))))))
