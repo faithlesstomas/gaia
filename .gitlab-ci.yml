@@ -6,8 +6,8 @@ test:
   stage: test
   image: registry.gitlab.com/debdistutils/guix/container:latest
   before_script:
-    # Start the Guix daemon in the background if it's not already running
-    - if ! pgrep guix-daemon > /dev/null; then guix-daemon --disable-chroot --build-users-group=guixbuild & sleep 5; fi
+    # Start the Guix daemon if its socket is not present
+    - if [ ! -S /var/guix/daemon-socket/socket ]; then guix-daemon --disable-chroot & sleep 5; fi
   script:
     # Run the integration test suite
     - guix shell -m guix.scm make -- make check
@@ -26,7 +26,7 @@ build:
   stage: build
   image: registry.gitlab.com/debdistutils/guix/container:latest
   before_script:
-    - if ! pgrep guix-daemon > /dev/null; then guix-daemon --disable-chroot --build-users-group=guixbuild & sleep 5; fi
+    - if [ ! -S /var/guix/daemon-socket/socket ]; then guix-daemon --disable-chroot & sleep 5; fi
   script:
     # Build the Rust CLI binary in release mode
     - guix shell -m guix.scm -- cargo build --manifest-path src/gaia-cli/Cargo.toml --release
