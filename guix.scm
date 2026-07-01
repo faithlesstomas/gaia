@@ -12,6 +12,7 @@
 
 (packages->manifest
  (list guile-3.0
+       guile-readline
        guile-json-4
        guile-gnutls
        guile-fibers
