@@ -14,6 +14,8 @@ test:
     - for key in ci.guix.gnu.org.pub bordeaux.guix.gnu.org.pub; do key_path=$(find / -name "$key" 2>/dev/null | head -n 1); if [ -n "$key_path" ]; then mkdir -p /etc/guix && guix archive --authorize < "$key_path"; fi; done
     # Start the Guix daemon if its socket is not present
     - if [ ! -S /var/guix/daemon-socket/socket ]; then guix-daemon --disable-chroot & sleep 5; fi
+    # Configure git to trust all directories inside the container to avoid dubious ownership errors
+    - git config --global --add safe.directory '*'
   script:
     # Run the integration test suite and dump build logs on failure for debugging
     - guix shell -m guix.scm make -- make check || (echo "=== GUIIX BUILD LOGS ===" && find /var/log/guix/drvs/ -name "*.gz" -exec zcat {} + && exit 1)
@@ -37,6 +39,7 @@ build:
     - echo "https 443/tcp" >> /etc/services
     - for key in ci.guix.gnu.org.pub bordeaux.guix.gnu.org.pub; do key_path=$(find / -name "$key" 2>/dev/null | head -n 1); if [ -n "$key_path" ]; then mkdir -p /etc/guix && guix archive --authorize < "$key_path"; fi; done
     - if [ ! -S /var/guix/daemon-socket/socket ]; then guix-daemon --disable-chroot & sleep 5; fi
+    - git config --global --add safe.directory '*'
   script:
     # Build the Rust CLI binary in release mode and dump build logs on failure
     - guix shell -m guix.scm -- cargo build --manifest-path src/gaia-cli/Cargo.toml --release || (echo "=== GUIIX BUILD LOGS ===" && find /var/log/guix/drvs/ -name "*.gz" -exec zcat {} + && exit 1)

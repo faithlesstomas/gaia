@@ -214,7 +214,7 @@
         (let* ((wrapped-cmd (string-append "cd /workspace && " cmd))
                (res (run-cmd-with-output "guix" "shell" "--container"
                                          (string-append "--share=" workspace-path "=/workspace")
-                                         "coreutils" "git" "bash" "findutils" "grep" "sed" "gawk"
+                                         "coreutils" "git" "bash" "findutils" "grep" "sed" "gawk" "texinfo" "guile"
                                          "--" "bash" "-c" wrapped-cmd)))
           res)
         ;; Local fallback since guix shell --container is restricted in this environment
