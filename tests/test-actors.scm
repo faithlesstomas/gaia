@@ -266,8 +266,14 @@
          (threads-mod (resolve-module '(ice-9 threads) #:ensure #f))
          
          ;; Create a real transactormap and syscaller
+         ;; make-syscaller takes (actormap) in older goblins, (actormap sleep-profile) in 0.18+
          (am (make-transactormap (make-whactormap)))
-         (sys ((@@ (goblins core) make-syscaller) am #f))
+         (sys (let* ((f (@@ (goblins core) make-syscaller))
+                     (arity (procedure-minimum-arity f))
+                     (n-args (car arity)))
+                (if (= n-args 1)
+                    (f am)
+                    (f am #f))))
          
          ;; Save original actors bindings
          (orig-call-with-vat (module-ref goblins-mod 'call-with-vat))
