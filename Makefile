@@ -18,7 +18,9 @@ run: llm-server
 repl:
 	$(GUIX_SHELL) guile -L src
 
-check: test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-actors test-server test-curator test-llm-client
+check:
+	@echo "Running GAIA test suite..."
+	GAIA_NO_COVERAGE=1 $(GUIX_SHELL) guile -L src tests/run-coverage.scm
 
 test-server:
 	@echo "Running GAIA server unit tests..."
@@ -57,8 +59,6 @@ test-units:
 	$(GUIX_SHELL) guile -L src tests/test-interrupts.scm
 	@echo "Running error traceback capture tests..."
 	$(GUIX_SHELL) guile -L src tests/test-traceback.scm
-	@echo "Running curator tests..."
-	$(GUIX_SHELL) guile -L src tests/test-curator.scm
 
 test-sandbox:
 	@echo "Running Goblins sandbox unit tests..."

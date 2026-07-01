@@ -101,8 +101,6 @@
   (set-port-encoding! client-socket "UTF-8")
   (set-nonblocking! client-socket)
   (let ((channel (make-channel))
-        (perm-mutex (make-mutex))
-        (perm-cond (make-condition-variable))
         (perm-state-box (make-vector 1 'idle))
         (perm-value-box (make-vector 1 #f)))
     ;; Spawn the asynchronous socket reader fiber
@@ -120,9 +118,7 @@
            (cond
             ((eof-object? line)
              (put-message channel 'eof)
-             (with-mutex perm-mutex
-               (vector-set! perm-state-box 0 'eof)
-               (signal-condition-variable perm-cond)))
+             (vector-set! perm-state-box 0 'eof))
             ((equal? msg '(interrupt))
              ;; Set the global *interrupted* flag in core
              (let ((core-mod (resolve-module '(gaia core) #:ensure #f)))
@@ -132,36 +128,36 @@
              (abort-active-llm-calls!)
              (send-event client-socket '(error "Interrupted"))
              (put-message channel 'interrupt)
-             (with-mutex perm-mutex
-               (vector-set! perm-state-box 0 'interrupted)
-               (signal-condition-variable perm-cond))
+             (vector-set! perm-state-box 0 'interrupted)
              (loop))
             ((and (pair? msg) (eq? (car msg) 'permission-response))
-             (with-mutex perm-mutex
-               (vector-set! perm-state-box 0 'resolved)
-               (vector-set! perm-value-box 0 (cadr msg))
-               (signal-condition-variable perm-cond))
+             (vector-set! perm-value-box 0 (cadr msg))
+             (vector-set! perm-state-box 0 'resolved)
              (loop))
             (else
              (put-message channel msg)
              (loop)))))))
     (let* ((event-sink (lambda (event) (send-event client-socket event)))
            (permission-sink (lambda (expr)
+                              ;; Set state to pending BEFORE sending to avoid race condition
+                              (vector-set! perm-state-box 0 'pending)
                               (send-event client-socket `(permission-request ,expr))
-                              (with-mutex perm-mutex
-                                (vector-set! perm-state-box 0 'pending)
-                                (let loop ()
-                                  (let ((state (vector-ref perm-state-box 0)))
-                                    (cond
-                                     ((eq? state 'resolved)
-                                      (vector-ref perm-value-box 0))
-                                     ((eq? state 'interrupted)
-                                      (throw 'user-interrupt))
-                                     ((eq? state 'eof)
-                                      (throw 'user-interrupt))
-                                     (else
-                                       (wait-condition-variable perm-cond perm-mutex)
-                                       (loop))))))))
+                              (let loop ()
+                                (let ((state (vector-ref perm-state-box 0)))
+                                  (cond
+                                   ((eq? state 'resolved)
+                                    (let ((val (vector-ref perm-value-box 0)))
+                                      (vector-set! perm-state-box 0 'idle)
+                                      val))
+                                   ((eq? state 'interrupted)
+                                    (vector-set! perm-state-box 0 'idle)
+                                    (throw 'user-interrupt))
+                                   ((eq? state 'eof)
+                                    (vector-set! perm-state-box 0 'idle)
+                                    (throw 'user-interrupt))
+                                   (else
+                                    (usleep 10000) ; Sleep 10ms (POSIX thread sleep, doesn't block Fibers scheduler)
+                                    (loop)))))))
            (first-msg (get-message channel))
            (session-id (match first-msg
                          (('session id) id)
