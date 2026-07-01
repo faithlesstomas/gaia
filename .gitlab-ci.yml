@@ -49,11 +49,10 @@ coverage:
 
 build:
   stage: build
-  image: registry.gitlab.com/debdistutils/guix/container:latest
-  <<: *guix_setup
+  image: rust:latest
   script:
-    # Build the Rust CLI binary in release mode and dump build logs on failure
-    - guix shell -m guix.scm rust:cargo -- cargo build --manifest-path src/gaia-cli/Cargo.toml --release || (echo "=== GUIX BUILD LOGS ===" && find /var/log/guix/drvs/ -name "*.gz" -exec zcat {} + && exit 1)
+    # Build the Rust CLI binary in release mode using official Rust container
+    - cargo build --manifest-path src/gaia-cli/Cargo.toml --release
   artifacts:
     name: "gaia-cli-$CI_COMMIT_REF_SLUG"
     paths:
