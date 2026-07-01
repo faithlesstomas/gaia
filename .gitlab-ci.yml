@@ -6,8 +6,10 @@ test:
   stage: test
   image: registry.gitlab.com/debdistutils/guix/container:latest
   before_script:
-    # Install netbase to restore /etc/services for DNS resolution in Guix
-    - apt-get update && apt-get install -y netbase
+    # Restore /etc/services manually to resolve HTTP/HTTPS port names in Guix
+    - mkdir -p /etc
+    - echo "http 80/tcp" > /etc/services
+    - echo "https 443/tcp" >> /etc/services
     # Start the Guix daemon if its socket is not present
     - if [ ! -S /var/guix/daemon-socket/socket ]; then guix-daemon --disable-chroot & sleep 5; fi
   script:
@@ -28,7 +30,9 @@ build:
   stage: build
   image: registry.gitlab.com/debdistutils/guix/container:latest
   before_script:
-    - apt-get update && apt-get install -y netbase
+    - mkdir -p /etc
+    - echo "http 80/tcp" > /etc/services
+    - echo "https 443/tcp" >> /etc/services
     - if [ ! -S /var/guix/daemon-socket/socket ]; then guix-daemon --disable-chroot & sleep 5; fi
   script:
     # Build the Rust CLI binary in release mode
