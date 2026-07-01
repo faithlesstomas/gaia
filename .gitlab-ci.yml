@@ -15,8 +15,8 @@ test:
     # Start the Guix daemon if its socket is not present
     - if [ ! -S /var/guix/daemon-socket/socket ]; then guix-daemon --disable-chroot & sleep 5; fi
   script:
-    # Run the integration test suite
-    - guix shell -m guix.scm make -- make check
+    # Run the integration test suite and dump build logs on failure for debugging
+    - guix shell -m guix.scm make -- make check || (echo "=== GUIIX BUILD LOGS ===" && find /var/log/guix/drvs/ -name "*.gz" -exec zcat {} + && exit 1)
     # Generate coverage report and extract HTML/LCOV outputs
     - guix shell -m guix.scm make lcov -- make test-coverage
   coverage: '/TOTAL:\s*(\d+(?:\.\d+)?)%/'
@@ -38,8 +38,8 @@ build:
     - for key in ci.guix.gnu.org.pub bordeaux.guix.gnu.org.pub; do key_path=$(find / -name "$key" 2>/dev/null | head -n 1); if [ -n "$key_path" ]; then mkdir -p /etc/guix && guix archive --authorize < "$key_path"; fi; done
     - if [ ! -S /var/guix/daemon-socket/socket ]; then guix-daemon --disable-chroot & sleep 5; fi
   script:
-    # Build the Rust CLI binary in release mode
-    - guix shell -m guix.scm -- cargo build --manifest-path src/gaia-cli/Cargo.toml --release
+    # Build the Rust CLI binary in release mode and dump build logs on failure
+    - guix shell -m guix.scm -- cargo build --manifest-path src/gaia-cli/Cargo.toml --release || (echo "=== GUIIX BUILD LOGS ===" && find /var/log/guix/drvs/ -name "*.gz" -exec zcat {} + && exit 1)
   artifacts:
     name: "gaia-cli-$CI_COMMIT_REF_SLUG"
     paths:
