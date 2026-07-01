@@ -8,7 +8,9 @@
              (gnu packages compression)
              (gnu packages rust)
              (gnu packages version-control)
-             (gnu packages base))
+             (gnu packages base)
+             (gnu packages perl)
+             (gnu packages code))
 
 (packages->manifest
  (list guile-3.0
@@ -22,4 +24,5 @@
        coreutils
        git
        texinfo
-       gzip))
+       gzip
+       lcov))

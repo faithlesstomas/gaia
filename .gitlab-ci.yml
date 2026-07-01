@@ -19,8 +19,8 @@ test:
   script:
     # Run the integration test suite and dump build logs on failure for debugging
     - guix shell -m guix.scm make -- make check || (echo "=== GUIIX BUILD LOGS ===" && find /var/log/guix/drvs/ -name "*.gz" -exec zcat {} + && exit 1)
-    # Generate coverage report and extract HTML/LCOV outputs
-    - guix shell -m guix.scm make lcov -- make test-coverage
+    # Generate coverage report and extract HTML/LCOV outputs (lcov is in guix.scm)
+    - guix shell -m guix.scm make -- make test-coverage
   coverage: '/TOTAL:\s*(\d+(?:\.\d+)?)%/'
   artifacts:
     name: "coverage-report-$CI_COMMIT_REF_SLUG"
