@@ -10,6 +10,8 @@ test:
     - mkdir -p /etc
     - echo "http 80/tcp" > /etc/services
     - echo "https 443/tcp" >> /etc/services
+    # Find and authorize substitute signing keys
+    - for key in ci.guix.gnu.org.pub bordeaux.guix.gnu.org.pub; do key_path=$(find / -name "$key" 2>/dev/null | head -n 1); if [ -n "$key_path" ]; then mkdir -p /etc/guix && guix archive --authorize < "$key_path"; fi; done
     # Start the Guix daemon if its socket is not present
     - if [ ! -S /var/guix/daemon-socket/socket ]; then guix-daemon --disable-chroot & sleep 5; fi
   script:
@@ -33,6 +35,7 @@ build:
     - mkdir -p /etc
     - echo "http 80/tcp" > /etc/services
     - echo "https 443/tcp" >> /etc/services
+    - for key in ci.guix.gnu.org.pub bordeaux.guix.gnu.org.pub; do key_path=$(find / -name "$key" 2>/dev/null | head -n 1); if [ -n "$key_path" ]; then mkdir -p /etc/guix && guix archive --authorize < "$key_path"; fi; done
     - if [ ! -S /var/guix/daemon-socket/socket ]; then guix-daemon --disable-chroot & sleep 5; fi
   script:
     # Build the Rust CLI binary in release mode
