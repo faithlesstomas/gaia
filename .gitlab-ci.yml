@@ -53,7 +53,7 @@ build:
   <<: *guix_setup
   script:
     # Build the Rust CLI binary in release mode and dump build logs on failure
-    - guix shell -m guix.scm -- cargo build --manifest-path src/gaia-cli/Cargo.toml --release || (echo "=== GUIX BUILD LOGS ===" && find /var/log/guix/drvs/ -name "*.gz" -exec zcat {} + && exit 1)
+    - guix shell -m guix.scm rust:cargo -- cargo build --manifest-path src/gaia-cli/Cargo.toml --release || (echo "=== GUIX BUILD LOGS ===" && find /var/log/guix/drvs/ -name "*.gz" -exec zcat {} + && exit 1)
   artifacts:
     name: "gaia-cli-$CI_COMMIT_REF_SLUG"
     paths:
