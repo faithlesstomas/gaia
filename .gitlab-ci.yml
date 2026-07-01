@@ -1,0 +1,37 @@
+stages:
+  - test
+  - build
+
+test:
+  stage: test
+  image: registry.gitlab.com/debdistutils/guix/container:latest
+  before_script:
+    # Start the Guix daemon in the background if it's not already running
+    - if ! pgrep guix-daemon > /dev/null; then guix-daemon --disable-chroot --build-users-group=guixbuild & sleep 5; fi
+  script:
+    # Run the integration test suite
+    - guix shell -m guix.scm make -- make check
+    # Generate coverage report and extract HTML/LCOV outputs
+    - guix shell -m guix.scm make lcov -- make test-coverage
+  coverage: '/TOTAL:\s*(\d+(?:\.\d+)?)%/'
+  artifacts:
+    name: "coverage-report-$CI_COMMIT_REF_SLUG"
+    paths:
+      - coverage-html/
+      - coverage.info
+      - "*.log"
+    expire_in: 1 week
+
+build:
+  stage: build
+  image: registry.gitlab.com/debdistutils/guix/container:latest
+  before_script:
+    - if ! pgrep guix-daemon > /dev/null; then guix-daemon --disable-chroot --build-users-group=guixbuild & sleep 5; fi
+  script:
+    # Build the Rust CLI binary in release mode
+    - guix shell -m guix.scm -- cargo build --manifest-path src/gaia-cli/Cargo.toml --release
+  artifacts:
+    name: "gaia-cli-$CI_COMMIT_REF_SLUG"
+    paths:
+      - src/gaia-cli/target/release/gaia
+    expire_in: 1 week

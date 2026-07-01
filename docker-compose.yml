@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  gaia-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      # Mount the current workspace so the agent has access to files
+      - .:/workspace
+      # Mount /tmp to share the UNIX domain socket (/tmp/gaia.sock) with the host CLI client
+      - /tmp:/tmp
+    environment:
+      - GAIA_LLM_URL=http://litellm:4000
+      - GAIA_MODEL=gemma4:e2b
+      - GAIA_BASE_MODEL=gemma4:e2b
+    # Match the host user's UID and GID to avoid permission conflicts on the shared socket and files
+    user: "${GAIA_UID:-1000}:${GAIA_GID:-1000}"
+    depends_on:
+      - litellm
+    restart: always
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    volumes:
+      # Mount the local LiteLLM configuration file
+      - ./litellm_config.yaml:/app/config.yaml
+    ports:
+      - "4000:4000"
+    command: [ "--config", "/app/config.yaml", "--port", "4000" ]
+    restart: always

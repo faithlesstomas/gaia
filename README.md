@@ -87,6 +87,30 @@ cp litellm_config.yaml.template litellm_config.yaml
 # Edit litellm_config.yaml with your preferred local or remote models and API keys
 ```
 
+### Running with Docker / Podman (Alternative)
+
+If you prefer a self-contained installation without installing Guix or Rust on your host machine, you can run GAIA and LiteLLM together using Docker Compose:
+
+1. **Start the containers:**
+   ```bash
+   # Run with host UID/GID env to avoid file permission issues in mounts
+   GAIA_UID=$(id -u) GAIA_GID=$(id -g) docker-compose up --build -d
+   ```
+   This command starts:
+   - A reproducible `gaia-server` container based on GNU Guix.
+   - A `litellm` gateway container on port 4000.
+   - A shared mount for `/tmp/gaia.sock`, making the server socket accessible on your host machine.
+
+2. **Accessing the CLI:**
+   You can run the native client binary locally on your host (`./bin/gaia`), and it will connect directly to the containerized server via `/tmp/gaia.sock`.
+   Alternatively, you can run the client inside the container:
+   ```bash
+   docker-compose exec -u $(id -u):$(id -g) gaia-server guix shell -m guix.scm -- cargo run --manifest-path src/gaia-cli/Cargo.toml
+   ```
+
+3. **Connecting to Host Services (e.g. Ollama):**
+   If Ollama is running on your host machine, LiteLLM running inside Docker cannot connect to it using `localhost`. You must edit `litellm_config.yaml` to change `http://localhost:11434` to `http://host.docker.internal:11434`.
+
 ### Usage
 
 **1. Start the Headless Server (Backend):**
