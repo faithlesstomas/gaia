@@ -59,7 +59,10 @@
                (let* ((payload (assoc-ref response "payload"))
                       (response-text (if payload
                                          (assoc-ref payload "content")
-                                         "Error: No payload in response"))
+                                         (let ((err (assoc-ref response "error")))
+                                           (if err
+                                               (string-append "Error from LLM API: " (if (string? err) err (format #f "~a" err)))
+                                               "Error: No payload in response"))))
                       (action-code (extract-code response-text)))
                  (if action-code
                      ;; If the LLM outputted a repl block, enter Task-Solving mode
