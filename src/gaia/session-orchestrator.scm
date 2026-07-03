@@ -227,7 +227,7 @@
       (('get-history)
        (send-event client-socket `(history-list ,(clean-history history))))
 
-      ('help
+      (('help)
        (let ((help-text "Available Commands:
   /help             - Show this help message
   /exit, /quit      - Exit the CLI

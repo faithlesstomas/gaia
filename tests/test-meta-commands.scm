@@ -22,7 +22,7 @@
     (for-each (lambda (id)
                 (let ((path (string-append "sessions/" id ".json")))
                   (when (file-exists? path) (delete-file path))))
-              '("meta-test-1" "meta-test-2" "meta-test-3"))
+              '("meta-test-1" "meta-test-2" "meta-test-3" "meta-test-4"))
 
     (let ((server-thread (call-with-new-thread
                           (lambda ()
@@ -95,7 +95,7 @@
            (('env-list '()) #t)
            (_ (begin (display (format #f "[DEBUG] Received res: ~s\n" res)) #f)))))))
 
-  (test-assert "/model returns current model"
+   (test-assert "/model returns current model"
     (with-test-client
      (lambda (send receive)
        (send '(session "meta-test-3"))
@@ -103,6 +103,18 @@
        (let ((res (receive)))
          (match res
            (('model-info _) #t)
+           (_ #f))))))
+
+  (test-assert "/help returns help text"
+    (with-test-client
+     (lambda (send receive)
+       (send '(session "meta-test-4"))
+       (send '(help))
+       (let ((res (receive)))
+         (match res
+           (('final help-text)
+            (and (string? help-text)
+                 (string-prefix? "Available Commands:" help-text)))
            (_ #f)))))))
 
 (let* ((runner (test-runner-current))

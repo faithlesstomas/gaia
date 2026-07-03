@@ -526,7 +526,7 @@
                 (run-turns-synchronously)
                 (<- orch 'handle-message '(list-sessions))
                 (run-turns-synchronously)
-                (<- orch 'handle-message 'help)
+                (<- orch 'handle-message '(help))
                 (run-turns-synchronously)
                 (<- orch 'handle-message 'eof)
                 (run-turns-synchronously)
