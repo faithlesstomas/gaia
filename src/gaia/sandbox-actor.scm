@@ -7,6 +7,7 @@
   #:use-module (gaia rlm-env)
   #:use-module (gaia config)
   #:use-module (gaia core)
+  #:use-module (gaia llm-client)
   #:use-module (gaia utils)
   #:export (^repl-sandbox
             ^repl-sandbox-from-env))

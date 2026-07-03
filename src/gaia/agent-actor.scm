@@ -6,6 +6,8 @@
   #:use-module (fibers channels)
   #:use-module (ice-9 threads)
   #:use-module (ice-9 suspendable-ports)
+  #:use-module (srfi srfi-1)
+  #:use-module (srfi srfi-11)
   #:use-module (gaia sandbox-actor)
   #:use-module (gaia config)
   #:use-module (gaia core)

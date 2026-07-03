@@ -3,6 +3,7 @@
   #:use-module (ice-9 ftw)
   #:use-module (goblins)
   #:use-module (goblins actor-lib methods)
+  #:use-module (srfi srfi-11)
   #:use-module (gaia sandbox-actor)
   #:use-module (gaia agent-actor)
   #:use-module (gaia config)

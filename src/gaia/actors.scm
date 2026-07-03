@@ -1,4 +1,5 @@
 (define-module (gaia actors)
+  #:use-module (goblins)
   #:use-module (gaia sandbox-actor)
   #:use-module (gaia agent-actor)
   #:use-module (gaia session-orchestrator)
