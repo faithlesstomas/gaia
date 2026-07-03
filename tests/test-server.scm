@@ -31,6 +31,8 @@
   (test-equal "get-thinking" '(get-thinking) (parse-slash-command "/thinking"))
   (test-equal "set-thinking" '(set-thinking "off") (parse-slash-command "/thinking off"))
   (test-equal "ask" '(ask "explain scheme") (parse-slash-command "/ask explain scheme"))
+  (test-equal "eval" '(repl "(+ 1 1)") (parse-slash-command "/eval (+ 1 1)"))
+  (test-equal "eval-empty" #f (parse-slash-command "/eval"))
   (test-equal "session" '(session "test-session") (parse-slash-command "/session test-session"))
   (test-equal "list-sessions" '(list-sessions) (parse-slash-command "/sessions"))
   (test-equal "history" '(get-history) (parse-slash-command "/history"))

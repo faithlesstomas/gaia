@@ -77,6 +77,10 @@
           `(set-thinking ,args)))
      ((string=? cmd "/ask")
       `(ask ,args))
+     ((string=? cmd "/eval")
+      (if (string-null? args)
+          #f
+          `(repl ,args)))
      ((string=? cmd "/session")
       `(session ,args))
      ((string=? cmd "/sessions")
