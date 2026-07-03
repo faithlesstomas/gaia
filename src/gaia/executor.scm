@@ -121,7 +121,7 @@ to prevent blocking the Fibers scheduler, yielding control cooperatively."
 
                 (if (guix-container-supported?)
                     ;; Level 3: Guix Shell executes bash
-                    (let* ((command (format #f "guix shell --container --share=./=/workspace guile coreutils grep sed gawk bash git guix texinfo gzip -- ~a" bash-cmd))
+                    (let* ((command (format #f "guix shell --container --share=./=/workspace guile guile-json guile-fibers guile-goblins guile-wisp coreutils grep sed gawk bash git guix texinfo gzip -- ~a" bash-cmd))
                            (port (open-input-pipe command))
                            (result (read-string port))
                            (exit-val (status:exit-val (close-pipe port))))
