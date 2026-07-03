@@ -47,17 +47,17 @@ Core infrastructure that is already built and working.
 
 Hardening the agentic loop to handle syntax constraints of smaller local models (e.g. 3B `gemma4:e2b`) and decoupling the client/server layout.
 
-- [ ] **Wisp (SRFI-119) Integration** — Implement the whitespace-to-Lisp parser in the execution pipeline. This allows LLMs to write Scheme code using Python-like indentation, solving the "parenthesis blindness" of small models while retaining Guile's AST-level safety and homoiconicity.
-- [/] **Client-Server Refactoring (De-bloat gaia-cli)** — Fully delegate slash command routing to the server and remove local output parsing (e.g. `/help` text definitions, and alist formatting). Client should become a presentation-agnostic renderer of pre-parsed events. *(Partially completed: server handles most slash commands and streams token/thought events).*
-- [/] **Advanced Terminal UX & Inline Status** — Non-blocking inline spinner or bottom status bar showing current background RLM execution state using ANSI cursor control codes or `indicatif`. *(Partially completed: basic spinner exists in Rust client).*
-- [/] **Expanded Auto-healing** — Programmatic unmatched parens closing and syntax self-repair hardening before running `eval`. *(Partially completed).*
-- [ ] **Modularize Actors Framework** — Split the monolithic `actors.scm` into separate files (`sandbox-actor.scm`, `agent-actor.scm`, `session-orchestrator.scm`) to separate session orchestration, environment evaluation, and agent cognitive logic.
-- [ ] **HITL Security Hardening (Command Injection)** — Replace simple prefix checks in `run-command` with shell-token parsing or direct executable invocation (`system*`) to prevent shell injection bypasses (e.g., `grep; rm -rf /`).
-- [ ] **Efficient HITL Sync** — Replace busy-waiting `usleep` polling in `permission-sink` with Guile mutexes and condition variables.
-- [ ] **HITL Metadata Exchange** — Define an S-expression metadata format for permission requests so the client doesn't need to parse Scheme AST to print file diffs.
-- [ ] **HITL Permission Scoping** — Introduce session/directory scoping in client approvals to reduce prompt fatigue (e.g., "Allow all write-file commands in this path").
-- [ ] **Bailout Mechanism** — If confidence drops drastically or the error loop persists too long, pause the main loop and spawn a diagnostic sub-agent.
-- [ ] **High-level Standard Library for LLM** — Add ready-made higher-order procedures to `tools.scm` to offload the model from writing complex nested loops:
+- [x] **Wisp (SRFI-119) Integration** — Implement the whitespace-to-Lisp parser in the execution pipeline. This allows LLMs to write Scheme code using Python-like indentation, solving the "parenthesis blindness" of small models while retaining Guile's AST-level safety and homoiconicity.
+- [x] **Client-Server Refactoring (De-bloat gaia-cli)** — Fully delegate slash command routing to the server and remove local output parsing (e.g. `/help` text definitions, and alist formatting). Client should become a presentation-agnostic renderer of pre-parsed events.
+- [x] **Advanced Terminal UX & Inline Status** — Non-blocking inline spinner or bottom status bar showing current background RLM execution state using ANSI cursor control codes or `indicatif`.
+- [x] **Expanded Auto-healing** — Programmatic unmatched parens closing and syntax self-repair hardening before running `eval`.
+- [x] **Modularize Actors Framework** — Split the monolithic `actors.scm` into separate files (`sandbox-actor.scm`, `agent-actor.scm`, `session-orchestrator.scm`) to separate session orchestration, environment evaluation, and agent cognitive logic.
+- [/] **HITL Security Hardening (Command Injection)** — Replace simple prefix checks in `run-command` with shell-token parsing or direct executable invocation (`system*`) to prevent shell injection bypasses (e.g., `grep; rm -rf /`). *(Partially completed: basic safety checks checking for forbidden characters `#\; #\& #\| #\` #\$` are implemented, but shell-token parsing / direct system* execution is pending).*
+- [x] **Efficient HITL Sync** — Replace busy-waiting `usleep` polling in `permission-sink` with Guile mutexes and condition variables.
+- [x] **HITL Metadata Exchange** — Define an S-expression metadata format for permission requests so the client doesn't need to parse Scheme AST to print file diffs.
+- [/] **HITL Permission Scoping** — Introduce session/directory scoping in client approvals to reduce prompt fatigue (e.g., "Allow all write-file commands in this path"). *(Partially completed: server-side matching scopes via directory/always rules are implemented, but client UI integration is pending).*
+- [x] **Bailout Mechanism** — If confidence drops drastically or the error loop persists too long, pause the main loop and spawn a diagnostic sub-agent.
+- [x] **High-level Standard Library for LLM** — Add ready-made higher-order procedures to `tools.scm` to offload the model from writing complex nested loops:
   - `(read-files '("A" "B"))` — batch file reading
   - `(patch-file path old-string new-string)` — in-place string replacement in files
   - `(map-files dir pattern proc)` — apply procedure to matching files

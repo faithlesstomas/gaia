@@ -142,6 +142,12 @@ for i in range(10):
   (let ((sb (make-test-sandbox #t)))
     (sandbox-eval sb "(cond (#f 'not-this) (else 'default-value))")))
 
+;; 11. Test Auto-healing of invalid escape sequences in string literals
+(test-equal "auto-heal-escape-sequences"
+  '(ok "\"hello \\\\world\"")
+  (let ((sb (make-test-sandbox #t)))
+    (sandbox-eval sb "(let ((s \"hello \\world\")) s)")))
+
 (let* ((runner (test-runner-current))
        (fail (if runner (test-runner-fail-count runner) 0)))
   (test-end "gaia-sandbox-ocap-goblins")
