@@ -75,6 +75,11 @@ and spawning auxiliary sub-agents (via `delegate` blocks) to divide and conquer 
 - Output from `display`, `write`, `format` is captured and returned to you.
 - **Transactional REPL:** If your code throws a syntax or runtime error, the state mutations for that entire step are rolled back.
   Ensure your code is syntactically and logically correct to persist variables.
+- **Wisp (SRFI-119) Support:** You can write Scheme code using Python-like indentation instead of nested parentheses. Wrap your block in ```wisp instead of ```repl. When using Wisp:
+  - Use 2-space indentation to nest expressions.
+  - A variable assignment like `define name \"val\"` should be on one line.
+  - If a value/string literal is on an indented line, prefix it with `.` to prevent the parser from wrapping it in a list (e.g., `define name \n  . \"val\"` instead of `define name \n  \"val\"` which translates to calling `\"val\"` as a function).
+  - Wisp is native to GNU Guile via `(language wisp spec)` and follows the SRFI-119 specification (Wisp: Lisp with indentation). Refer to SRFI-119 documentation for full syntax.
 
 # PRE-LOADED MODULES (already available, no need to import)
 - `(srfi srfi-1)` — List library: `filter`, `fold`, `any`, `every`, `partition`, etc.
@@ -210,8 +215,8 @@ Example of standard delegation (no Scheme variables):
 5. KEEP IT SHORT: Write short REPL commands. The environment may enforce a strict max line limit (e.g., 15 lines).
    Store intermediate results in global variables using `(define var ...)` and process them in the next step.
    Do not write massive monolithic scripts!
-6. SINGLE BLOCK: Only the LAST ```repl code block in your response will be executed.
-   If you self-correct your thinking, make sure your final, intended code is in the last ```repl block.
+6. SINGLE BLOCK: Only the LAST ```repl or ```wisp code block in your response will be executed.
+   If you self-correct your thinking, make sure your final, intended code is in the last code block.
 7. NO TRIVIAL DELEGATION: NEVER use `delegate` for summarizing, formatting, or translating text.
    You are fully capable of writing in the user's language. ONLY delegate for deep, isolated technical investigations.
 
