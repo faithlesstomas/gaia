@@ -5,6 +5,8 @@
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-9)   ;; Records
   #:use-module (srfi srfi-13)  ;; Strings
+  #:use-module (language wisp spec)
+  #:use-module (system base language)
   #:use-module (gaia tools)
   #:export (make-sandbox
             sandbox-eval
@@ -21,6 +23,24 @@
   (and (not (string-contains path ".."))
        (or (not (string-prefix? "/" path))
            (string-prefix? (getcwd) path))))
+
+(define (safe-command-string? cmd)
+  "Checks if the command is a single command without shell operators or redirections."
+  (let ((forbidden-chars '(#\; #\& #\| #\` #\$ #\newline #\> #\<)))
+    (not (any (lambda (c) (string-index cmd c)) forbidden-chars))))
+
+(define (is-command-safe? cmd)
+  "Determines if a command is safe to run without user permission."
+  (and (safe-command-string? cmd)
+       (let* ((trimmed (string-trim-both cmd))
+              (parts (string-split trimmed #\space))
+              (first-word (if (null? parts) "" (car parts))))
+         (cond
+          ((member first-word '("grep" "find" "sed" "awk" "info")) #t)
+          ((string=? first-word "git")
+           (let ((subcommand (if (and (pair? (cdr parts)) (not (string-null? (cadr parts)))) (cadr parts) "")))
+             (member subcommand '("status" "diff" "log" "ls-files"))))
+          (else #f)))))
 
 ;; Whitelist of allowed primitives from (guile)
 (define SAFE-GUILE-EXPORTS
@@ -302,37 +322,57 @@
                              guile-syntax-check git-status git-diff git-log
                              git-ls-files guix-search guix-package-info
                              get-system-logs get-recent-logs get-boot-logs
-                             list-boots get-kernel-logs fork-sandbox)))
+                             list-boots get-kernel-logs fork-sandbox
+                             read-files patch-file map-files)))
     (filter (lambda (pair)
               (not (memq (car pair) capability-names)))
             all-bindings)))
 
+(define (parse-wisp-string code-str)
+  "Parses a Wisp code string into standard Scheme S-expressions wrapped in a begin form."
+  (catch #t
+    (lambda ()
+      (let* ((wisp-lang (lookup-language 'wisp))
+             (r (language-reader wisp-lang)))
+        (with-input-from-string code-str
+          (lambda ()
+            (let loop ((forms '()))
+              (let ((form (r (current-input-port) #f)))
+                (if (eof-object? form)
+                    (list 'ok (cons 'begin (reverse forms)))
+                    (loop (cons form forms)))))))))
+    (lambda (key . args)
+      (list 'error 'syntax (format #f "Wisp Parser Error (~a): ~a" key args)))))
+
 ;; Sandbox execution engine
 (define* (sandbox-eval sandbox code-string #:key (permission-handler #f) (injected-bindings '()))
   "Evaluates Guile Scheme code securely in the persistent module, with rollback on error."
-  (let* ((escapes-healed (auto-heal-escape-sequences code-string))
-         (healed (auto-heal-parentheses escapes-healed))
-         (parsed (catch #t
-                   (lambda ()
-                     (with-input-from-string (string-append "(begin " healed ")")
-                       (lambda ()
-                         (let ((expr (read)))
-                           (catch #t
+  (let* ((is-wisp? (string-prefix? ";; wisp" (string-trim-both code-string)))
+         (parsed (if is-wisp?
+                     (parse-wisp-string code-string)
+                     (let* ((escapes-healed (auto-heal-escape-sequences code-string))
+                            (healed (auto-heal-parentheses escapes-healed)))
+                       (catch #t
+                         (lambda ()
+                           (with-input-from-string (string-append "(begin " healed ")")
                              (lambda ()
-                               (let ((next (read)))
-                                 (if (eof-object? next)
-                                     expr
-                                     (error 'syntax-error "Trailing garbage detected"))))
-                             (lambda _
-                               (error 'syntax-error "Extra closing parentheses detected")))))))
-                   (lambda (key . args)
-                     (let* ((arg-str (format #f "~a" args))
-                            (hint (if (and (eq? key 'read-error)
-                                           (string-contains arg-str "escape sequence"))
-                                      "\nLLM Hint: In Guile Scheme string literals, backslashes must only be used for standard escapes (like \\n, \\t, \\\\, \\\"). Do not escape other characters (like \\} or \\$). If you need a literal backslash, use double-backslash \\\\."
-                                      "")))
-                       (list 'error 'syntax (string-append "Syntax Error (" (symbol->string key) "): " arg-str hint)))))))
-    (if (and (pair? parsed) (eq? (car parsed) 'error))
+                               (let ((expr (read)))
+                                 (catch #t
+                                   (lambda ()
+                                     (let ((next (read)))
+                                       (if (eof-object? next)
+                                           (list 'ok expr)
+                                           (error 'syntax-error "Trailing garbage detected"))))
+                                   (lambda _
+                                     (error 'syntax-error "Extra closing parentheses detected")))))))
+                         (lambda (key . args)
+                           (let* ((arg-str (format #f "~a" args))
+                                  (hint (if (and (eq? key 'read-error)
+                                                 (string-contains arg-str "escape sequence"))
+                                            "\nLLM Hint: In Guile Scheme string literals, backslashes must only be used for standard escapes (like \\n, \\t, \\\\, \\\"). Do not escape other characters (like \\} or \\$). If you need a literal backslash, use double-backslash \\\\."
+                                            "")))
+                             (list 'error 'syntax (string-append "Syntax Error (" (symbol->string key) "): " arg-str hint)))))))))
+    (if (eq? (car parsed) 'error)
         parsed
         (let* ((m (sandbox-module sandbox))
                (initial-symbols (sandbox-initial-symbols sandbox))
@@ -376,8 +416,7 @@
                  ;; Process Capability (process-cap)
                  (cons 'run-command
                        (lambda (cmd)
-                         (let* ((safe-prefixes '("git status" "git diff" "git log" "git ls-files" "grep" "find" "sed" "awk" "info"))
-                                (is-safe? (any (lambda (p) (string-prefix? p cmd)) safe-prefixes)))
+                         (let ((is-safe? (is-command-safe? cmd)))
                            (if is-safe?
                                (catch #t
                                  (lambda ()
@@ -464,6 +503,28 @@
                  (cons 'get-kernel-logs get-kernel-logs)
                  ;; Fork capability
                  (cons 'fork-sandbox (lambda () (fork-sandbox sandbox)))
+                 ;; High-level standard library capabilities
+                 (cons 'read-files
+                       (lambda (paths)
+                         (for-each (lambda (path)
+                                     (if (not (safe-path? path))
+                                         (error "Access Denied: Path outside workspace" path)))
+                                   paths)
+                         (read-files paths)))
+                 (cons 'patch-file
+                       (lambda (path old-string new-string)
+                         (if (not (safe-path? path))
+                             (error "Access Denied: Path outside workspace" path)
+                             (if perm-handler
+                                 (if (perm-handler `(write-file ,path ,(string-append "Patch file: replace " old-string " with " new-string)))
+                                     (patch-file path old-string new-string)
+                                     (throw 'user-interrupt))
+                                 (error "Permission Denied: No permission handler registered for dangerous operation")))))
+                 (cons 'map-files
+                       (lambda (dir pattern proc)
+                         (if (not (safe-path? dir))
+                             (error "Access Denied: Path outside workspace" dir)
+                             (map-files dir pattern proc))))
                  )))
 
           ;; Inject capabilities and injected bindings into the persistent module
@@ -477,12 +538,12 @@
               (let* ((output-port (open-output-string))
                      (res (with-output-to-port output-port
                             (lambda ()
-                              (let ((val (eval parsed m)))
+                              (let ((val (eval (cadr parsed) m)))
                                 (when (and val (not (unspecified? val)))
                                   (write val))
                                 val))))
                      (output (get-output-string output-port))
-                     (final-output (if (> (car (analyze-parentheses code-string)) 0)
+                     (final-output (if (and (not is-wisp?) (> (car (analyze-parentheses code-string)) 0))
                                        (string-append "[Auto-healed " (number->string (car (analyze-parentheses code-string))) " missing parentheses]\n" output)
                                        output)))
                 (close-port output-port)

@@ -237,6 +237,27 @@
     (module-set! mod 'guix-container-supported? orig-supported?)
     #t))
 
+(test-assert "direct: high-level tools"
+  (begin
+    ;; Setup temp files
+    (write-file "test_temp_a.txt" "hello A")
+    (write-file "test_temp_b.txt" "hello B")
+    ;; Test read-files
+    (let ((contents (read-files '("test_temp_a.txt" "test_temp_b.txt"))))
+      (test-equal "read-files matches" '("hello A" "hello B") contents))
+    ;; Test patch-file
+    (patch-file "test_temp_a.txt" "hello" "world")
+    (test-equal "patch-file replaces" "world A" (read-file "test_temp_a.txt"))
+    ;; Test map-files
+    (let ((results (map-files "." "^test_temp_.*\\.txt$" (lambda (f) (read-file f)))))
+      (test-assert "map-files matches"
+        (and (member "world A" results)
+             (member "hello B" results))))
+    ;; Cleanup
+    (delete-file "test_temp_a.txt")
+    (delete-file "test_temp_b.txt")
+    #t))
+
 (let* ((runner (test-runner-current))
        (fail (if runner (test-runner-fail-count runner) 0)))
   (test-end "gaia-tools")

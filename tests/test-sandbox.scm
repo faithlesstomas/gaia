@@ -53,6 +53,22 @@
   (let ((sb (make-test-sandbox #t)))
     (sandbox-eval sb "(write-file \"/etc/passwd\" \"malicious\")")))
 
+;; 5b. Test Command Injection Hardening
+(test-assert "command-hardening-safe"
+  (let ((sb (make-test-sandbox #f))) ;; Handlers denied
+    ;; git status has no operator and is safe, should succeed directly
+    (let ((res (sandbox-eval sb "(run-command \"git status\")")))
+      (not (and (pair? res) (eq? (car res) 'error) (string-contains (caddr res) "user-interrupt"))))))
+
+(test-assert "command-hardening-injection-blocked"
+  (let ((sb (make-test-sandbox #f))) ;; Handlers denied
+    ;; grep with shell operator (semicolon) is unsafe, should throw user-interrupt
+    (catch 'user-interrupt
+      (lambda ()
+        (sandbox-eval sb "(run-command \"grep foo bar; rm -rf /tmp\")")
+        #f)
+      (lambda _ #t))))
+
 ;; 6. Test Sandbox Forking / Cloning
 (test-equal "sandbox-fork-isolation"
   (list '(ok "20") '(ok "30"))

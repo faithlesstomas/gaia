@@ -239,24 +239,36 @@ CONFIDENCE(100)
           last-idx))))
 
 (define (extract-code response)
-  "Extracts Scheme code from the LLM response (```repl code block).
-Prefers the LAST code block to support LLM self-correction patterns."
+  "Extracts Scheme or Wisp code from the LLM response.
+Prefers the LAST code block (either ```repl or ```wisp) to support LLM self-correction patterns."
   (let ((str (if (string? response) response (scm->json response))))
-    (let ((raw-code
-           (cond
-            ;; Only match ```repl blocks for code execution (no fallback to ```scheme)
-            ((string-contains-last str "```repl")
-             => (lambda (idx)
-                  (let* ((start (+ idx 7))
-                         (end (string-contains str "```" start)))
-                    (if end (substring str start end) #f))))
-            (else #f))))
-      (if raw-code
-          ;; Clean any FINAL(N) or CONFIDENCE(N) that small models mistakenly put inside code blocks
-          (let* ((cleaned (regexp-substitute/global #f "FINAL\\([^)]*\\)" raw-code 'pre "" 'post))
-                 (cleaned (regexp-substitute/global #f "CONFIDENCE\\([^)]*\\)" cleaned 'pre "" 'post))
-                 (trimmed (string-trim-both cleaned)))
-            (if (> (string-length trimmed) 0) trimmed #f))
+    (let* ((repl-idx (string-contains-last str "```repl"))
+           (wisp-idx (string-contains-last str "```wisp"))
+           (block-info (cond
+                        ((and repl-idx wisp-idx)
+                         (if (> repl-idx wisp-idx)
+                             (cons repl-idx 'repl)
+                             (cons wisp-idx 'wisp)))
+                        (repl-idx (cons repl-idx 'repl))
+                        (wisp-idx (cons wisp-idx 'wisp))
+                        (else #f))))
+      (if block-info
+          (let* ((idx (car block-info))
+                 (type (cdr block-info))
+                 (start (+ idx 7))
+                 (end (string-contains str "```" start))
+                 (raw-code (if end (substring str start end) #f)))
+            (if raw-code
+                ;; Clean any FINAL(N) or CONFIDENCE(N) that small models mistakenly put inside code blocks
+                (let* ((cleaned (regexp-substitute/global #f "FINAL\\([^)]*\\)" raw-code 'pre "" 'post))
+                       (cleaned (regexp-substitute/global #f "CONFIDENCE\\([^)]*\\)" cleaned 'pre "" 'post))
+                       (trimmed (string-trim-both cleaned)))
+                  (if (> (string-length trimmed) 0)
+                      (if (eq? type 'wisp)
+                          (string-append ";; wisp\n" trimmed)
+                          trimmed)
+                      #f))
+                #f))
           #f))))
 
 (define (extract-delegation response)

@@ -444,6 +444,48 @@
             (run-turns-synchronously)
             (test-assert "direct-agent-actor: solve recursive loop"
               (and resolved? (equal? (car result-val) "The agent value is 999"))))
+
+          ;; Test agent-actor diagnostic bailout mechanism
+          (let* ((sandbox (spawn ^repl-sandbox "bailout-agent-session" (lambda _ #t) (lambda _ #t) '()))
+                 (resp-ptr 0)
+                 (llm-responses
+                  '("```repl\n(unbound-var-1)\n```"
+                    "```repl\n(unbound-var-2)\n```"
+                    "```repl\n(unbound-var-3)\n```"
+                    "FINAL(Diagnostic Fix Answer) CONFIDENCE(100)"))
+                 (mock-llm
+                  (spawn
+                   (lambda (bcom)
+                     (methods
+                      [(chat session-id prompt model system-prompt think history stream-callback #:optional (role "user"))
+                       (let ((resp (if (string-contains prompt "consecutive errors")
+                                       "FINAL(Diagnostic Fix Answer) CONFIDENCE(100)"
+                                       (let ((r (list-ref llm-responses resp-ptr)))
+                                         (set! resp-ptr (+ resp-ptr 1))
+                                         r))))
+                         (let-values (((promo resolver) (spawn-promise-and-resolver)))
+                           (<-np resolver 'fulfill
+                                 `(("payload" . (("content" . ,resp)
+                                                 ("reasoning" . "Thinking...")))))
+                           promo))]))))
+                 (agent (spawn ^agent-actor "bailout-agent-session" sandbox mock-llm (lambda _ #t) (lambda _ #t)))
+                 (resolved? #f)
+                 (result-val #f)
+                 (resolver
+                  (spawn
+                   (lambda (bcom)
+                     (methods
+                      [(fulfill val)
+                       (set! resolved? #t)
+                       (set! result-val val)]
+                      [(break err)
+                       (set! resolved? #t)
+                       (set! result-val err)])))))
+            
+            (<- agent 'solve "Perform task with failures" 0 '() resolver)
+            (run-turns-synchronously)
+            (test-assert "direct-agent-actor: diagnostic bailout triggers on consecutive errors"
+              (and resolved? (string-contains (car result-val) "Diagnostic Fix Answer"))))
           
           ;; 4. Test session-orchestrator behavior directly
           (let* ((sandbox (spawn ^repl-sandbox "direct-orch-session" (lambda _ #t) (lambda _ #t) '()))
@@ -483,6 +525,8 @@
                 (<- orch 'handle-message '(session "new-session-id"))
                 (run-turns-synchronously)
                 (<- orch 'handle-message '(list-sessions))
+                (run-turns-synchronously)
+                (<- orch 'handle-message 'help)
                 (run-turns-synchronously)
                 (<- orch 'handle-message 'eof)
                 (run-turns-synchronously)

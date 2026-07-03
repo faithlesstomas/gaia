@@ -27,7 +27,10 @@
             list-boots
             get-kernel-logs
             git-ls-files
-            run-in-sandbox))
+            run-in-sandbox
+            read-files
+            patch-file
+            map-files))
 
 (define (guile-syntax-check code-string)
   "Checks if the Guile Scheme code string has valid syntax (matched parentheses, valid expressions) without evaluating it."
@@ -219,3 +222,42 @@
           res)
         ;; Local fallback since guix shell --container is restricted in this environment
         (run-cmd-with-output "bash" "-c" (string-append "cd " workspace-path " && " cmd)))))
+
+(define (string-replace-substring str old new)
+  (let ((len (string-length old)))
+    (if (= len 0)
+        str
+        (let loop ((start 0)
+                   (parts '()))
+          (let ((idx (string-contains str old start)))
+            (if idx
+                (loop (+ idx len)
+                      (cons* new (substring str start idx) parts))
+                (string-join (reverse (cons (substring str start) parts)) "")))))))
+
+(define (read-files paths)
+  "Reads multiple files as a list of strings."
+  (map read-file paths))
+
+(define (patch-file path old-string new-string)
+  "Replaces all occurrences of OLD-STRING with NEW-STRING in the file at PATH."
+  (let* ((content (read-file path))
+         (patched (string-replace-substring content old-string new-string)))
+    (write-file path patched)
+    (format #f "Patched file ~a (replaced ~s with ~s)" path old-string new-string)))
+
+(define (map-files dir pattern proc)
+  "Applies procedure PROC to each file in DIR matching the regex PATTERN (excluding . and ..). Returns list of results."
+  (let* ((files (list-files dir))
+         (regex (make-regexp pattern))
+         (matching-files (filter (lambda (f)
+                                   (and (not (string=? f "."))
+                                        (not (string=? f ".."))
+                                        (regexp-exec regex f)))
+                                 files)))
+    (map (lambda (f)
+           (let ((full-path (if (string-suffix? "/" dir)
+                                (string-append dir f)
+                                (string-append dir "/" f))))
+             (proc full-path)))
+         matching-files)))

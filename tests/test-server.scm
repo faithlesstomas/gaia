@@ -22,6 +22,7 @@
 ;; --- 1. Test parse-slash-command ---
 
 (test-group "parse-slash-command"
+  (test-equal "help" '(help) (parse-slash-command "/help"))
   (test-equal "env" '(env) (parse-slash-command "/env"))
   (test-equal "clear" '(clear) (parse-slash-command "/clear"))
   (test-equal "list-models" '(list-models) (parse-slash-command "/models"))

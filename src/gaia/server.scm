@@ -4,6 +4,7 @@
   #:use-module (ice-9 ftw)
   #:use-module (ice-9 regex)
   #:use-module (srfi srfi-13)
+  #:use-module (srfi srfi-1)
   #:use-module (ice-9 rdelim)
   #:use-module (gaia core)
   #:use-module (gaia rlm-env)
@@ -58,6 +59,8 @@
          (cmd (car parts))
          (args (string-trim-both (string-join (cdr parts) " "))))
     (cond
+     ((string=? cmd "/help")
+      '(help))
      ((string=? cmd "/env")
       '(env))
      ((string=? cmd "/clear")
@@ -97,67 +100,103 @@
                turn)))
        history))
 
+(define (operation-matches-scopes? expr scopes)
+  (any (lambda (scope)
+         (match scope
+           (('always . approved-expr)
+            (equal? expr approved-expr))
+           (('directory . dir-prefix)
+            (and (eq? (car expr) 'write-file)
+                 (string-prefix? dir-prefix (cadr expr))))
+           (_ #f)))
+       scopes))
+
 (define (handle-client client-socket)
   (set-port-encoding! client-socket "UTF-8")
   (set-nonblocking! client-socket)
   (let ((channel (make-channel))
-        (perm-state-box (make-vector 1 'idle))
-        (perm-value-box (make-vector 1 #f)))
+        (perm-mutex (make-mutex))
+        (perm-cond (make-condition-variable))
+        (perm-state 'idle)        ;; 'idle, 'pending, 'resolved, 'interrupted, 'eof
+        (perm-value #f)
+        (approved-scopes '()))
     ;; Spawn the asynchronous socket reader fiber
     (spawn-fiber
      (lambda ()
-       (let loop ()
-         (let* ((line (catch #t
-                        (lambda () (read-line client-socket))
-                        (lambda _ (with-input-from-string "" read))))
-                (msg (if (eof-object? line)
-                         line
-                         (catch #t
-                           (lambda () (with-input-from-string line read))
-                           (lambda _ 'error)))))
-           (cond
-            ((eof-object? line)
-             (put-message channel 'eof)
-             (vector-set! perm-state-box 0 'eof))
-            ((equal? msg '(interrupt))
-             ;; Set the global *interrupted* flag in core
-             (let ((core-mod (resolve-module '(gaia core) #:ensure #f)))
-               (when core-mod
-                 (module-set! core-mod '*interrupted* #t)))
-             ;; Cancel any active LLM request immediately
-             (abort-active-llm-calls!)
-             (send-event client-socket '(error "Interrupted"))
-             (put-message channel 'interrupt)
-             (vector-set! perm-state-box 0 'interrupted)
-             (loop))
-            ((and (pair? msg) (eq? (car msg) 'permission-response))
-             (vector-set! perm-value-box 0 (cadr msg))
-             (vector-set! perm-state-box 0 'resolved)
-             (loop))
-            (else
-             (put-message channel msg)
-             (loop)))))))
+        (let loop ()
+          (let* ((line (catch #t
+                         (lambda () (read-line client-socket))
+                         (lambda _ (with-input-from-string "" read))))
+                 (msg (if (eof-object? line)
+                          line
+                          (catch #t
+                            (lambda () (with-input-from-string line read))
+                            (lambda _ 'error)))))
+            (cond
+             ((eof-object? line)
+              (put-message channel 'eof)
+              (with-mutex perm-mutex
+                (set! perm-state 'eof)
+                (signal-condition-variable perm-cond)))
+             ((equal? msg '(interrupt))
+              ;; Set the global *interrupted* flag in core
+              (let ((core-mod (resolve-module '(gaia core) #:ensure #f)))
+                (when core-mod
+                  (module-set! core-mod '*interrupted* #t)))
+              ;; Cancel any active LLM request immediately
+              (abort-active-llm-calls!)
+              (send-event client-socket '(error "Interrupted"))
+              (put-message channel 'interrupt)
+              (with-mutex perm-mutex
+                (set! perm-state 'interrupted)
+                (signal-condition-variable perm-cond))
+              (loop))
+             ((and (pair? msg) (eq? (car msg) 'permission-response))
+              (with-mutex perm-mutex
+                (let ((res (cadr msg)))
+                  (match res
+                    (('always approved-expr)
+                     (set! approved-scopes (cons (cons 'always approved-expr) approved-scopes))
+                     (set! perm-value #t))
+                    (('directory dir-path)
+                     (set! approved-scopes (cons (cons 'directory dir-path) approved-scopes))
+                     (set! perm-value #t))
+                    (val
+                     (set! perm-value val))))
+                (set! perm-state 'resolved)
+                (signal-condition-variable perm-cond))
+              (loop))
+             (else
+              (put-message channel msg)
+              (loop)))))))
     (let* ((event-sink (lambda (event) (send-event client-socket event)))
            (permission-sink (lambda (expr)
-                              ;; Set state to pending BEFORE sending to avoid race condition
-                              (vector-set! perm-state-box 0 'pending)
-                              (send-event client-socket `(permission-request ,expr))
-                              (let loop ()
-                                (let ((state (vector-ref perm-state-box 0)))
-                                  (cond
-                                   ((eq? state 'resolved)
-                                    (let ((val (vector-ref perm-value-box 0)))
-                                      (vector-set! perm-state-box 0 'idle)
-                                      val))
-                                   ((eq? state 'interrupted)
-                                    (vector-set! perm-state-box 0 'idle)
-                                    (throw 'user-interrupt))
-                                   ((eq? state 'eof)
-                                    (vector-set! perm-state-box 0 'idle)
-                                    (throw 'user-interrupt))
-                                   (else
-                                    (usleep 10000) ; Sleep 10ms (POSIX thread sleep, doesn't block Fibers scheduler)
-                                    (loop)))))))
+                              (let ((bypass? #f))
+                                (with-mutex perm-mutex
+                                  (when (operation-matches-scopes? expr approved-scopes)
+                                    (set! bypass? #t)))
+                                (if bypass?
+                                    #t
+                                    (begin
+                                      (with-mutex perm-mutex
+                                        (set! perm-state 'pending))
+                                      (send-event client-socket `(permission-request ,expr))
+                                      (with-mutex perm-mutex
+                                        (let loop ()
+                                          (cond
+                                           ((eq? perm-state 'resolved)
+                                            (let ((val perm-value))
+                                              (set! perm-state 'idle)
+                                              val))
+                                           ((eq? perm-state 'interrupted)
+                                            (set! perm-state 'idle)
+                                            (throw 'user-interrupt))
+                                           ((eq? perm-state 'eof)
+                                            (set! perm-state 'idle)
+                                            (throw 'user-interrupt))
+                                            (else
+                                             (wait-condition-variable perm-cond perm-mutex)
+                                             (loop))))))))))
            (first-msg (get-message channel))
            (session-id (match first-msg
                          (('session id) id)

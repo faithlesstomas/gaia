@@ -19,6 +19,7 @@
        guile-gnutls
        guile-fibers
        guile-goblins
+       guile-wisp
        rust
        nss-certs
        coreutils

@@ -25,6 +25,7 @@
          "test-final-signal.scm"
          "test-error-handling.scm"
          "test-sandbox.scm"
+         "test-wisp.scm"
          "test-tools.scm"
          "test-rlm-env.scm"
          "test-sessions.scm"
@@ -36,7 +37,8 @@
          "test-interrupts.scm"
          "test-traceback.scm"
          "test-curator.scm"
-         "test-llm-client.scm")))
+         "test-llm-client.scm"
+         "test-hitl-sync.scm")))
 
 (define failed-tests '())
 

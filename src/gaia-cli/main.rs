@@ -366,10 +366,6 @@ fn dispatch(
 
     match cmd {
         "/exit" | "/quit" => Ok(Action::Exit),
-        "/help" => {
-            show_help();
-            Ok(Action::Continue)
-        }
         "/edit" | "/e" => {
             if let Some(edited_prompt) = edit_prompt_in_editor()? {
                 let trimmed = edited_prompt.trim();
@@ -537,20 +533,4 @@ fn wait_and_print(rx: &Receiver<ServerEvent>, stream: &mut UnixStream) -> Result
         }
     }
     Ok(())
-}
-
-fn show_help() {
-    println!("{BOLD}Available Commands:{RESET}");
-    println!("  /help             - Show this help message");
-    println!("  /exit, /quit      - Exit the CLI");
-    println!("  /session [id]     - Show or switch current session");
-    println!("  /sessions         - List available sessions on server");
-    println!("  /history          - Show conversation history");
-    println!("  /clear            - Clear current session history and environment");
-    println!("  /env              - Show variables defined in REPL");
-    println!("  /eval <scheme>   - Execute Scheme code directly in REPL");
-    println!("  /ask <query>     - Ask a one-off question to AI (no recursion)");
-    println!("  /model [name]     - Show or change the active LLM model");
-    println!("  /models           - List available models");
-    println!("  /thinking [on|off]- Enable or disable reasoning mode");
 }
