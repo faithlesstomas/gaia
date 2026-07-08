@@ -49,7 +49,7 @@
        'ok)
 
       (('eval task)
-       (gaia-log (format #f "[SERVER] Received EVAL request: ~a" task))
+       (gaia-log (format #f "[SERVER] Received prompt: ~a" task))
        (let* ((event-sink (lambda (event) (send-event client-socket event)))
               (chat-promise (<- llm-client 'chat session-id task (get-config 'model)
                                 (or (get-config 'system-prompt) SYSTEM_PROMPT)
