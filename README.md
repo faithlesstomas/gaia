@@ -4,15 +4,16 @@
 ### A Deterministic, Homoiconic Runtime for Neuro-Symbolic Artificial General Intelligence
 
 
-**GAIA** is a local-First AI engine and assistant (agent manager) for any task in reproducible safe environment with REPL build in **GNU Guile**.
+**GAIA** is a local-first AI engine and assistant (agent manager) for any task in a reproducible, safe environment with a REPL built in **GNU Guile**.
 It is designed specifically for researchers and engineers who require strict reproducibility, mathematical rigor,
-safe execution and data privacy when integrating Large Language Models (LLMs) into their workflows.
+safe execution, and data privacy when integrating Large Language Models (LLMs) into their workflows.
 
-Thanks to Guile language GAIA treats code as data (homoiconicity) to eliminate LLM hallucinations,
+Thanks to the Guile language, GAIA treats code as data (homoiconicity) to eliminate LLM hallucinations,
 enforce mathematical logic, and guarantee strict white-box auditability.
 
-GAIA is also planned to be neuro-symbolic AI engine designed to bridge the gap between probabilistic
-Large Language Models (LLMs) and rigorous, deterministic symbolic reasoning.
+As a neuro-symbolic AI engine, GAIA bridges the gap between probabilistic Large Language Models (LLMs)
+and rigorous, deterministic symbolic reasoning. It achieves this by mapping continuous LLM workspace 
+activations (J-space) directly to discrete symbolic actors (Goblins AtomSpace) and provers (Lean 4).
 
 
 ## Core Architecture & Why GNU Guile?
@@ -63,6 +64,7 @@ GAIA utilizes a **Client-Server architecture**, acting as the "Hands" (Scheme/Gu
 * **Thinking Mode:** Native reasoning support for models with `<|think|>` tags (Gemma 4).
 * **Self-Improvement Loop:** Trajectory logging → dataset curation → fine-tuning pipeline.
 * **Live Monitoring:** Real-time trajectory viewer for debugging agent reasoning.
+* **Neuro-Symbolic J-space Alignment:** Proactive safety monitoring and working-memory synchronization mapping LLM internal activations (J-space) to symbolic Goblins actors and Lean 4 provers.
 
 ## Getting Started
 
@@ -176,10 +178,13 @@ GAIA is part of the GNU ecosystem and is released under the **GPLv3+ License**. 
 ## Roadmap
 
 See **[ROADMAP.md](ROADMAP.md)** for the full development plan, including:
-- Phase 1: RLM core improvements & homoiconicity (code-as-data)
-- Phase 2: Headless architecture & terminal UX
-- Phase 3: Continuous learning (fine-tuning & data pipeline)
-- Phase 4: Long-term vision (Web UI, Guix containers, MLIR/IREE)
+- **Phase 1** — Parenthesis Hardening & CLI Refactoring (Immediate Priority)
+- **Phase 2** — Cognitive Working Memory (Local AtomSpace, STI/LTI, J-space mapping)
+- **Phase 3** — GAIA Scheme DSL ($gscm$) & J-space Type Verification
+- **Phase 4** — Closing the Self-Improvement Loop (`make learn`, CRT)
+- **Phase 5** — System Integration & Multimodal I/O
+- **Phase 6** — GAIA OS & Transactional Self-Healing
+- **Phase 7** — Decentralized Scientist & Lean 4 Bridges (J-space guidance)
 
 ---
 *GAIA is under active development. If you are interested in supporting this digital commons project, please reach out.*
