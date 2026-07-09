@@ -522,7 +522,7 @@ Prefers the LAST code block (either ```repl or ```wisp) to support LLM self-corr
                               (chat-with-llm session-id prompt (get-config 'model) (or (get-config 'system-prompt) SYSTEM_PROMPT)
                                              #:think (get-config 'thinking)
                                              #:history history
-                                             #:role (if (null? transcript) "user" "system")
+                                             #:role "user"
                                              #:stream-callback (lambda (evt)
                                                                  (when event-handler
                                                                    (event-handler evt)))))
@@ -616,13 +616,13 @@ or provide FINAL(answer) if you have the answer."
                                (cons (match final-sig (('final ans) ans) (('final-var var) var) (_ "Sub-agent executed successfully"))
                                      (append history (list `(("role" . "user") ("content" . ,last-output))
                                                            `(("role" . "assistant") ("content" . ,response-text)))))
-                               (rlm-loop-inner session-id (string-append "Sub-agent execution finished. Result: " sub-result)
+                               (rlm-loop-inner session-id (string-append "[System Sub-agent]:\nSub-agent execution finished. Result: " sub-result)
                                                depth env
                                                (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                      `(("role" . "assistant") ("content" . ,response-text))))
                                                (+ step 1) updated-transcript #:event-handler event-handler #:permission-handler permission-handler))))
                         (_
-                         (rlm-loop-inner session-id "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")"
+                         (rlm-loop-inner session-id "[System Error]:\nInvalid delegation format. Use (delegate \"Goal\" \"Context\")"
                                          depth env
                                          (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                `(("role" . "assistant") ("content" . ,response-text))))
@@ -638,21 +638,21 @@ or provide FINAL(answer) if you have the answer."
                               (('ok result)
                                (when event-handler (event-handler `(result ,result)))
                                (gaia-log (string-append C-GREEN "\n[REPL] Success:\n" C-RESET result "\n"))
-                               (rlm-loop-inner session-id (string-append "Code executed successfully. Result:\n" result)
+                               (rlm-loop-inner session-id (string-append "[System REPL Output]:\nCode executed successfully. Result:\n" result)
                                                depth env
                                                (append history
-                                                       (list `(("role" . "system") ("content" . ,last-output))
+                                                       (list `(("role" . "user") ("content" . ,last-output))
                                                              `(("role" . "assistant") ("content" . ,response-text))))
                                                (+ step 1) updated-transcript #:event-handler event-handler #:permission-handler permission-handler))
                               (('error et msg . rest)
                                (let ((feedback (handle-error et msg code depth)))
                                  (when event-handler (event-handler `(repl-error ,feedback)))
                                  (gaia-log (string-append C-RED "\n[REPL] Runtime Error:\n" C-RESET feedback "\n"))
-                                 (rlm-loop-inner session-id feedback depth env
-                                                 (append history (list `(("role" . "system") ("content" . ,last-output))
+                                 (rlm-loop-inner session-id (string-append "[System Error]:\n" feedback) depth env
+                                                 (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                        `(("role" . "assistant") ("content" . ,response-text))))
                                                  (+ step 1) updated-transcript #:event-handler event-handler #:permission-handler permission-handler)))))
-                          (cons response-text (append history (list `(("role" . "system") ("content" . ,last-output))
+                          (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                     `(("role" . "assistant") ("content" . ,response-text))))))))
 
                    ((and final-sig (match final-sig (('final ans) ans) (('final-var var) var) (_ #f))) =>
@@ -661,19 +661,19 @@ or provide FINAL(answer) if you have the answer."
                       (if (equal? (car final-sig) 'final)
                           (gaia-log (string-append C-BOLD "[GAIA] Final Answer: " C-RESET (markdown->ansi answer) "\n"))
                           (gaia-log (string-append C-BOLD "[GAIA] Answer stored in: " C-RESET answer "\n")))
-                      (cons answer (append history (list `(("role" . "system") ("content" . ,last-output))
+                      (cons answer (append history (list `(("role" . "user") ("content" . ,last-output))
                                                          `(("role" . "assistant") ("content" . ,response-text)))))))
 
                    ((and conf-val (>= conf-val CONFIDENCE-THRESHOLD))
                     (when event-handler (event-handler `(final ,response-text)))
                     (gaia-log (string-append C-GREEN "\n[GAIA] ✓ High confidence (" (number->string conf-val) "%) - stopping." C-RESET "\n"))
-                    (cons response-text (append history (list `(("role" . "system") ("content" . ,last-output))
+                    (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
                                                               `(("role" . "assistant") ("content" . ,response-text))))))
 
                    (else
                     (when event-handler (event-handler `(final ,response-text)))
                     (gaia-log (string-append C-RED "\n[GAIA] ⚠ No actionable output. Treating as final answer (unless low confidence)." C-RESET "\n"))
-                    (cons response-text (append history (list `(("role" . "system") ("content" . ,last-output))
+                    (cons response-text (append history (list `(("role" . "user") ("content" . ,last-output))
                                                               `(("role" . "assistant") ("content" . ,response-text))))))))))))))))
 
 (define (handle-command input session-id history env)

@@ -132,10 +132,10 @@
                       (on sub-promise
                           (lambda (sub-res-pair)
                             (let* ((sub-ans (car sub-res-pair))
-                                   (formatted-sub-output (string-append "Diagnostic sub-agent completed. Suggestion/Fix:\n" sub-ans)))
+                                   (formatted-sub-output (string-append "[System Diagnostic Sub-agent]:\nDiagnostic sub-agent completed. Suggestion/Fix:\n" sub-ans)))
                               (gaia-log (string-append C-BOLD C-GREEN "\n[GAIA] Diagnostic sub-agent completed.\n" C-RESET))
                               (<- self 'solve-step task depth outer-history
-                                  (append history (list `(("role" . "system") ("content" . "Diagnostic sub-agent ran to debug consecutive errors."))
+                                  (append history (list `(("role" . "user") ("content" . "Diagnostic sub-agent ran to debug consecutive errors."))
                                                         `(("role" . "assistant") ("content" . ,sub-ans))))
                                   (+ step 1) transcript formatted-sub-output resolve-promise)))
                           #:catch (lambda (err)
@@ -147,7 +147,7 @@
                   (let ((chat-promise (<- llm-client 'chat session-id prompt (get-config 'model)
                                           (or (get-config 'system-prompt) SYSTEM_PROMPT)
                                           (get-config 'thinking) history stream-callback
-                                          (if (null? transcript) "user" "system"))))
+                                          "user")))
                     (on chat-promise
                         (lambda (response)
                           (let* ((payload (assoc-ref response "payload"))
@@ -199,7 +199,7 @@
                                          (on sub-promise
                                              (lambda (sub-res-pair)
                                                (let* ((sub-ans (car sub-res-pair))
-                                                      (formatted-sub-output (string-append "Sub-agent execution finished. Result: " sub-ans)))
+                                                      (formatted-sub-output (string-append "[System Sub-agent]:\nSub-agent execution finished. Result: " sub-ans)))
                                                  (gaia-log (string-append C-BOLD C-GREEN "\n[GAIA] Sub-Agent completed.\n" C-RESET "Result length: "
                                                                          (number->string (string-length sub-ans)) " chars\n"))
                                                  (if final-sig
@@ -211,20 +211,20 @@
                                                        (<- resolve-promise 'fulfill (cons (match final-sig (('final ans) ans) (('final-var var) var) (_ "Sub-agent executed successfully"))
                                                                                           clean-history)))
                                                      (<- self 'solve-step task depth outer-history
-                                                         (append history (list `(("role" . "system") ("content" . ,last-output))
+                                                         (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                                `(("role" . "assistant") ("content" . ,response-text))))
                                                          (+ step 1) updated-transcript formatted-sub-output resolve-promise))))
                                              #:catch (lambda (err)
-                                                       (let ((err-str (format #f "Sub-agent failed: ~a" err)))
+                                                       (let ((err-str (format #f "[System Error]:\nSub-agent failed: ~a" err)))
                                                          (<- self 'solve-step task depth outer-history
-                                                             (append history (list `(("role" . "system") ("content" . ,last-output))
+                                                             (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                                    `(("role" . "assistant") ("content" . ,response-text))))
                                                              (+ step 1) updated-transcript err-str resolve-promise)))))))
                                     (_
                                      (<- self 'solve-step task depth outer-history
-                                         (append history (list `(("role" . "system") ("content" . ,last-output))
+                                         (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                `(("role" . "assistant") ("content" . ,response-text))))
-                                         (+ step 1) updated-transcript "Error: Invalid delegation format. Use (delegate \"Goal\" \"Context\")" resolve-promise))))
+                                         (+ step 1) updated-transcript "[System Error]:\nInvalid delegation format. Use (delegate \"Goal\" \"Context\")" resolve-promise))))
 
                                  ;; Case B: Code execution
                                  (action-code
@@ -240,21 +240,21 @@
                                                    (when event-handler (event-handler `(result ,result)))
                                                    (gaia-log (string-append C-GREEN "\n[REPL] Success:\n" C-RESET result "\n"))
                                                    (<- self 'solve-step task depth outer-history
-                                                       (append history (list `(("role" . "system") ("content" . ,last-output))
+                                                       (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                              `(("role" . "assistant") ("content" . ,response-text))))
-                                                       (+ step 1) updated-transcript (string-append "Code executed successfully. Result:\n" result) resolve-promise))
+                                                       (+ step 1) updated-transcript (string-append "[System REPL Output]:\nCode executed successfully. Result:\n" result) resolve-promise))
                                                   (('error type msg)
-                                                   (let ((feedback (string-append "Runtime Error (" (symbol->string type) "): " msg)))
+                                                   (let ((feedback (string-append "[System Error]:\nRuntime Error (" (symbol->string type) "): " msg)))
                                                      (when event-handler (event-handler `(repl-error feedback)))
                                                      (gaia-log (string-append C-RED "\n[REPL] Runtime Error:\n" C-RESET feedback "\n"))
                                                      (<- self 'solve-step task depth outer-history
-                                                         (append history (list `(("role" . "system") ("content" . ,last-output))
+                                                         (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                                `(("role" . "assistant") ("content" . ,response-text))))
                                                          (+ step 1) updated-transcript feedback resolve-promise)))))
                                               #:catch (lambda (err)
-                                                        (let ((err-str (format #f "Sandbox evaluation crash: ~a" err)))
+                                                        (let ((err-str (format #f "[System Error]:\nSandbox evaluation crash: ~a" err)))
                                                           (<- self 'solve-step task depth outer-history
-                                                              (append history (list `(("role" . "system") ("content" . ,last-output))
+                                                              (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                                     `(("role" . "assistant") ("content" . ,response-text))))
                                                               (+ step 1) updated-transcript err-str resolve-promise))))))
                                       (let* ((loop-steps (drop history (length outer-history)))
