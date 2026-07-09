@@ -47,13 +47,14 @@ with this ideas in mind (and in system prompt as instructions):
 * **Functional Isolation:** Investigative steps run in sandboxed environments with AST-level safety validation.
 ## Architecture
 
-GAIA utilizes a **Client-Server architecture**, acting as the "Hands" (Scheme/Guix) for a "Brain" (LLM) hosted through an **OpenAI-compatible LLM Gateway**.
+GAIA is designed with a **Kernel + Pluggable Modules** architecture, built on top of a **Client-Server model**:
 
-1. **Native CLI Client (Rust):** A fast, responsive terminal client providing a scrollback REPL, syntax highlighting, and asynchronous stream handling.
-2. **GAIA Server (Guile Scheme):** The Headless System Core. A multi-threaded UNIX socket server that handles the RLM loop, persistent REPL state, and recursive logic.
-3. **LiteLLM / Proxy Server:** The Intelligence Gateway. Maps OpenAI-API calls to LLM providers
-   (Gemini, Local Ollama, Anthropic) handling context window limits and routing.
-4. **GNU Guix:** The Execution Layer. Provides safe, isolated, and reproducible sandboxes for AI-generated code.
+* **GAIA Kernel:** The core engine coordinating RLM execution, AST sandboxing, Goblins-based AtomSpace working memory, and self-training loops.
+* **Extension Modules:** Opt-in plugins extending the kernel to other domains (Wayland window managers, Lean 4 provers, local voice models, etc.) without mutating the system core.
+* **Client-Server Topology:** Native Rust CLI client connected to a headless Guile Scheme server over UNIX sockets using S-expressions.
+* **LiteLLM Gateway:** API proxy routing prompts to Ollama, Gemini, or other local/remote backends.
+* **GNU Guix Layer:** Execution environment providing reproducible sandboxes (`guix shell`) for AI-generated code.
+
 
 ## Key Features
 
@@ -177,14 +178,11 @@ GAIA is part of the GNU ecosystem and is released under the **GPLv3+ License**. 
 
 ## Roadmap
 
-See **[ROADMAP.md](ROADMAP.md)** for the full development plan, including:
-- **Phase 1** — Parenthesis Hardening & CLI Refactoring (Immediate Priority)
-- **Phase 2** — Cognitive Working Memory (Local AtomSpace, STI/LTI, J-space mapping)
-- **Phase 3** — GAIA Scheme DSL ($gscm$) & J-space Type Verification
-- **Phase 4** — Closing the Self-Improvement Loop (`make learn`, CRT)
-- **Phase 5** — System Integration & Multimodal I/O
-- **Phase 6** — GAIA OS & Transactional Self-Healing
-- **Phase 7** — Decentralized Scientist & Lean 4 Bridges (J-space guidance)
+See **[ROADMAP.md](ROADMAP.md)** for the full development plan. The project is organized around:
+- **GAIA Kernel** (Core Engine: K0–K3) — Closed loop of RLM inference, sandbox safety, local cognitive memory (AtomSpace/Goblins), and J-space-aligned self-training (`make learn`).
+- **Showcase Benchmarks** — GAIA-SysOps (system administration tasks) and GAIA-Math (programming/logical challenges) to validate the model's evolution.
+- **Extension Modules** — Decoupled domains: `gaia-accel` (tensor compiling), `gaia-io` (voice/vision), `gaia-desktop` (COSMIC/Emacs), `gaia-os` (transactional self-healing), `gaia-proof` (Lean 4/Z3), and `gaia-sci` (RAG/Hyperon FFI).
 
 ---
 *GAIA is under active development. If you are interested in supporting this digital commons project, please reach out.*
+
