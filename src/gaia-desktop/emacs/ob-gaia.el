@@ -25,11 +25,15 @@
 (defvar ob-gaia--status nil
   "Internal variable to store sync evaluation status: \\='waiting, \\='success, \\='error.")
 
+(defvar ob-gaia-in-progress nil
+  "Dynamic variable bound to t when Org-Babel GAIA is executing.")
+
 (defun org-babel-execute:gaia (body params)
   "Execute a block of GAIA Scheme code.
 BODY is the code block content.
 PARAMS is the alist of header arguments."
-  (let* ((session (or (cdr (assq :session params)) "default"))
+  (let* ((ob-gaia-in-progress t)
+         (session (or (cdr (assq :session params)) "default"))
          (session-id (cond
                        ((stringp session) session)
                        ((symbolp session) (symbol-name session))

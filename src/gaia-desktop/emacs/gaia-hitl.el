@@ -18,6 +18,9 @@
   :group 'gaia
   :prefix "gaia-hitl-")
 
+(defvar ob-gaia-in-progress nil
+  "Dynamic variable bound to t when Org-Babel GAIA is executing.")
+
 (defvar-local gaia-hitl--request nil
   "The current active permission request expression.")
 
@@ -50,11 +53,13 @@
 
 (defun gaia-hitl-respond (value)
   "Send VALUE as the permission response and clean up."
-  (unless gaia-hitl--responded
-    (setq gaia-hitl--responded t)
-    (gaia-send `(permission-response ,value))
-    (message "Sent permission response: %S" value)
-    (let ((buf (current-buffer)))
+  (let ((buf (get-buffer "*gaia-permission*")))
+    (when buf
+      (with-current-buffer buf
+        (unless gaia-hitl--responded
+          (setq gaia-hitl--responded t)
+          (gaia-send `(permission-response ,value))
+          (message "Sent permission response: %S" value)))
       (kill-buffer buf))))
 
 (defun gaia-hitl-approve ()
@@ -89,21 +94,39 @@
     (gaia-send '(permission-response nil))
     (message "Permission denied (buffer closed).")))
 
+(defun gaia-hitl--prompt-user-blocking (expr)
+  "Prompt the user in a blocking way (minibuffer) for Org-Babel execution."
+  (let* ((action-prompt (cond
+                         ((and (listp expr) (eq (car expr) 'write-file))
+                          (format "Write file %s?" (file-name-nondirectory (cadr expr))))
+                         ((and (listp expr) (eq (car expr) 'list-files))
+                          (format "List files in %s?" (cadr expr)))
+                         (t "Execute Scheme expression?")))
+         (char (read-char (concat action-prompt " [y]es / [n]o / [a]lways: ")))
+         (response-val (cond
+                        ((memq char '(?y ?Y)) t)
+                        ((memq char '(?a ?A)) `(always ,expr))
+                        (t nil))))
+    (gaia-send `(permission-response ,response-val))
+    (message "Sent permission response: %S" response-val)))
+
 (defun gaia-hitl--on-request (expr)
   "Callback for incoming permission-request event."
-  (let ((handled nil))
-    (when (listp expr)
-      (cond
-       ;; Handle write-file
-       ((eq (car expr) 'write-file)
-        (let ((path (cadr expr))
-              (content (caddr expr)))
-          (gaia-hitl--handle-write-file path content expr)
-          (setq handled t)))
-       (t nil)))
-    ;; Handle general command/eval expressions
-    (unless handled
-      (gaia-hitl--handle-generic expr))))
+  (if ob-gaia-in-progress
+      (gaia-hitl--prompt-user-blocking expr)
+    (let ((handled nil))
+      (when (listp expr)
+        (cond
+         ;; Handle write-file
+         ((eq (car expr) 'write-file)
+          (let ((path (cadr expr))
+                (content (caddr expr)))
+            (gaia-hitl--handle-write-file path content expr)
+            (setq handled t)))
+         (t nil)))
+      ;; Handle general command/eval expressions
+      (unless handled
+        (gaia-hitl--handle-generic expr)))))
 
 (defun gaia-hitl--insert-buttons ()
   "Insert interactive response buttons."
