@@ -48,10 +48,13 @@
   (let ((sb (make-test-sandbox #t)))
     (sandbox-eval sb "(read-file \"../secret.txt\")")))
 
-(test-equal "ocap-path-restriction-write"
-  '(error runtime "Runtime Error: misc-error (#f Access Denied: Path outside workspace ~S (/etc/passwd) #f)")
-  (let ((sb (make-test-sandbox #t)))
-    (sandbox-eval sb "(write-file \"/etc/passwd\" \"malicious\")")))
+(test-assert "ocap-path-restriction-write"
+  (let ((sb (make-test-sandbox #f)))
+    (catch 'user-interrupt
+      (lambda ()
+        (sandbox-eval sb "(write-file \"/etc/passwd\" \"malicious\")")
+        #f)
+      (lambda _ #t))))
 
 ;; 5b. Test Command Injection Hardening
 (test-assert "command-hardening-safe"

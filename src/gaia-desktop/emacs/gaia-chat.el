@@ -44,6 +44,7 @@
   "Major mode for GAIA interactive buffers, derived from Org-mode."
   (setq-local gaia-chat--stream-state nil)
   (setq-local gaia-chat--session-id (format "emacs-%d" (time-convert nil 'integer)))
+  (visual-line-mode 1)
   ;; Setup custom local variables or hooks if needed
   (use-local-map gaia-chat-mode-map))
 
@@ -223,7 +224,7 @@
       (insert "*** Final Answer\n" answer "\n")
       (setq gaia-chat--stream-state nil)
       (gaia-chat--insert-prompt)
-      (pop-to-buffer (current-buffer)))))
+      (pop-to-buffer (current-buffer) '((display-buffer-reuse-window display-buffer-same-window))))))
 
 (defun gaia-chat--on-error (err)
   "Insert server error."
@@ -233,7 +234,7 @@
       (insert "\n*** Server Error\n" err "\n")
       (setq gaia-chat--stream-state nil)
       (gaia-chat--insert-prompt)
-      (pop-to-buffer (current-buffer)))))
+      (pop-to-buffer (current-buffer) '((display-buffer-reuse-window display-buffer-same-window))))))
 
 ;; Register handlers
 (gaia-connection-register-handler 'token #'gaia-chat--on-token)
