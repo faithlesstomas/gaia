@@ -64,7 +64,10 @@
           (setq gaia-hitl--responded t)
           (gaia-send `(permission-response ,value))
           (message "Sent permission response: %S" value)))
-      (kill-buffer buf))))
+      (let ((win (get-buffer-window buf t)))
+        (if win
+            (quit-window t win)
+          (kill-buffer buf))))))
 
 (defun gaia-hitl-approve ()
   "Approve the proposed action."
@@ -226,7 +229,10 @@
     (when buf
       (with-current-buffer buf
         (setq gaia-hitl--responded t))
-      (kill-buffer buf))))
+      (let ((win (get-buffer-window buf t)))
+        (if win
+            (quit-window t win)
+          (kill-buffer buf))))))
 
 ;; Register request handler and connection close hook
 (gaia-connection-register-handler 'permission-request #'gaia-hitl--on-request)
