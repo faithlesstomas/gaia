@@ -15,5 +15,5 @@ export GAIA_TRAJECTORIES_FILE="$TRAJ"
 echo "Starting GAIA CLI. Trajectory will be saved to: $TRAJ"
 
 # 2. Run Rust Client
-eval "$(guix shell -m guix.scm --search-paths)"
+eval "$(guix shell -m guix-dev.scm --search-paths)"
 exec cargo run --manifest-path src/gaia-cli/Cargo.toml --release

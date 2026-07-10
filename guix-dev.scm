@@ -6,6 +6,7 @@
              (gnu packages nss)
              (gnu packages texinfo)
              (gnu packages compression)
+             (gnu packages rust)
              (gnu packages version-control)
              (gnu packages base)
              (gnu packages perl)
@@ -19,6 +20,7 @@
        guile-fibers
        guile-goblins
        guile-wisp
+       rust
        nss-certs
        coreutils
        git

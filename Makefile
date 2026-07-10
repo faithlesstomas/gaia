@@ -9,6 +9,7 @@ export GAIA_BASE_MODEL
 .PHONY: run repl check test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-actors test-server test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop clean-trajectories monitor client server
 
 GUIX_SHELL = guix shell -m guix.scm --
+GUIX_DEV_SHELL = guix shell -m guix-dev.scm --
 
 run: llm-server
 	@echo "\033[1;31mERROR: 'make run' is deprecated because 'make' intercepts Ctrl-C and breaks the REPL.\033[0m"
@@ -149,7 +150,7 @@ monitor:
 
 client:
 	@echo "Building and running GAIA Rust Client..."
-	$(GUIX_SHELL) cargo run --manifest-path src/gaia-cli/Cargo.toml
+	$(GUIX_DEV_SHELL) cargo run --manifest-path src/gaia-cli/Cargo.toml
 
 server:
 	@echo "Starting GAIA Headless Server..."
