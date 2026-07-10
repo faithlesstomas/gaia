@@ -44,7 +44,12 @@
   "Major mode for GAIA interactive buffers, derived from Org-mode."
   (setq-local gaia-chat--stream-state nil)
   (setq-local gaia-chat--session-id (format "emacs-%d" (time-convert nil 'integer)))
+  ;; Enable word wrapping and prevent truncation
+  (setq-local truncate-lines nil)
+  (setq-local word-wrap t)
   (visual-line-mode 1)
+  ;; Smooth scrolling during streaming (prevents buffer jumping)
+  (setq-local scroll-conservatively 10000)
   ;; Setup custom local variables or hooks if needed
   (use-local-map gaia-chat-mode-map))
 
@@ -153,6 +158,12 @@
       (message "Please connect first.")
     (gaia-send '(get-history))))
 
+(defun gaia-chat--scroll-to-bottom ()
+  "Scroll windows showing GAIA buffer to the bottom."
+  (let ((buf (gaia-chat-buffer)))
+    (dolist (win (get-buffer-window-list buf nil t))
+      (set-window-point win (point-max)))))
+
 ;;; Handler functions for GAIA socket events
 
 (defun gaia-chat--on-token (token)
@@ -168,7 +179,8 @@
         (insert "*** Response\n")
         (setq gaia-chat--stream-state 'token))
        (t nil))
-      (insert token))))
+      (insert token)
+      (gaia-chat--scroll-to-bottom))))
 
 (defun gaia-chat--on-thought (thought)
   "Handle a streamed thinking token."
@@ -183,7 +195,8 @@
         (insert "*** Thinking\n#+BEGIN_QUOTE\n")
         (setq gaia-chat--stream-state 'thought))
        (t nil))
-      (insert thought))))
+      (insert thought)
+      (gaia-chat--scroll-to-bottom))))
 
 (defun gaia-chat--on-status (status)
   "Display status in echo area."
@@ -198,21 +211,24 @@
         (insert "\n#+END_QUOTE\n\n")
         (setq gaia-chat--stream-state nil))
       (insert "*** Code Execution\n")
-      (insert "#+BEGIN_SRC scheme\n" code "\n#+END_SRC\n\n"))))
+      (insert "#+BEGIN_SRC scheme\n" code "\n#+END_SRC\n\n")
+      (gaia-chat--scroll-to-bottom))))
 
 (defun gaia-chat--on-result (result)
   "Insert code execution result."
   (with-current-buffer (gaia-chat-buffer)
     (let ((inhibit-read-only t))
       (goto-char (point-max))
-      (insert "#+RESULTS:\n: " (replace-regexp-in-string "\n" "\n: " result) "\n\n"))))
+      (insert "#+RESULTS:\n: " (replace-regexp-in-string "\n" "\n: " result) "\n\n")
+      (gaia-chat--scroll-to-bottom))))
 
 (defun gaia-chat--on-repl-error (err)
   "Insert REPL error."
   (with-current-buffer (gaia-chat-buffer)
     (let ((inhibit-read-only t))
       (goto-char (point-max))
-      (insert "#+RESULTS:\n: ERROR: " (replace-regexp-in-string "\n" "\n: " err) "\n\n"))))
+      (insert "#+RESULTS:\n: ERROR: " (replace-regexp-in-string "\n" "\n: " err) "\n\n")
+      (gaia-chat--scroll-to-bottom))))
 
 (defun gaia-chat--on-final (answer)
   "Insert the final response and prepare the next prompt."
@@ -224,6 +240,7 @@
       (insert "*** Final Answer\n" answer "\n")
       (setq gaia-chat--stream-state nil)
       (gaia-chat--insert-prompt)
+      (gaia-chat--scroll-to-bottom)
       (pop-to-buffer (current-buffer) '((display-buffer-reuse-window display-buffer-same-window))))))
 
 (defun gaia-chat--on-error (err)
@@ -234,6 +251,7 @@
       (insert "\n*** Server Error\n" err "\n")
       (setq gaia-chat--stream-state nil)
       (gaia-chat--insert-prompt)
+      (gaia-chat--scroll-to-bottom)
       (pop-to-buffer (current-buffer) '((display-buffer-reuse-window display-buffer-same-window))))))
 
 ;; Register handlers
