@@ -17,33 +17,34 @@
   :group 'gaia
   :prefix "gaia-chat-")
 
-(defcustom gaia-chat-buffer-name "*gaia*"
-  "Name of the interactive GAIA buffer."
-  :type 'string
-  :group 'gaia-chat)
-
 (defvar-local gaia-chat--stream-state nil
   "Current streaming state: nil, \\='token, \\='thought.")
 
 (defvar-local gaia-chat--session-id nil
   "Active session ID in the buffer.")
 
+(defvar-local gaia-chat--repl-buffer nil
+  "The REPL buffer associated with this chat buffer.")
+
+(defvar-local gaia-chat--active-request nil
+  "Non-nil if the Assistant is currently running a request.")
+
 (defvar gaia-chat-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c C-c") #'gaia-chat-send)
+    (define-key map (kbd "<C-return>") #'gaia-chat-send)
+    (define-key map (kbd "C-<return>") #'gaia-chat-send)
     (define-key map (kbd "C-c C-k") #'gaia-chat-interrupt)
     (define-key map (kbd "C-c C-l") #'gaia-chat-clear)
     (define-key map (kbd "C-c C-s") #'gaia-chat-switch-session)
     (define-key map (kbd "C-c C-m") #'gaia-chat-switch-model)
     (define-key map (kbd "C-c C-t") #'gaia-chat-toggle-thinking)
-    (define-key map (kbd "C-c C-h") #'gaia-chat-show-history)
     map)
   "Keymap for `gaia-mode'.")
 
 (define-derived-mode gaia-mode org-mode "GAIA Chat"
   "Major mode for GAIA interactive buffers, derived from Org-mode."
   (setq-local gaia-chat--stream-state nil)
-  (setq-local gaia-chat--session-id (format "emacs-%d" (time-convert nil 'integer)))
   ;; Enable word wrapping and prevent truncation (even in split/partial-width windows)
   (setq-local truncate-lines nil)
   (setq-local word-wrap t)
@@ -55,12 +56,17 @@
   ;; Setup custom local variables or hooks if needed
   (use-local-map gaia-chat-mode-map))
 
-(defun gaia-chat-buffer ()
-  "Get or create the GAIA buffer."
-  (let ((buf (get-buffer-create gaia-chat-buffer-name)))
+(defun gaia-chat-buffer (&optional session-id)
+  "Get or create a GAIA buffer for SESSION-ID."
+  (let* ((sid (or session-id
+                  (and (eq major-mode 'gaia-mode) gaia-chat--session-id)
+                  (format "gaia-%d" (time-convert nil 'integer))))
+         (buf-name (format "*gaia-%s*" sid))
+         (buf (get-buffer-create buf-name)))
     (with-current-buffer buf
       (unless (eq major-mode 'gaia-mode)
         (gaia-mode)
+        (setq-local gaia-chat--session-id sid)
         (gaia-chat--initialize-buffer)))
     buf))
 
@@ -70,6 +76,7 @@
     (erase-buffer)
     (insert "* GAIA Agent Session\n")
     (insert "Welcome to GNU AI Assistant (GAIA) in Emacs.\n")
+    (insert "Active Session: " (or gaia-chat--session-id "") "\n")
     (insert "Type your task after the prompt below and press `C-c C-c` to send.\n\n")
     (gaia-chat--insert-prompt)))
 
@@ -114,6 +121,7 @@
                 ;; Accept output to let socket process the queue
                 (accept-process-output gaia-connection-process 0.1))
               ;; Send command
+              (setq gaia-chat--active-request t)
               (gaia-send `(eval ,input))
               (setq gaia-chat--stream-state nil)
               (message "Prompt sent to GAIA..."))))))))
@@ -132,33 +140,38 @@
     (gaia-send '(clear))
     (message "Cleared GAIA history.")))
 
+(defvar gaia-chat--pending-sessions nil
+  "Stash for active session list retrieved from server.")
+
 (defun gaia-chat-switch-session ()
-  "Switch to another session ID."
+  "Switch to another session ID by listing server sessions."
   (interactive)
-  (if (not (gaia-connected-p))
-      (message "Please connect first.")
-    (gaia-send '(list-sessions))))
-
-(defun gaia-chat-switch-model ()
-  "Switch active LLM model."
-  (interactive)
-  (if (not (gaia-connected-p))
-      (message "Please connect first.")
-    (gaia-send '(list-models))))
-
-(defun gaia-chat-toggle-thinking ()
-  "Toggle thinking mode on the server."
-  (interactive)
-  (if (not (gaia-connected-p))
-      (message "Please connect first.")
-    (gaia-send '(get-thinking))))
-
-(defun gaia-chat-show-history ()
-  "Get conversation history from server."
-  (interactive)
-  (if (not (gaia-connected-p))
-      (message "Please connect first.")
-    (gaia-send '(get-history))))
+  (unless (gaia-connected-p)
+    (gaia-connect))
+  (setq gaia-chat--pending-sessions 'waiting)
+  (gaia-send '(list-sessions))
+  ;; Wait for server response
+  (let ((start-time (float-time)))
+    (while (and (eq gaia-chat--pending-sessions 'waiting)
+                (< (- (float-time) start-time) 5))
+      (accept-process-output gaia-connection-process 0.05)))
+  (if (eq gaia-chat--pending-sessions 'waiting)
+      (error "Failed to retrieve sessions list from server")
+    (let* ((sessions gaia-chat--pending-sessions)
+           (chosen (completing-read "Select session: " sessions nil t)))
+      (when (and chosen (not (string-empty-p chosen)))
+        ;; Check if buffer already exists for this session
+        (let ((buf (get-buffer (format "*gaia-%s*" chosen))))
+          (if buf
+              (pop-to-buffer buf)
+            ;; Create new buffer for this session
+            (let ((new-buf (gaia-chat-buffer chosen)))
+              (pop-to-buffer new-buf)
+              (unless (gaia-connected-p)
+                (gaia-connect))
+              (gaia-send `(session ,chosen))
+              (gaia-send '(get-history))
+              (message "Restored session %s" chosen))))))))
 
 (defun gaia-chat--scroll-to-bottom ()
   "Scroll windows showing GAIA buffer to the bottom."
@@ -218,24 +231,103 @@
 
 (defun gaia-chat--on-result (result)
   "Insert code execution result."
-  (with-current-buffer (gaia-chat-buffer)
+  (with-current-buffer (current-buffer)
     (let ((inhibit-read-only t))
       (goto-char (point-max))
+      (insert "*** Environment Output\n")
       (insert "#+RESULTS:\n: " (replace-regexp-in-string "\n" "\n: " result) "\n\n")
       (gaia-chat--scroll-to-bottom))))
 
 (defun gaia-chat--on-repl-error (err)
   "Insert REPL error."
-  (with-current-buffer (gaia-chat-buffer)
+  (with-current-buffer (current-buffer)
     (let ((inhibit-read-only t))
       (goto-char (point-max))
+      (insert "*** Environment Error\n")
       (insert "#+RESULTS:\n: ERROR: " (replace-regexp-in-string "\n" "\n: " err) "\n\n")
+      (gaia-chat--scroll-to-bottom))))
+
+(defun gaia-chat--on-session-list (sessions)
+  "Callback when list of sessions is received."
+  (setq gaia-chat--pending-sessions sessions))
+
+(defun gaia-chat--on-history-list (history)
+  "Render the full history list in the buffer."
+  (with-current-buffer (current-buffer)
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (insert "* GAIA Agent Session\n")
+      (insert "Welcome to GNU AI Assistant (GAIA) in Emacs.\n")
+      (insert "Active Session: " gaia-chat--session-id "\n\n")
+      (dolist (turn history)
+        (let* ((role (assoc-default "role" turn))
+               (content (assoc-default "content" turn)))
+          (cond
+           ((string= role "user")
+            (insert (format "** User\n%s\n\n" content)))
+           ((string= role "user-repl")
+            (insert (format "** User (REPL)\n%s\n\n" content)))
+           ((string= role "assistant")
+            (insert (format "** Assistant\n%s\n\n" content)))
+           (t nil))))
+      (gaia-chat--insert-prompt)
+      (gaia-chat--scroll-to-bottom))))
+
+(defun gaia-chat--on-repl-result (val)
+  "Handle a successful manual REPL execution."
+  ;; 1. Update the REPL buffer if active
+  (when (and gaia-chat--repl-buffer (buffer-live-p gaia-chat--repl-buffer))
+    (with-current-buffer gaia-chat--repl-buffer
+      (when (fboundp 'gaia-repl--on-result)
+        (gaia-repl--on-result val))))
+  ;; 2. Update the chat buffer
+  (with-current-buffer (current-buffer)
+    (let ((inhibit-read-only t)
+          (prompt-pos (save-excursion
+                        (goto-char (point-max))
+                        (search-backward "GAIA > " nil t)))
+          (user-input ""))
+      (when prompt-pos
+        (setq user-input (buffer-substring-no-properties (+ prompt-pos 7) (point-max)))
+        (delete-region prompt-pos (point-max)))
+      (goto-char (point-max))
+      (insert "*** REPL Environment Output (User)\n")
+      (insert "#+RESULTS:\n: " (replace-regexp-in-string "\n" "\n: " val) "\n\n")
+      (gaia-chat--insert-prompt)
+      (when (not (string-empty-p user-input))
+        (insert user-input))
+      (gaia-chat--scroll-to-bottom))))
+
+(defun gaia-chat--on-repl-result-error (err)
+  "Handle a failed manual REPL execution."
+  ;; 1. Update the REPL buffer if active
+  (when (and gaia-chat--repl-buffer (buffer-live-p gaia-chat--repl-buffer))
+    (with-current-buffer gaia-chat--repl-buffer
+      (when (fboundp 'gaia-repl--on-error)
+        (gaia-repl--on-error err))))
+  ;; 2. Update the chat buffer
+  (with-current-buffer (current-buffer)
+    (let ((inhibit-read-only t)
+          (prompt-pos (save-excursion
+                        (goto-char (point-max))
+                        (search-backward "GAIA > " nil t)))
+          (user-input ""))
+      (when prompt-pos
+        (setq user-input (buffer-substring-no-properties (+ prompt-pos 7) (point-max)))
+        (delete-region prompt-pos (point-max)))
+      (goto-char (point-max))
+      (insert "*** REPL Environment Error (User)\n")
+      (insert "#+RESULTS:\n: ERROR: " (replace-regexp-in-string "\n" "\n: " err) "\n\n")
+      (gaia-chat--insert-prompt)
+      (when (not (string-empty-p user-input))
+        (insert user-input))
       (gaia-chat--scroll-to-bottom))))
 
 (defun gaia-chat--on-final (answer)
   "Insert the final response and prepare the next prompt."
   (with-current-buffer (gaia-chat-buffer)
     (let ((inhibit-read-only t))
+      (setq gaia-chat--active-request nil)
       (goto-char (point-max))
       (when (eq gaia-chat--stream-state 'thought)
         (insert "\n#+END_QUOTE\n\n"))
@@ -249,12 +341,27 @@
   "Insert server error."
   (with-current-buffer (gaia-chat-buffer)
     (let ((inhibit-read-only t))
+      (setq gaia-chat--active-request nil)
       (goto-char (point-max))
       (insert "\n*** Server Error\n" err "\n")
       (setq gaia-chat--stream-state nil)
       (gaia-chat--insert-prompt)
       (gaia-chat--scroll-to-bottom)
       (pop-to-buffer (current-buffer) '((display-buffer-reuse-window display-buffer-same-window))))))
+
+(defun gaia-chat--on-repl-private-result (val)
+  "Handle a private REPL execution result (no state change)."
+  (when (and gaia-chat--repl-buffer (buffer-live-p gaia-chat--repl-buffer))
+    (with-current-buffer gaia-chat--repl-buffer
+      (when (fboundp 'gaia-repl--on-result)
+        (gaia-repl--on-result val)))))
+
+(defun gaia-chat--on-repl-private-result-error (err)
+  "Handle a private REPL execution error (no state change)."
+  (when (and gaia-chat--repl-buffer (buffer-live-p gaia-chat--repl-buffer))
+    (with-current-buffer gaia-chat--repl-buffer
+      (when (fboundp 'gaia-repl--on-error)
+        (gaia-repl--on-error err)))))
 
 ;; Register handlers
 (gaia-connection-register-handler 'token #'gaia-chat--on-token)
@@ -265,6 +372,12 @@
 (gaia-connection-register-handler 'repl-error #'gaia-chat--on-repl-error)
 (gaia-connection-register-handler 'final #'gaia-chat--on-final)
 (gaia-connection-register-handler 'error #'gaia-chat--on-error)
+(gaia-connection-register-handler 'session-list #'gaia-chat--on-session-list)
+(gaia-connection-register-handler 'history-list #'gaia-chat--on-history-list)
+(gaia-connection-register-handler 'repl-result #'gaia-chat--on-repl-result)
+(gaia-connection-register-handler 'repl-result-error #'gaia-chat--on-repl-result-error)
+(gaia-connection-register-handler 'repl-private-result #'gaia-chat--on-repl-private-result)
+(gaia-connection-register-handler 'repl-private-result-error #'gaia-chat--on-repl-private-result-error)
 
 (provide 'gaia-chat)
 ;;; gaia-chat.el ends here

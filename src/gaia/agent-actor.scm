@@ -139,7 +139,9 @@
                                                         `(("role" . "assistant") ("content" . ,sub-ans))))
                                   (+ step 1) transcript formatted-sub-output resolve-promise)))
                           #:catch (lambda (err)
-                                    (<- resolve-promise 'fulfill (cons (string-append "Failed with consecutive errors, diagnostic sub-agent also failed: " (format #f "~a" err)) history)))))))
+                                    (let ((err-str (format #f "Failed with consecutive errors, diagnostic sub-agent also failed: ~a" err)))
+                                      (when event-handler (event-handler `(repl-error ,err-str)))
+                                      (<- resolve-promise 'fulfill (cons err-str history))))))))
                 (let* ((prompt last-output)
                        (stream-callback (lambda (evt)
                                           (when event-handler
@@ -216,6 +218,7 @@
                                                          (+ step 1) updated-transcript formatted-sub-output resolve-promise))))
                                              #:catch (lambda (err)
                                                        (let ((err-str (format #f "[System Error]:\nSub-agent failed: ~a" err)))
+                                                         (when event-handler (event-handler `(repl-error ,err-str)))
                                                          (<- self 'solve-step task depth outer-history
                                                              (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                                    `(("role" . "assistant") ("content" . ,response-text))))
@@ -245,7 +248,7 @@
                                                        (+ step 1) updated-transcript (string-append "[System REPL Output]:\nCode executed successfully. Result:\n" result) resolve-promise))
                                                   (('error type msg)
                                                    (let ((feedback (string-append "[System Error]:\nRuntime Error (" (symbol->string type) "): " msg)))
-                                                     (when event-handler (event-handler `(repl-error feedback)))
+                                                     (when event-handler (event-handler `(repl-error ,feedback)))
                                                      (gaia-log (string-append C-RED "\n[REPL] Runtime Error:\n" C-RESET feedback "\n"))
                                                      (<- self 'solve-step task depth outer-history
                                                          (append history (list `(("role" . "user") ("content" . ,last-output))
@@ -253,6 +256,7 @@
                                                          (+ step 1) updated-transcript feedback resolve-promise)))))
                                               #:catch (lambda (err)
                                                         (let ((err-str (format #f "[System Error]:\nSandbox evaluation crash: ~a" err)))
+                                                          (when event-handler (event-handler `(repl-error ,err-str)))
                                                           (<- self 'solve-step task depth outer-history
                                                               (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                                     `(("role" . "assistant") ("content" . ,response-text))))

@@ -42,72 +42,108 @@ PARAMS is the alist of header arguments."
          (timeout (or (and (cdr (assq :timeout params))
                            (string-to-number (cdr (assq :timeout params))))
                       30))
-         (clean-body (string-trim body)))
+         (clean-body (substring-no-properties (string-trim body)))
+         (chat-buf (gaia-chat-buffer session-id)))
     
-    (unless (gaia-connected-p)
-      (gaia-connect)
-      ;; Bind session ID
-      (gaia-send `(session ,session-id)))
-    
-    ;; Synchronous evaluation using connection filter
-    (setq ob-gaia--result nil)
-    (setq ob-gaia--status 'waiting)
-    
-    ;; Register temporary event handlers to capture the execution result
-    (let ((old-repl-result (assoc 'repl-result gaia-connection-handlers))
-          (old-final (assoc 'final gaia-connection-handlers))
-          (old-error (assoc 'error gaia-connection-handlers)))
+    (with-current-buffer chat-buf
+      (unless (gaia-connected-p)
+        (gaia-connect)
+        ;; Bind session ID
+        (gaia-send `(session ,session-id)))
       
-      (gaia-connection-register-handler
-       'repl-result
-       (lambda (val)
-         (setq ob-gaia--result val)
-         (setq ob-gaia--status 'success)))
+      ;; Synchronous evaluation using connection filter
+      (setq ob-gaia--result nil)
+      (setq ob-gaia--status 'waiting)
       
-      (gaia-connection-register-handler
-       'final
-       (lambda (val)
-         (setq ob-gaia--result val)
-         (setq ob-gaia--status 'success)))
-      
-      (gaia-connection-register-handler
-       'error
-       (lambda (val)
-         (setq ob-gaia--result val)
-         (setq ob-gaia--status 'error)))
-      
-      (unwind-protect
-          (progn
-            ;; Send request to server
-            (if (string= eval-mode "ask")
-                (gaia-send `(eval ,clean-body))
-              (gaia-send `(repl ,clean-body)))
-            
-            ;; Wait loop
-            (let ((start-time (float-time)))
-              (while (and (eq ob-gaia--status 'waiting)
-                          (< (- (float-time) start-time) timeout))
-                (accept-process-output gaia-connection-process 0.05)))
-            
-            (cond
-             ((eq ob-gaia--status 'waiting)
-              (error "GAIA execution timed out after %d seconds" timeout))
-             ((eq ob-gaia--status 'error)
-              (error "GAIA Execution Error: %s" ob-gaia--result))
-             (t ob-gaia--result)))
+      ;; Register temporary event handlers to capture the execution result
+      (let ((old-repl-result (assoc 'repl-result gaia-connection-handlers))
+            (old-repl-error (assoc 'repl-result-error gaia-connection-handlers))
+            (old-repl-private-result (assoc 'repl-private-result gaia-connection-handlers))
+            (old-repl-private-result-error (assoc 'repl-private-result-error gaia-connection-handlers))
+            (old-final (assoc 'final gaia-connection-handlers))
+            (old-error (assoc 'error gaia-connection-handlers)))
         
-        ;; Restore original handlers
-        (if old-repl-result
-            (setcdr (assoc 'repl-result gaia-connection-handlers) (cdr old-repl-result))
-          (gaia-connection-unregister-handler 'repl-result))
+        (gaia-connection-register-handler
+         'repl-result
+         (lambda (val)
+           (setq ob-gaia--result val)
+           (setq ob-gaia--status 'success)))
         
-        (if old-final
-            (setcdr (assoc 'final gaia-connection-handlers) (cdr old-final))
-          (gaia-connection-unregister-handler 'final))
+        (gaia-connection-register-handler
+         'repl-result-error
+         (lambda (val)
+           (setq ob-gaia--result val)
+           (setq ob-gaia--status 'error)))
+
+        (gaia-connection-register-handler
+         'repl-private-result
+         (lambda (val)
+           (setq ob-gaia--result val)
+           (setq ob-gaia--status 'success)))
         
-        (if old-error
-            (setcdr (assoc 'error gaia-connection-handlers) (cdr old-error))
-          (gaia-connection-unregister-handler 'error))))))
+        (gaia-connection-register-handler
+         'repl-private-result-error
+         (lambda (val)
+           (setq ob-gaia--result val)
+           (setq ob-gaia--status 'error)))
+        
+        (gaia-connection-register-handler
+         'final
+         (lambda (val)
+           (setq ob-gaia--result val)
+           (setq ob-gaia--status 'success)))
+        
+        (gaia-connection-register-handler
+         'error
+         (lambda (val)
+           (setq ob-gaia--result val)
+           (setq ob-gaia--status 'error)))
+        
+        (unwind-protect
+            (progn
+              ;; Send request to server
+              (if (string= eval-mode "ask")
+                  (gaia-send `(eval ,clean-body))
+                (gaia-send `(repl ,clean-body)))
+              
+              ;; Wait loop (access buffer-local process)
+              (let ((start-time (float-time))
+                    (proc gaia-connection-process))
+                (while (and (eq ob-gaia--status 'waiting)
+                            (< (- (float-time) start-time) timeout))
+                  (accept-process-output proc 0.05)))
+              
+              (cond
+               ((eq ob-gaia--status 'waiting)
+                (error "GAIA execution timed out after %d seconds" timeout))
+               ((eq ob-gaia--status 'error)
+                (error "GAIA Execution Error: %s" ob-gaia--result))
+               (t ob-gaia--result)))
+          
+          ;; Restore original handlers
+          (if old-repl-result
+              (setcdr (assoc 'repl-result gaia-connection-handlers) (cdr old-repl-result))
+            (gaia-connection-unregister-handler 'repl-result))
+          
+          (if old-repl-error
+              (setcdr (assoc 'repl-result-error gaia-connection-handlers) (cdr old-repl-error))
+            (gaia-connection-unregister-handler 'repl-result-error))
+
+          (if old-repl-private-result
+              (setcdr (assoc 'repl-private-result gaia-connection-handlers) (cdr old-repl-private-result))
+            (gaia-connection-unregister-handler 'repl-private-result))
+          
+          (if old-repl-private-result-error
+              (setcdr (assoc 'repl-private-result-error gaia-connection-handlers) (cdr old-repl-private-result-error))
+            (gaia-connection-unregister-handler 'repl-private-result-error))
+          
+          (if old-final
+              (setcdr (assoc 'final gaia-connection-handlers) (cdr old-final))
+            (gaia-connection-unregister-handler 'final))
+          
+          (if old-error
+              (setcdr (assoc 'error gaia-connection-handlers) (cdr old-error))
+            (gaia-connection-unregister-handler 'error)))))))
 
 ;; Associate gaia blocks with scheme editing mode
 (add-to-list 'org-src-lang-modes '("gaia" . scheme))

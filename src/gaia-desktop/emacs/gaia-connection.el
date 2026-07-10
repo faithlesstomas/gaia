@@ -21,10 +21,10 @@
   :type 'string
   :group 'gaia-connection)
 
-(defvar gaia-connection-process nil
+(defvar-local gaia-connection-process nil
   "The active network process connecting to GAIA.")
 
-(defvar gaia-connection-buffer ""
+(defvar-local gaia-connection-buffer ""
   "Buffer to accumulate partial S-expressions from the process.")
 
 (defvar gaia-connection-handlers nil
@@ -53,24 +53,26 @@
 (defun gaia-connect (&optional socket-path)
   "Establish a persistent UNIX socket connection to GAIA."
   (interactive)
-  (let ((path (or socket-path gaia-connection-socket-path)))
+  (let ((path (or socket-path gaia-connection-socket-path))
+        (chat-buf (current-buffer)))
     (when (gaia-connected-p)
       (gaia-disconnect))
-    (setq gaia-connection-buffer "")
+    (setq-local gaia-connection-buffer "")
     (message "Connecting to GAIA server at %s..." path)
     (condition-case err
         (let ((proc (make-network-process
-                     :name "gaia-connection"
+                     :name (format "gaia-connection-%s" (buffer-name))
                      :family 'local
                      :service path
                      :filter #'gaia-connection--process-filter
                      :sentinel #'gaia-connection--process-sentinel
                      :coding 'utf-8)))
-          (setq gaia-connection-process proc)
+          (process-put proc 'gaia-buffer chat-buf)
+          (setq-local gaia-connection-process proc)
           (message "GAIA connection established.")
           proc)
       (error
-       (setq gaia-connection-process nil)
+       (setq-local gaia-connection-process nil)
        (error "Failed to connect to GAIA at %s: %s" path (error-message-string err))))))
 
 (defun gaia-disconnect ()
@@ -87,7 +89,10 @@
   (unless (gaia-connected-p)
     ;; Auto-connect
     (gaia-connect))
-  (let* ((serialized (format "%S" sexp))
+  (let* ((print-escape-newlines t)
+         (print-level nil)
+         (print-length nil)
+         (serialized (format "%S" sexp))
          ;; Standardize boolean representation: elisp writes t/nil, server expects #t/#f
          (formatted (replace-regexp-in-string "\\bnil\\b" "#f" serialized))
          (formatted (replace-regexp-in-string "\\bt\\b" "#t" formatted))
@@ -98,16 +103,19 @@
       (write-region (point-min) (point-max) "/home/tomasz/scratch/AI/gaia/test-output.txt" t 'silent))
     (process-send-string gaia-connection-process msg)))
 
-(defun gaia-connection--process-filter (_proc string)
-  "Buffer incoming raw data from _PROC and split into lines."
-  (setq gaia-connection-buffer (concat gaia-connection-buffer string))
-  (let ((lines (split-string gaia-connection-buffer "\n")))
-    ;; The last element might be incomplete; keep it in the buffer
-    (setq gaia-connection-buffer (car (last lines)))
-    ;; Process all complete lines
-    (dolist (line (butlast lines))
-      (unless (string-empty-p (string-trim line))
-        (gaia-connection--handle-line line)))))
+(defun gaia-connection--process-filter (proc string)
+  "Buffer incoming raw data from PROC and split into lines."
+  (let ((buf (process-get proc 'gaia-buffer)))
+    (when (and buf (buffer-live-p buf))
+      (with-current-buffer buf
+        (setq gaia-connection-buffer (concat gaia-connection-buffer string))
+        (let ((lines (split-string gaia-connection-buffer "\n")))
+          ;; The last element might be incomplete; keep it in the buffer
+          (setq gaia-connection-buffer (car (last lines)))
+          ;; Process all complete lines
+          (dolist (line (butlast lines))
+            (unless (string-empty-p (string-trim line))
+              (gaia-connection--handle-line line))))))))
 
 (defun gaia-connection--handle-line (line)
   "Convert LINE to Lisp data and dispatch it."
@@ -133,12 +141,15 @@
         (when (member event-type '(error repl-error))
           (message "GAIA Server Error: %S" args))))))
 
-(defun gaia-connection--process-sentinel (_proc event)
+(defun gaia-connection--process-sentinel (proc event)
   "Handle process lifecycle events."
   (when (member event '("finished\n" "exited\n" "connection broken by remote peer\n"))
-    (setq gaia-connection-process nil)
-    (message "GAIA connection closed: %s" (string-trim event))
-    (run-hooks 'gaia-connection-on-close-hooks)))
+    (let ((buf (process-get proc 'gaia-buffer)))
+      (when (and buf (buffer-live-p buf))
+        (with-current-buffer buf
+          (setq gaia-connection-process nil)
+          (message "GAIA connection closed: %s" (string-trim event))
+          (run-hooks 'gaia-connection-on-close-hooks))))))
 
 
 (provide 'gaia-connection)

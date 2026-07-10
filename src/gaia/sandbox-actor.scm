@@ -26,10 +26,17 @@
                                         (rlm-eval! env code #:permission-handler (lambda (_) #t)))))))
                               (if (vector? trajectory) (vector->list trajectory) trajectory))
                     (let ((content (or (assoc-ref turn 'content) (assoc-ref turn "content"))))
-                      (when (and role (string=? (format #f "~a" role) "assistant") content)
-                        (let ((code (extract-code content)))
-                          (when code
-                            (rlm-eval! env code #:permission-handler (lambda (_) #t)))))))))
+                      (when (and role content)
+                        (let ((role-str (format #f "~a" role)))
+                          (cond
+                           ((string=? role-str "assistant")
+                            (let ((code (extract-code content)))
+                              (when code
+                                (rlm-eval! env code #:permission-handler (lambda (_) #t)))))
+                           ((string=? role-str "user-repl")
+                            (let ((code (extract-code content)))
+                              (when code
+                                (rlm-eval! env code #:permission-handler (lambda (_) #t))))))))))))
             history))
 
 ;; Sandbox Actor

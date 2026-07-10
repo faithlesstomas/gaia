@@ -125,28 +125,36 @@
 
       (('repl code)
        (gaia-log (format #f "[SERVER] Received REPL code execution request."))
-       (let ((eval-promise (<- sandbox-actor 'eval code)))
-         (on eval-promise
-             (lambda (eval-res)
-               (match eval-res
-                 (('ok val-str)
-                  (gaia-log (format #f "[SERVER] REPL success. Result: ~a" val-str))
-                  (let ((updated-history (append history
-                                                 (list `(("role" . "assistant")
-                                                         ("content" . ,(string-append "```repl\n" code "\n```")))
-                                                       `(("role" . "user")
-                                                         ("content" . ,(string-append "Result:\n" val-str)))))))
-                    (save-session session-id updated-history)
-                    (send-event client-socket `(repl-result ,val-str))
-                    (<- self 'update-history updated-history)))
-                 (('error type msg)
-                  (let ((err-msg (format #f "REPL Error (~a): ~a" type msg)))
-                    (gaia-log (format #f "[SERVER] REPL error: ~a" err-msg))
-                    (send-event client-socket `(error ,err-msg))))))
-             #:catch (lambda (err)
-                       (let ((err-msg (format #f "REPL Crash: ~a" err)))
-                         (gaia-log (format #f "[SERVER] REPL crash: ~a" err-msg))
-                         (send-event client-socket `(error ,err-msg)))))))
+       (let ((before-promise (<- sandbox-actor 'definitions)))
+         (on before-promise
+             (lambda (before-defs)
+               (let ((eval-promise (<- sandbox-actor 'eval code)))
+                 (on eval-promise
+                     (lambda (eval-res)
+                       (match eval-res
+                         (('ok val-str)
+                          (gaia-log (format #f "[SERVER] REPL success. Result: ~a" val-str))
+                          (let ((after-promise (<- sandbox-actor 'definitions)))
+                            (on after-promise
+                                (lambda (after-defs)
+                                  (if (not (equal? before-defs after-defs))
+                                      ;; Mutated state! Send public result and save history.
+                                      (let ((updated-history (append history
+                                                                     (list `(("role" . "user-repl")
+                                                                             ("content" . ,(string-append "```repl\n" code "\n```\nResult:\n" val-str)))))))
+                                        (save-session session-id updated-history)
+                                        (send-event client-socket `(repl-result ,val-str))
+                                        (<- self 'update-history updated-history))
+                                      ;; No state change! Send private result.
+                                      (send-event client-socket `(repl-private-result ,val-str)))))))
+                         (('error type msg)
+                          (let ((err-msg (format #f "REPL Error (~a): ~a" type msg)))
+                            (gaia-log (format #f "[SERVER] REPL error: ~a" err-msg))
+                            (send-event client-socket `(repl-private-result-error ,err-msg))))))
+                     #:catch (lambda (err)
+                               (let ((err-msg (format #f "REPL Crash: ~a" err)))
+                                 (gaia-log (format #f "[SERVER] REPL crash: ~a" err-msg))
+                                 (send-event client-socket `(repl-private-result-error ,err-msg))))))))))
 
       (('env)
        (gaia-log "[SERVER] Client requested current environment variables.")

@@ -21,7 +21,7 @@
 
 
 (define (replay-history env history)
-  "Re-executes all code blocks found in the assistant's history to restore REPL state."
+  "Re-executes all code blocks found in the history to restore REPL state."
   (let ((history-list (if (vector? history) (vector->list history) history)))
     (for-each (lambda (turn)
                 (let ((role (or (assoc-ref turn 'role) (assoc-ref turn "role")))
@@ -39,13 +39,20 @@
                                           (rlm-eval! env code #:permission-handler (lambda (_) #t)))))))
                                 (if (vector? trajectory) (vector->list trajectory) trajectory))
                       (let ((content (or (assoc-ref turn 'content) (assoc-ref turn "content"))))
-                        (when (and role (string=? (format #f "~a" role) "assistant") content)
-                          (let ((code (or (extract-code content)
-                                          (if (or (string-prefix? "(" content)
-                                                  (string-prefix? ";" content))
-                                              content #f))))
-                            (when code
-                              (rlm-eval! env code #:permission-handler (lambda (_) #t)))))))))
+                        (when (and role content)
+                          (let ((role-str (format #f "~a" role)))
+                            (cond
+                             ((string=? role-str "assistant")
+                              (let ((code (or (extract-code content)
+                                              (if (or (string-prefix? "(" content)
+                                                      (string-prefix? ";" content))
+                                                  content #f))))
+                                (when code
+                                  (rlm-eval! env code #:permission-handler (lambda (_) #t)))))
+                             ((string=? role-str "user-repl")
+                              (let ((code (extract-code content)))
+                                (when code
+                                  (rlm-eval! env code #:permission-handler (lambda (_) #t))))))))))))
               history-list)))
 
 (define (set-nonblocking! port)

@@ -11,39 +11,52 @@
 (define* (rlm-execute env code-string #:key (permission-handler #f))
   "Executes code in the persistent RLM environment inside a POSIX thread
 to prevent blocking the Fibers scheduler, yielding control cooperatively."
-  (let* ((result-val #f)
-         (result-err #f)
-         (done? #f)
-         (worker (call-with-new-thread
-                  (lambda ()
-                    (catch #t
+  (let ((trimmed (string-trim-both code-string)))
+    (cond
+     ((string=? trimmed ",help")
+      (list 'ok "Available REPL meta-commands:\n  ,help     - Show this help\n  ,bindings - Show current user-defined variables and their values\n"))
+     ((string=? trimmed ",bindings")
+      (let ((bindings (rlm-env-user-bindings env)))
+        (if (null? bindings)
+            (list 'ok "No user bindings defined.")
+            (list 'ok (string-join (map (lambda (b)
+                                          (format #f "  ~a = ~a" (car b) (cdr b)))
+                                        bindings)
+                                   "\n")))))
+     (else
+      (let* ((result-val #f)
+             (result-err #f)
+             (done? #f)
+             (worker (call-with-new-thread
                       (lambda ()
-                        (set! result-val (rlm-eval! env code-string #:permission-handler permission-handler)))
-                      (lambda (key . args)
-                        (set! result-err (cons key args))))
-                    (set! done? #t)))))
-    (let ((interrupted? (lambda ()
-                          (module-ref (resolve-module '(gaia core)) '*interrupted*)))
-          (fibers-sleep (lambda (t)
-                          (let ((sleep-proc (catch #t
-                                              (lambda ()
-                                                (module-ref (resolve-module '(fibers) #:ensure #f) 'sleep))
-                                              (lambda _ #f))))
-                            (if sleep-proc
-                                (sleep-proc t)
-                                (usleep (inexact->exact (round (* t 1000000)))))))))
-      (let loop ()
-        (cond
-         ((interrupted?)
-          (cancel-thread worker)
-          (throw 'user-interrupt))
-         (done?
-          (if result-err
-              (apply throw (car result-err) (cdr result-err))
-              result-val))
-         (else
-          (fibers-sleep 0.01)
-          (loop)))))))
+                        (catch #t
+                          (lambda ()
+                            (set! result-val (rlm-eval! env code-string #:permission-handler permission-handler)))
+                          (lambda (key . args)
+                            (set! result-err (cons key args))))
+                        (set! done? #t)))))
+        (let ((interrupted? (lambda ()
+                              (module-ref (resolve-module '(gaia core)) '*interrupted*)))
+              (fibers-sleep (lambda (t)
+                              (let ((sleep-proc (catch #t
+                                                  (lambda ()
+                                                    (module-ref (resolve-module '(fibers) #:ensure #f) 'sleep))
+                                                  (lambda _ #f))))
+                                (if sleep-proc
+                                    (sleep-proc t)
+                                    (usleep (inexact->exact (round (* t 1000000)))))))))
+          (let loop ()
+            (cond
+             ((interrupted?)
+              (cancel-thread worker)
+              (throw 'user-interrupt))
+             (done?
+              (if result-err
+                  (apply throw (car result-err) (cdr result-err))
+                  result-val))
+             (else
+              (fibers-sleep 0.01)
+              (loop))))))))))
 
 (define BANNED-PRIMITIVES '(system system* delete-file rmdir rename-file chmod))
 

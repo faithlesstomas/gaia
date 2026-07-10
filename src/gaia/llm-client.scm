@@ -153,11 +153,16 @@ Returns (response-header . response-body) or throws 'user-interrupt."
         (string-contains m "reasoning"))))
 
 (define (clean-history-for-llm history)
-  "Strips extra fields like trajectory from the history turns to ensure OpenAI API compliance."
+  "Strips extra fields like trajectory from the history turns and normalizes user-repl role for LLM compatibility."
   (map (lambda (turn)
-         (filter (lambda (pair)
-                   (member (car pair) '("role" role "content" content)))
-                 turn))
+         (let ((role (or (assoc-ref turn 'role) (assoc-ref turn "role")))
+               (content (or (assoc-ref turn 'content) (assoc-ref turn "content"))))
+           (if (or (string=? (format #f "~a" role) "user-repl")
+                   (string=? (format #f "~a" role) "user_repl"))
+               `(("role" . "user") ("content" . ,content))
+               (filter (lambda (pair)
+                         (member (car pair) '("role" role "content" content)))
+                       turn))))
        history))
 
 (define* (chat-with-llm session-id input model system-prompt #:key (think #f) (history '()) (stream-callback #f) (role "user"))
