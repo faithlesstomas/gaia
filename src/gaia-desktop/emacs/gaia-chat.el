@@ -44,9 +44,11 @@
   "Major mode for GAIA interactive buffers, derived from Org-mode."
   (setq-local gaia-chat--stream-state nil)
   (setq-local gaia-chat--session-id (format "emacs-%d" (time-convert nil 'integer)))
-  ;; Enable word wrapping and prevent truncation
+  ;; Enable word wrapping and prevent truncation (even in split/partial-width windows)
   (setq-local truncate-lines nil)
   (setq-local word-wrap t)
+  (setq-local truncate-partial-width-windows nil)
+  (setq-local org-startup-truncated nil)
   (visual-line-mode 1)
   ;; Smooth scrolling during streaming (prevents buffer jumping)
   (setq-local scroll-conservatively 10000)

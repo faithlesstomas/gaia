@@ -49,7 +49,11 @@
 
 (define-derived-mode gaia-hitl-mode special-mode "GAIA HITL"
   "Major mode for GAIA Human-in-the-Loop permission reviews."
-  (setq-local font-lock-defaults '(gaia-hitl-font-lock-keywords)))
+  (setq-local font-lock-defaults '(gaia-hitl-font-lock-keywords))
+  (setq-local truncate-lines nil)
+  (setq-local word-wrap t)
+  (setq-local truncate-partial-width-windows nil)
+  (visual-line-mode 1))
 
 (defun gaia-hitl-respond (value)
   "Send VALUE as the permission response and clean up."
