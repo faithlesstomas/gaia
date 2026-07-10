@@ -56,6 +56,14 @@
         #f)
       (lambda _ #t))))
 
+(test-equal "ocap-path-restriction-denied-feedback"
+  '(error permission "Reason text")
+  (let ((sb (make-sandbox "test-session" 
+                          (lambda (evt) #t) 
+                          (lambda (expr) '(denied "Reason text")))))
+    (sandbox-eval sb "(write-file \"/etc/passwd\" \"malicious\")")))
+
+
 ;; 5b. Test Command Injection Hardening
 (test-assert "command-hardening-safe"
   (let ((sb (make-test-sandbox #f))) ;; Handlers denied

@@ -75,9 +75,12 @@
   (gaia-hitl-respond t))
 
 (defun gaia-hitl-deny ()
-  "Deny the proposed action."
+  "Deny the proposed action, optionally providing feedback."
   (interactive)
-  (gaia-hitl-respond nil))
+  (let ((feedback (read-from-minibuffer "Reason for denial (optional): ")))
+    (if (string-empty-p feedback)
+        (gaia-hitl-respond nil)
+      (gaia-hitl-respond `(denied ,feedback)))))
 
 (defun gaia-hitl-always ()
   "Always approve this exact expression."
@@ -113,6 +116,11 @@
          (response-val (cond
                         ((memq char '(?y ?Y)) t)
                         ((memq char '(?a ?A)) `(always ,expr))
+                        ((memq char '(?n ?N))
+                         (let ((feedback (read-from-minibuffer "Reason for denial (optional): ")))
+                           (if (string-empty-p feedback)
+                               nil
+                             `(denied ,feedback))))
                         (t nil))))
     (gaia-send `(permission-response ,response-val))
     (message "Sent permission response: %S" response-val)))

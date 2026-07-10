@@ -393,6 +393,14 @@
         (let* ((m (sandbox-module sandbox))
                (initial-symbols (sandbox-initial-symbols sandbox))
                (perm-handler (or permission-handler (sandbox-permission-handler sandbox)))
+               (handle-perm-response
+                (lambda (res)
+                  (cond
+                   ((eq? res #t) #t)
+                   ((and (list? res) (eq? (car res) 'denied))
+                    (throw 'permission-denied (cadr res)))
+                   (else
+                    (throw 'user-interrupt)))))
                ;; Back up current module bindings
                (backup (backup-module m initial-symbols))
                ;; Define capabilities
@@ -405,27 +413,26 @@
                             (if (safe-path? validated)
                                 (read-file validated)
                                 (if perm-handler
-                                    (if (perm-handler `(read-file ,validated))
-                                        (read-file validated)
-                                        (throw 'user-interrupt))
+                                    (begin
+                                      (handle-perm-response (perm-handler `(read-file ,validated)))
+                                      (read-file validated))
                                     (error "Permission Denied: No permission handler registered for dangerous operation"))))))
                   (cons 'write-file
                         (lambda (path content)
                           (let ((validated (validate-path path)))
                             (if perm-handler
-                                (if (perm-handler `(write-file ,validated ,content))
-                                    (write-file validated content)
-                                    (throw 'user-interrupt))
+                                (begin
+                                  (handle-perm-response (perm-handler `(write-file ,validated ,content)))
+                                  (write-file validated content))
                                 (error "Permission Denied: No permission handler registered for dangerous operation")))))
                   (cons 'delete-file
                         (lambda (path)
                           (let ((validated (validate-path path)))
                             (if perm-handler
-                                (if (perm-handler `(delete-file ,validated))
-                                    (begin
-                                      (delete-file validated)
-                                      (string-append "Deleted file: " validated))
-                                    (throw 'user-interrupt))
+                                (begin
+                                  (handle-perm-response (perm-handler `(delete-file ,validated)))
+                                  (delete-file validated)
+                                  (string-append "Deleted file: " validated))
                                 (error "Permission Denied: No permission handler registered for dangerous operation")))))
                   (cons 'list-files
                         (lambda (path)
@@ -433,9 +440,9 @@
                             (if (safe-path? validated)
                                 (list-files validated)
                                 (if perm-handler
-                                    (if (perm-handler `(list-files ,validated))
-                                        (list-files validated)
-                                        (throw 'user-interrupt))
+                                    (begin
+                                      (handle-perm-response (perm-handler `(list-files ,validated)))
+                                      (list-files validated))
                                     (error "Permission Denied: No permission handler registered for dangerous operation"))))))
                   ;; Process Capability (process-cap)
                   (cons 'run-command
@@ -454,55 +461,55 @@
                                       (close-pipe pipe)
                                       out)))
                                 (if perm-handler
-                                    (if (perm-handler `(run-command ,cmd))
-                                        (catch #t
-                                          (lambda ()
-                                            (let ((res (run-in-sandbox cmd)))
-                                              (if (string-contains res "guix shell:")
-                                                  (error "Guix container failed")
-                                                  res)))
-                                          (lambda _
-                                            (let* ((pipe (open-pipe (string-append cmd " 2>&1") OPEN_READ))
-                                                   (out (read-string pipe)))
-                                              (close-pipe pipe)
-                                              out)))
-                                        (throw 'user-interrupt))
+                                    (begin
+                                      (handle-perm-response (perm-handler `(run-command ,cmd)))
+                                      (catch #t
+                                        (lambda ()
+                                          (let ((res (run-in-sandbox cmd)))
+                                            (if (string-contains res "guix shell:")
+                                                (error "Guix container failed")
+                                                res)))
+                                        (lambda _
+                                          (let* ((pipe (open-pipe (string-append cmd " 2>&1") OPEN_READ))
+                                                 (out (read-string pipe)))
+                                            (close-pipe pipe)
+                                            out))))
                                     (error "Permission Denied: No permission handler registered for dangerous operation"))))))
                   (cons 'system
                         (lambda (cmd)
                           (if perm-handler
-                              (if (perm-handler `(system ,cmd))
-                                  (let* ((pipe (open-pipe (string-append cmd " 2>&1") OPEN_READ))
-                                         (out (read-string pipe)))
-                                    (close-pipe pipe)
-                                    out)
-                                  (throw 'user-interrupt))
+                              (begin
+                                (handle-perm-response (perm-handler `(system ,cmd)))
+                                (let* ((pipe (open-pipe (string-append cmd " 2>&1") OPEN_READ))
+                                       (out (read-string pipe)))
+                                  (close-pipe pipe)
+                                  out))
                               (error "Permission Denied: No permission handler registered for dangerous operation"))))
                   (cons 'system*
                         (lambda args
                           (let ((cmd (string-join (map (lambda (a) (format #f "~a" a)) args) " ")))
                             (if perm-handler
-                                (if (perm-handler `(system* ,cmd))
-                                    (let* ((pipe (open-pipe (string-append cmd " 2>&1") OPEN_READ))
-                                           (out (read-string pipe)))
-                                      (close-pipe pipe)
-                                      out)
-                                    (throw 'user-interrupt))
+                                (begin
+                                  (handle-perm-response (perm-handler `(system* ,cmd)))
+                                  (let* ((pipe (open-pipe (string-append cmd " 2>&1") OPEN_READ))
+                                         (out (read-string pipe)))
+                                    (close-pipe pipe)
+                                    out))
                                 (error "Permission Denied: No permission handler registered for dangerous operation")))))
                   (cons 'run-in-sandbox
                         (lambda (cmd)
                           (if perm-handler
-                              (if (perm-handler `(run-in-sandbox ,cmd))
-                                  (run-in-sandbox cmd)
-                                  (throw 'user-interrupt))
+                              (begin
+                                (handle-perm-response (perm-handler `(run-in-sandbox ,cmd)))
+                                (run-in-sandbox cmd))
                               (error "Permission Denied: No permission handler registered for dangerous operation"))))
                   ;; Python Polyglot Capability (python-cap)
                   (cons 'run-python
                         (lambda (py-code)
                           (if perm-handler
-                              (if (perm-handler `(run-python ,py-code))
-                                  (run-python-in-sandbox sandbox py-code)
-                                  (throw 'user-interrupt))
+                              (begin
+                                (handle-perm-response (perm-handler `(run-python ,py-code)))
+                                (run-python-in-sandbox sandbox py-code))
                               (error "Permission Denied: No permission handler registered for dangerous operation"))))
                   ;; Search capabilities
                   (cons 'search-file
@@ -511,9 +518,9 @@
                             (if (safe-path? validated)
                                 (search-file pattern validated)
                                 (if perm-handler
-                                    (if (perm-handler `(search-file ,pattern ,validated))
-                                        (search-file pattern validated)
-                                        (throw 'user-interrupt))
+                                    (begin
+                                      (handle-perm-response (perm-handler `(search-file ,pattern ,validated)))
+                                      (search-file pattern validated))
                                     (error "Permission Denied: No permission handler registered for dangerous operation"))))))
                   (cons 'search-guile-manual search-guile-manual)
                   (cons 'run-sed
@@ -522,9 +529,9 @@
                             (if (safe-path? validated)
                                 (run-sed expression validated)
                                 (if perm-handler
-                                    (if (perm-handler `(run-sed ,expression ,validated))
-                                        (run-sed expression validated)
-                                        (throw 'user-interrupt))
+                                    (begin
+                                      (handle-perm-response (perm-handler `(run-sed ,expression ,validated)))
+                                      (run-sed expression validated))
                                     (error "Permission Denied: No permission handler registered for dangerous operation"))))))
                   (cons 'run-awk
                         (lambda (program path)
@@ -532,9 +539,9 @@
                             (if (safe-path? validated)
                                 (run-awk program validated)
                                 (if perm-handler
-                                    (if (perm-handler `(run-awk ,program ,validated))
-                                        (run-awk program validated)
-                                        (throw 'user-interrupt))
+                                    (begin
+                                      (handle-perm-response (perm-handler `(run-awk ,program ,validated)))
+                                      (run-awk program validated))
                                     (error "Permission Denied: No permission handler registered for dangerous operation"))))))
                   (cons 'file-info
                         (lambda (path)
@@ -542,9 +549,9 @@
                             (if (safe-path? validated)
                                 (file-info validated)
                                 (if perm-handler
-                                    (if (perm-handler `(file-info ,validated))
-                                        (file-info validated)
-                                        (throw 'user-interrupt))
+                                    (begin
+                                      (handle-perm-response (perm-handler `(file-info ,validated)))
+                                      (file-info validated))
                                     (error "Permission Denied: No permission handler registered for dangerous operation"))))))
                   (cons 'guile-syntax-check guile-syntax-check)
                   ;; Git capabilities
@@ -571,18 +578,18 @@
                                    (if (safe-path? validated)
                                        (read-file validated)
                                        (if perm-handler
-                                           (if (perm-handler `(read-file ,validated))
-                                               (read-file validated)
-                                               (throw 'user-interrupt))
+                                           (begin
+                                             (handle-perm-response (perm-handler `(read-file ,validated)))
+                                             (read-file validated))
                                            (error "Permission Denied: No permission handler registered for dangerous operation")))))
                                paths)))
                   (cons 'patch-file
                         (lambda (path old-string new-string)
                           (let ((validated (validate-path path)))
                             (if perm-handler
-                                (if (perm-handler `(write-file ,validated ,(string-append "Patch file: replace " old-string " with " new-string)))
-                                    (patch-file validated old-string new-string)
-                                    (throw 'user-interrupt))
+                                (begin
+                                  (handle-perm-response (perm-handler `(write-file ,validated ,(string-append "Patch file: replace " old-string " with " new-string))))
+                                  (patch-file validated old-string new-string))
                                 (error "Permission Denied: No permission handler registered for dangerous operation")))))
                   (cons 'map-files
                         (lambda (dir pattern proc)
@@ -590,9 +597,9 @@
                             (if (safe-path? validated)
                                 (map-files validated pattern proc)
                                 (if perm-handler
-                                    (if (perm-handler `(map-files ,validated))
-                                        (map-files validated pattern proc)
-                                        (throw 'user-interrupt))
+                                    (begin
+                                      (handle-perm-response (perm-handler `(map-files ,validated)))
+                                      (map-files validated pattern proc))
                                     (error "Permission Denied: No permission handler registered for dangerous operation"))))))
                  )))
 
@@ -615,14 +622,16 @@
                      (final-output (if (and (not is-wisp?) (> (car (analyze-parentheses code-string)) 0))
                                        (string-append "[Auto-healed " (number->string (car (analyze-parentheses code-string))) " missing parentheses]\n" output)
                                        output)))
-                (close-port output-port)
-                (list 'ok final-output)))
+                 (close-port output-port)
+                 (list 'ok final-output)))
             (lambda (key . args)
               ;; Automatic rollback (restore the module state to backup!)
               (restore-module! m initial-symbols backup)
               (cond
                ((eq? key 'user-interrupt)
                 (apply throw key args))
+               ((eq? key 'permission-denied)
+                (list 'error 'permission (car args)))
                ((eq? key 'syntax-error)
                 (match args
                   ((subr msg loc expr . rest)

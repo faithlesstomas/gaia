@@ -92,6 +92,10 @@
          (formatted (replace-regexp-in-string "\\bnil\\b" "#f" serialized))
          (formatted (replace-regexp-in-string "\\bt\\b" "#t" formatted))
          (msg (concat formatted "\n")))
+    ;; Write to debug log file
+    (with-temp-buffer
+      (insert (format "[%s] SENT: %s" (format-time-string "%Y-%m-%d %H:%M:%S") msg))
+      (write-region (point-min) (point-max) "/home/tomasz/scratch/AI/gaia/test-output.txt" t 'silent))
     (process-send-string gaia-connection-process msg)))
 
 (defun gaia-connection--process-filter (_proc string)
