@@ -219,7 +219,7 @@
               (let* ((sandbox-actor (spawn ^repl-sandbox session-id event-sink permission-sink history))
                      (llm-client (spawn ^llm-client session-vat))
                      (agent-actor (spawn ^agent-actor session-id sandbox-actor llm-client event-sink permission-sink)))
-                (spawn ^session-orchestrator session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history)))))
+                (spawn ^session-orchestrator session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history (get-config 'model) (get-config 'thinking))))))
       (gaia-log (format #f "[SERVER] Session initialized (Goblins Vat): ~a" session-id))
       (with-output-to-file ".last_session" (lambda () (display session-id)))
       (let loop ()

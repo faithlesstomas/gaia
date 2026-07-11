@@ -30,9 +30,13 @@
 
 (define (send-event client-socket event)
   "Write an S-expression event to client, flushing immediately."
-  (write event client-socket)
-  (newline client-socket)
-  (force-output client-socket))
+  (when (and client-socket (not (port-closed? client-socket)))
+    (catch #t
+      (lambda ()
+        (write event client-socket)
+        (newline client-socket)
+        (force-output client-socket))
+      (lambda _ #f))))
 
 (define (save-session session-id history)
   (unless (file-exists? "sessions")

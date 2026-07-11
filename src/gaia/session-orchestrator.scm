@@ -29,11 +29,11 @@
   (spawn-promise-and-resolver))
 
 ;; Session Orchestrator Actor
-(define-actor (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history)
+(define-actor (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model thinking)
   #:self self
   (methods
    [(update-history new-history)
-    (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client new-history) 'ok)]
+    (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client new-history model thinking) 'ok)]
 
    [(handle-message msg)
     (match msg
@@ -51,9 +51,9 @@
       (('eval task)
        (gaia-log (format #f "[SERVER] Received prompt: ~a" task))
        (let* ((event-sink (lambda (event) (send-event client-socket event)))
-              (chat-promise (<- llm-client 'chat session-id task (get-config 'model)
+              (chat-promise (<- llm-client 'chat session-id task model
                                 (or (get-config 'system-prompt) SYSTEM_PROMPT)
-                                (get-config 'thinking) history event-sink)))
+                                thinking history event-sink)))
          (on chat-promise
              (lambda (response)
                (let* ((payload (assoc-ref response "payload"))
@@ -92,7 +92,7 @@
                                                              (cons "assistant" (truncate-for-transcript response-text))
                                                              (cons "user" task))))
                                  (let-values (((solve-promise resolve-solve) (new-promise-pair)))
-                                   (<- agent-actor 'solve-step task 0 history step-history 2 step-transcript result-str resolve-solve)
+                                   (<- agent-actor 'solve-step task 0 history step-history 2 step-transcript result-str resolve-solve model thinking)
                                    (on solve-promise
                                        (lambda (res-pair)
                                          (let ((answer (car res-pair))
@@ -170,36 +170,43 @@
               (new-sb-actor (spawn ^repl-sandbox session-id event-sink permission-sink '()))
               (new-agent-actor (spawn ^agent-actor session-id new-sb-actor llm-client event-sink permission-sink)))
          (send-event client-socket '(final "Environment and history cleared."))
-         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client '()) 'ok)))
+         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client '() model thinking) 'ok)))
 
       (('get-model)
-       (send-event client-socket `(model-info ,(get-config 'model))))
+       (send-event client-socket `(model-info ,model)))
 
       (('set-model new-model)
-       (gaia-log (format #f "[SERVER] Hot-swapping model to: ~a" new-model))
-       (set-config! 'model new-model)
-       (send-event client-socket `(final ,(string-append "Model switched to: " new-model))))
+       (let ((new-model-str (format #f "~a" new-model)))
+         (gaia-log (format #f "[SERVER] Hot-swapping model to: ~a" new-model-str))
+         (send-event client-socket `(final ,(string-append "Model switched to: " new-model-str)))
+         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history new-model-str thinking) 'ok)))
 
       (('list-models)
-       (let ((models '("gemma4:e2b" "gpt-4o" "claude-3.5-sonnet" "ollama/llama3" "local/ministral")))
-         (send-event client-socket `(models-list ,models))))
+       (let ((models-promise (<- llm-client 'get-models)))
+         (on models-promise
+             (lambda (models)
+               (if (and (list? models) (not (null? models)) (string? (car models)))
+                   (send-event client-socket `(models-list ,models))
+                   (send-event client-socket `(models-list '("gemma4:e2b" "gemma4:e4b" "gemini-2.0-flash" "gpt-4o" "claude-3.5-sonnet")))))
+             #:catch (lambda (err)
+                       (send-event client-socket `(models-list '("gemma4:e2b" "gemma4:e4b" "gemini-2.0-flash" "gpt-4o" "claude-3.5-sonnet")))))))
 
       (('get-thinking)
-       (let ((thinking (if (get-config 'thinking) "on" "off")))
-         (send-event client-socket `(thinking-info ,thinking))))
+       (let ((thinking-str (if thinking "on" "off")))
+         (send-event client-socket `(thinking-info ,thinking-str))))
 
       (('set-thinking state)
        (gaia-log (format #f "[SERVER] Set thinking mode to: ~a" state))
        (let* ((on? (or (eq? state #t) (string=? (format #f "~a" state) "on"))))
-         (set-config! 'thinking on?)
-         (send-event client-socket `(final ,(string-append "Thinking mode set to: " (if on? "on" "off"))))))
+         (send-event client-socket `(final ,(string-append "Thinking mode set to: " (if on? "on" "off"))))
+         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model on?) 'ok)))
 
       (('ask query)
        (gaia-log (format #f "[SERVER] Received direct ASK request: ~a" query))
        (let* ((event-sink (lambda (event) (send-event client-socket event)))
-              (chat-promise (<- llm-client 'chat session-id query (get-config 'model)
+              (chat-promise (<- llm-client 'chat session-id query model
                                 "You are a helpful Guile Scheme expert."
-                                (get-config 'thinking) history event-sink)))
+                                thinking history event-sink)))
          (on chat-promise
              (lambda (response)
                (let* ((payload (assoc-ref response "payload"))
@@ -224,7 +231,7 @@
                     (new-agent-actor (spawn ^agent-actor new-id new-sb-actor llm-client event-sink permission-sink)))
                (with-output-to-file ".last_session" (lambda () (display new-id)))
                (send-event client-socket `(final ,(string-append "Session switched to: " new-id)))
-               (bcom (^session-orchestrator bcom new-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client new-history) 'ok)))))
+               (bcom (^session-orchestrator bcom new-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client new-history model thinking) 'ok)))))
 
       (('list-sessions)
        (let ((sessions (if (file-exists? "sessions")

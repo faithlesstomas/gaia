@@ -92,17 +92,46 @@
                   ((current-<-np-extern) resolver 'fulfill res))
                  (('error err)
                   ((current-<-np-extern) resolver 'fulfill `(("error" . ,err))))))))))
+      promo)]
+   [(get-models)
+    (let-values (((promo resolver) (spawn-promise-and-resolver)))
+      (let ((channel (make-channel)))
+        (call-with-new-thread
+         (lambda ()
+           (parameterize ((current-read-waiter (@@ (ice-9 suspendable-ports) default-read-waiter))
+                          (current-write-waiter (@@ (ice-9 suspendable-ports) default-write-waiter)))
+             (catch #t
+               (lambda ()
+                 (let ((res (get-models)))
+                   (put-message channel `(done ,res))))
+               (lambda (key . args)
+                 (put-message channel `(error ,(format #f "~s ~s" key args))))))))
+        (spawn-fiber
+         (lambda ()
+           (clear-goblins-context!)
+           (let loop ()
+             (let ((msg (get-message channel)))
+               (match msg
+                 (('done res)
+                  ((current-<-np-extern) resolver 'fulfill res))
+                 (('error err)
+                  ((current-<-np-extern) resolver 'fulfill `(("error" . ,err))))
+                 (_ (loop))))))))
       promo)]))
 
 ;; Agent Actor (Recursive Language Model Loop)
 (define-actor (^agent-actor bcom session-id sandbox llm-client event-handler permission-handler)
   #:self self
   (methods
-   [(solve task depth current-history resolve-promise)
-    (<- self 'solve-step task depth current-history current-history 1 '() task resolve-promise)
+   [(solve task depth current-history resolve-promise . optional-args)
+    (define model (if (null? optional-args) (get-config 'model) (car optional-args)))
+    (define thinking (if (or (null? optional-args) (null? (cdr optional-args))) (get-config 'thinking) (cadr optional-args)))
+    (<- self 'solve-step task depth current-history current-history 1 '() task resolve-promise model thinking)
     'ok]
 
-   [(solve-step task depth outer-history history step transcript last-output resolve-promise)
+   [(solve-step task depth outer-history history step transcript last-output resolve-promise . optional-args)
+    (define model (if (null? optional-args) (get-config 'model) (car optional-args)))
+    (define thinking (if (or (null? optional-args) (null? (cdr optional-args))) (get-config 'thinking) (cadr optional-args)))
     (check-interrupt!)
     (if (> depth MAX-RECURSION-DEPTH)
         (begin
@@ -128,7 +157,7 @@
                     (let-values (((sub-promise resolve-sub) (new-promise-pair)))
                       (<- sub-agent 'solve
                           (format #f "The main agent has encountered ~a consecutive errors. Last output: ~a. Diagnose the issue and write Scheme code to fix it." err-count last-output)
-                          (+ depth 1) '() resolve-sub)
+                          (+ depth 1) '() resolve-sub model thinking)
                       (on sub-promise
                           (lambda (sub-res-pair)
                             (let* ((sub-ans (car sub-res-pair))
@@ -137,7 +166,7 @@
                               (<- self 'solve-step task depth outer-history
                                   (append history (list `(("role" . "user") ("content" . "Diagnostic sub-agent ran to debug consecutive errors."))
                                                         `(("role" . "assistant") ("content" . ,sub-ans))))
-                                  (+ step 1) transcript formatted-sub-output resolve-promise)))
+                                  (+ step 1) transcript formatted-sub-output resolve-promise model thinking)))
                           #:catch (lambda (err)
                                     (let ((err-str (format #f "Failed with consecutive errors, diagnostic sub-agent also failed: ~a" err)))
                                       (when event-handler (event-handler `(repl-error ,err-str)))
@@ -146,10 +175,10 @@
                        (stream-callback (lambda (evt)
                                           (when event-handler
                                             (event-handler evt)))))
-                  (let ((chat-promise (<- llm-client 'chat session-id prompt (get-config 'model)
-                                          (or (get-config 'system-prompt) SYSTEM_PROMPT)
-                                          (get-config 'thinking) history stream-callback
-                                          "user")))
+                  (let ((chat-promise (<- llm-client 'chat session-id prompt model
+                                           (or (get-config 'system-prompt) SYSTEM_PROMPT)
+                                           thinking history stream-callback
+                                           "user")))
                     (on chat-promise
                         (lambda (response)
                           (let* ((payload (assoc-ref response "payload"))
@@ -197,7 +226,7 @@
                                                       (spawn ^repl-sandbox sub-session-id event-handler permission-handler '())
                                                       llm-client event-handler permission-handler))))
                                        (let-values (((sub-promise resolve-sub) (new-promise-pair)))
-                                         (<- sub-agent 'solve goal (+ depth 1) '() resolve-sub)
+                                         (<- sub-agent 'solve goal (+ depth 1) '() resolve-sub model thinking)
                                          (on sub-promise
                                              (lambda (sub-res-pair)
                                                (let* ((sub-ans (car sub-res-pair))
@@ -215,19 +244,19 @@
                                                      (<- self 'solve-step task depth outer-history
                                                          (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                                `(("role" . "assistant") ("content" . ,response-text))))
-                                                         (+ step 1) updated-transcript formatted-sub-output resolve-promise))))
+                                                         (+ step 1) updated-transcript formatted-sub-output resolve-promise model thinking))))
                                              #:catch (lambda (err)
                                                        (let ((err-str (format #f "[System Error]:\nSub-agent failed: ~a" err)))
                                                          (when event-handler (event-handler `(repl-error ,err-str)))
                                                          (<- self 'solve-step task depth outer-history
                                                              (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                                    `(("role" . "assistant") ("content" . ,response-text))))
-                                                             (+ step 1) updated-transcript err-str resolve-promise)))))))
+                                                             (+ step 1) updated-transcript err-str resolve-promise model thinking)))))))
                                     (_
                                      (<- self 'solve-step task depth outer-history
                                          (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                `(("role" . "assistant") ("content" . ,response-text))))
-                                         (+ step 1) updated-transcript "[System Error]:\nInvalid delegation format. Use (delegate \"Goal\" \"Context\")" resolve-promise))))
+                                         (+ step 1) updated-transcript "[System Error]:\nInvalid delegation format. Use (delegate \"Goal\" \"Context\")" resolve-promise model thinking))))
 
                                  ;; Case B: Code execution
                                  (action-code
@@ -245,7 +274,7 @@
                                                    (<- self 'solve-step task depth outer-history
                                                        (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                              `(("role" . "assistant") ("content" . ,response-text))))
-                                                       (+ step 1) updated-transcript (string-append "[System REPL Output]:\nCode executed successfully. Result:\n" result) resolve-promise))
+                                                       (+ step 1) updated-transcript (string-append "[System REPL Output]:\nCode executed successfully. Result:\n" result) resolve-promise model thinking))
                                                   (('error type msg)
                                                    (let ((feedback (string-append "[System Error]:\nRuntime Error (" (symbol->string type) "): " msg)))
                                                      (when event-handler (event-handler `(repl-error ,feedback)))
@@ -253,14 +282,14 @@
                                                      (<- self 'solve-step task depth outer-history
                                                          (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                                `(("role" . "assistant") ("content" . ,response-text))))
-                                                         (+ step 1) updated-transcript feedback resolve-promise)))))
+                                                         (+ step 1) updated-transcript feedback resolve-promise model thinking)))))
                                               #:catch (lambda (err)
                                                         (let ((err-str (format #f "[System Error]:\nSandbox evaluation crash: ~a" err)))
                                                           (when event-handler (event-handler `(repl-error ,err-str)))
                                                           (<- self 'solve-step task depth outer-history
                                                               (append history (list `(("role" . "user") ("content" . ,last-output))
                                                                                     `(("role" . "assistant") ("content" . ,response-text))))
-                                                              (+ step 1) updated-transcript err-str resolve-promise))))))
+                                                              (+ step 1) updated-transcript err-str resolve-promise model thinking))))))
                                       (let* ((loop-steps (drop history (length outer-history)))
                                              (clean-history (append outer-history
                                                                     (list `(("role" . "user") ("content" . ,task))

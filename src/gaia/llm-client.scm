@@ -144,13 +144,39 @@ Returns (response-header . response-body) or throws 'user-interrupt."
            (set! buffer ""))
          (stream-callback event))))))
 
-(define (model-supports-thinking? model)
-  "Checks if a model name indicates it supports reasoning output."
+(define (model-is-cloud-reasoning? model)
+  (let ((m (string-downcase model)))
+    (or (string-contains m "gemini")
+        (string-contains m "claude"))))
+
+(define (model-is-local-reasoning? model)
   (let ((m (string-downcase model)))
     (or (string-contains m "think")
         (string-contains m "r1")
         (string-contains m "gemma4")
         (string-contains m "reasoning"))))
+
+(define (model-supports-thinking? model)
+  "Checks if a model name indicates it supports reasoning output."
+  (or (model-is-cloud-reasoning? model)
+      (model-is-local-reasoning? model)))
+
+(define (get-thinking-fields model think)
+  "Return list of association pairs for thinking parameters based on the model and toggle state."
+  (cond
+   ((model-is-cloud-reasoning? model)
+    (if think
+        `(("reasoning_effort" . "medium")
+          ("thinking" . (("type" . "enabled") ("budget_tokens" . 2048) ("budget" . 2048)))
+          ("allowed_openai_params" . #("reasoning_effort" "thinking")))
+        `(("reasoning_effort" . "none")
+          ("thinking" . (("type" . "disabled") ("budget_tokens" . 0) ("budget" . 0)))
+          ("allowed_openai_params" . #("reasoning_effort" "thinking")))))
+   ((model-is-local-reasoning? model)
+    `(("think" . ,think)
+      ("allowed_openai_params" . #("think"))))
+   (else
+    '())))
 
 (define (clean-history-for-llm history)
   "Strips extra fields like trajectory from the history turns and normalizes user-repl role for LLM compatibility."
@@ -175,9 +201,7 @@ Returns (response-header . response-body) or throws 'user-interrupt."
          (body-fields `(("model" . ,model)
                         ("messages" . ,(list->vector messages-list))
                         ("stream" . ,(if stream-callback #t #f))))
-         (body-fields (if (model-supports-thinking? model)
-                          (append body-fields `(("think" . ,think)))
-                          body-fields))
+         (body-fields (append body-fields (get-thinking-fields model think)))
          (body (scm->json body-fields))
          (headers '((content-type . (application/json)))))
     (if stream-callback

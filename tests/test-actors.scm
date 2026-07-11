@@ -23,9 +23,13 @@
   `(("payload" . (("content" . "Hello! I am a mocked response.")
                   ("reasoning" . "Thinking...")))))
 
+(define (get-models-mock)
+  '("gemma4:e2b" "gpt-4o"))
+
 (let ((mod (resolve-module '(gaia llm-client) #:ensure #f)))
   (when mod
-    (module-set! mod 'chat-with-llm chat-with-llm-mock)))
+    (module-set! mod 'chat-with-llm chat-with-llm-mock)
+    (module-set! mod 'get-models get-models-mock)))
 
 
 ;; --- 1. Test repl-sandbox actor ---
@@ -191,31 +195,28 @@
          (set! sandbox-actor (spawn ^repl-sandbox "session-orch-test" (lambda (evt) #t) (lambda (expr) #t) '()))
          (set! llm-client (spawn ^llm-client session-vat))
          (set! agent-actor (spawn ^agent-actor "session-orch-test" sandbox-actor llm-client (lambda (evt) #t) (lambda (expr) #t)))
-         (set! orchestrator (spawn ^session-orchestrator "session-orch-test" mock-socket channel (lambda (expr) #t) sandbox-actor agent-actor llm-client '())))
+         (set! orchestrator (spawn ^session-orchestrator "session-orch-test" mock-socket channel (lambda (expr) #t) sandbox-actor agent-actor llm-client '() "gemma4:e2b" #t)))
 
        (with-vat session-vat
-         ;; 1. Test handle-message: get-model
          (<- orchestrator 'handle-message '(get-model))
-         ;; 2. Test handle-message: set-model
          (<- orchestrator 'handle-message '(set-model "gemma4-think"))
-         ;; 3. Test handle-message: list-models
          (<- orchestrator 'handle-message '(list-models))
-         ;; 4. Test handle-message: get-thinking
          (<- orchestrator 'handle-message '(get-thinking))
-         ;; 5. Test handle-message: set-thinking
          (<- orchestrator 'handle-message '(set-thinking "on"))
-         ;; 6. Test handle-message: interrupt
          (<- orchestrator 'handle-message 'interrupt)
-         ;; 7. Test handle-message: get-history
-         (on (<- orchestrator 'handle-message '(get-history))
-             (lambda (_)
-               (set! output-val (get-output-string mock-socket))
-               (<- orchestrator 'handle-message 'eof)
-               (set! done? #t))))
+         (<- orchestrator 'handle-message '(get-history)))
        (let loop ()
-         (unless done?
-           (sleep 0.01)
-           (loop))))
+         (set! output-val (get-output-string mock-socket))
+         (if (and (string-contains output-val "model-info")
+                  (string-contains output-val "models-list")
+                  (string-contains output-val "thinking-info")
+                  (string-contains output-val "history-list"))
+             (with-vat session-vat
+               (on (<- orchestrator 'handle-message 'eof)
+                   (lambda (_) (set! done? #t))))
+             (begin
+               (sleep 0.01)
+               (loop)))))
      #:drain? #t)
     (and (port-closed? mock-socket)
          (string-contains output-val "model-info")
@@ -498,11 +499,15 @@
                           (<-np resolver 'fulfill
                                 `(("payload" . (("content" . "Mocked answer")
                                                 ("reasoning" . "Thinking...")))))
-                          promo)]))))
+                          promo)]
+                        [(get-models)
+                         (let-values (((promo resolver) (spawn-promise-and-resolver)))
+                           (<-np resolver 'fulfill '("gemma4:e2b" "gpt-4o"))
+                           promo)]))))
                  (agent (spawn ^agent-actor "direct-orch-session" sandbox mock-llm (lambda _ #t) (lambda _ #t)))
                  (mock-socket (open-output-string))
                  (mock-channel #f)
-                 (orch (spawn ^session-orchestrator "direct-orch-session" mock-socket mock-channel (lambda (expr) #t) sandbox agent mock-llm '())))
+                 (orch (spawn ^session-orchestrator "direct-orch-session" mock-socket mock-channel (lambda (expr) #t) sandbox agent mock-llm '() "gemma4:e2b" #t)))
             
             (test-assert "direct-orchestrator: handle-message commands"
               (begin

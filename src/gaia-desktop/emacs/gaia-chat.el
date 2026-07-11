@@ -94,6 +94,8 @@
 (defun gaia-chat-send ()
   "Send the text written after the prompt to the GAIA server."
   (interactive)
+  (unless (derived-mode-p 'gaia-mode)
+    (user-error "This command can only be used in a GAIA Chat buffer"))
   (let* ((buf (gaia-chat-buffer))
          (prompt-pos (with-current-buffer buf
                        (save-excursion
@@ -129,6 +131,8 @@
 (defun gaia-chat-interrupt ()
   "Interrupt the active GAIA agent."
   (interactive)
+  (unless (derived-mode-p 'gaia-mode)
+    (user-error "This command can only be used in a GAIA Chat buffer"))
   (when (gaia-connected-p)
     (gaia-send '(interrupt))
     (message "Sent interrupt to GAIA server.")))
@@ -136,12 +140,17 @@
 (defun gaia-chat-clear ()
   "Clear current environment and history."
   (interactive)
+  (unless (derived-mode-p 'gaia-mode)
+    (user-error "This command can only be used in a GAIA Chat buffer"))
   (when (gaia-connected-p)
     (gaia-send '(clear))
     (message "Cleared GAIA history.")))
 
 (defvar gaia-chat--pending-sessions nil
   "Stash for active session list retrieved from server.")
+
+(defvar gaia-chat--pending-thinking nil
+  "Stash for active thinking mode retrieved from server.")
 
 (defun gaia-chat-switch-session ()
   "Switch to another session ID by listing server sessions."
@@ -172,6 +181,126 @@
               (gaia-send `(session ,chosen))
               (gaia-send '(get-history))
               (message "Restored session %s" chosen))))))))
+
+(defun gaia-chat--ensure-connected ()
+  "Ensure process is connected and the session ID is initialized on the server."
+  (unless (gaia-connected-p)
+    (gaia-connect)
+    ;; Send session command immediately
+    (gaia-send `(session ,gaia-chat--session-id))
+    ;; Accept output to let socket process the queue
+    (accept-process-output gaia-connection-process 0.1)))
+
+(defvar gaia-chat--pending-config nil
+  "Stash for synchronous config operation results.")
+
+(defun gaia-chat--send-config-cmd (sexp)
+  "Send config SEXP to the GAIA server and wait silently for the final response."
+  (gaia-chat--ensure-connected)
+  (setq gaia-chat--pending-config 'waiting)
+  (let* ((old-cell (assoc 'final gaia-connection-handlers))
+         (old-handler (and old-cell (cdr old-cell))))
+    ;; Temporarily override 'final handler to capture the response silently
+    (gaia-connection-register-handler
+     'final
+     (lambda (val)
+       (setq gaia-chat--pending-config val)))
+    (unwind-protect
+        (progn
+          (gaia-send sexp)
+          ;; Wait for response
+          (let ((start-time (float-time)))
+            (while (and (eq gaia-chat--pending-config 'waiting)
+                        (< (- (float-time) start-time) 5))
+              (accept-process-output gaia-connection-process 0.05)))
+          (if (eq gaia-chat--pending-config 'waiting)
+              (error "Configuration command timed out: %S" sexp)
+            (message "%s" gaia-chat--pending-config)))
+      ;; Restore original handler
+      (if old-cell
+          (setcdr old-cell old-handler)
+        (gaia-connection-unregister-handler 'final)))))
+
+(defun gaia-chat-toggle-thinking ()
+  "Toggle model thinking mode on the GAIA server."
+  (interactive)
+  (unless (derived-mode-p 'gaia-mode)
+    (user-error "This command can only be used in a GAIA Chat buffer"))
+  (gaia-chat--ensure-connected)
+  (setq gaia-chat--pending-thinking 'waiting)
+  (gaia-send '(get-thinking))
+  ;; Wait for server response
+  (let ((start-time (float-time)))
+    (while (and (eq gaia-chat--pending-thinking 'waiting)
+                (< (- (float-time) start-time) 5))
+      (accept-process-output gaia-connection-process 0.05)))
+  (if (eq gaia-chat--pending-thinking 'waiting)
+      (error "Failed to retrieve thinking mode from server")
+    (let* ((current-state gaia-chat--pending-thinking)
+           (new-state (if (string= current-state "on") "off" "on")))
+      (gaia-chat--send-config-cmd `(set-thinking ,new-state)))))
+
+(defun gaia-chat-set-thinking (state)
+  "Set model thinking mode to STATE (on or off) on the GAIA server."
+  (interactive
+   (progn
+     (unless (derived-mode-p 'gaia-mode)
+       (user-error "This command can only be used in a GAIA Chat buffer"))
+     (list (completing-read "Set model thinking mode: " '("on" "off") nil t))))
+  (unless (derived-mode-p 'gaia-mode)
+    (user-error "This command can only be used in a GAIA Chat buffer"))
+  (if (not (member state '("on" "off")))
+      (error "Invalid state: %s. Must be 'on' or 'off'" state)
+    (gaia-chat--send-config-cmd `(set-thinking ,state))))
+
+(defun gaia-chat-check-thinking ()
+  "Check the current model thinking mode on the GAIA server."
+  (interactive)
+  (unless (derived-mode-p 'gaia-mode)
+    (user-error "This command can only be used in a GAIA Chat buffer"))
+  (gaia-chat--ensure-connected)
+  (setq gaia-chat--pending-thinking 'waiting)
+  (gaia-send '(get-thinking))
+  ;; Wait for server response
+  (let ((start-time (float-time)))
+    (while (and (eq gaia-chat--pending-thinking 'waiting)
+                (< (- (float-time) start-time) 5))
+      (accept-process-output gaia-connection-process 0.05)))
+  (if (eq gaia-chat--pending-thinking 'waiting)
+      (error "Failed to retrieve thinking mode from server")
+    (message "GAIA thinking mode is: %s" gaia-chat--pending-thinking)))
+
+(defun gaia-chat--on-thinking-info (state)
+  "Callback when thinking mode is received from server."
+  (setq gaia-chat--pending-thinking state)
+  (message "GAIA thinking mode is %s" state))
+
+(defvar gaia-chat--pending-models nil
+  "Stash for active models list retrieved from server.")
+
+(defun gaia-chat-switch-model ()
+  "Switch the active model on the GAIA server for this session."
+  (interactive)
+  (unless (derived-mode-p 'gaia-mode)
+    (user-error "This command can only be used in a GAIA Chat buffer"))
+  (gaia-chat--ensure-connected)
+  (setq gaia-chat--pending-models 'waiting)
+  (gaia-send '(list-models))
+  ;; Wait for server response
+  (let ((start-time (float-time)))
+    (while (and (eq gaia-chat--pending-models 'waiting)
+                (< (- (float-time) start-time) 5))
+      (accept-process-output gaia-connection-process 0.05)))
+  (if (eq gaia-chat--pending-models 'waiting)
+      (error "Failed to retrieve models list from server")
+    (let* ((models gaia-chat--pending-models)
+           (chosen (completing-read "Select model: " models nil t)))
+      (when (and chosen (not (string-empty-p chosen)))
+        (gaia-chat--send-config-cmd `(set-model ,chosen))))))
+
+(defun gaia-chat--on-models-list (models)
+  "Callback when list of models is received."
+  (setq gaia-chat--pending-models models))
 
 (defun gaia-chat--scroll-to-bottom ()
   "Scroll windows showing GAIA buffer to the bottom."
@@ -378,6 +507,8 @@
 (gaia-connection-register-handler 'repl-result-error #'gaia-chat--on-repl-result-error)
 (gaia-connection-register-handler 'repl-private-result #'gaia-chat--on-repl-private-result)
 (gaia-connection-register-handler 'repl-private-result-error #'gaia-chat--on-repl-private-result-error)
+(gaia-connection-register-handler 'thinking-info #'gaia-chat--on-thinking-info)
+(gaia-connection-register-handler 'models-list #'gaia-chat--on-models-list)
 
 (provide 'gaia-chat)
 ;;; gaia-chat.el ends here
