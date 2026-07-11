@@ -7,6 +7,7 @@
   #:use-module (ice-9 optargs)
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-19)
+  #:use-module (gaia config)
   #:export (list-files
             read-file
             write-file
@@ -28,10 +29,12 @@
             get-kernel-logs
             git-ls-files
             run-in-sandbox
+            guix-container-supported?
             read-files
             patch-file
             map-files
-            find-files))
+            find-files
+            get-workspace-path))
 
 (define (guile-syntax-check code-string)
   "Checks if the Guile Scheme code string has valid syntax (matched parentheses, valid expressions) without evaluating it."
@@ -79,9 +82,13 @@
         (string-append "Written " (number->string (string-length content)) " bytes to " path))))
 
 
+(define (get-workspace-path)
+  (or (*workspace-path*) (getcwd)))
+
 (define (run-cmd-with-output cmd . args)
   "Runs a command and returns its stdout and stderr merged."
-  (let* ((pipe (apply open-pipe* OPEN_READ "sh" "-c" "exec \"$@\" 2>&1" "--" cmd args))
+  (let* ((ws (get-workspace-path))
+         (pipe (apply open-pipe* OPEN_READ "sh" "-c" "cd \"$1\" && shift && exec \"$@\" 2>&1" "--" ws cmd args))
          (output (read-string pipe)))
     (close-pipe pipe)
     (or output "")))
@@ -218,17 +225,19 @@
   *guix-container-supported*)
 
 (define (run-in-sandbox cmd)
-  "Executes a shell command inside an ephemeral Guix container if supported, falling back locally otherwise."
-  (let ((workspace-path (getcwd)))
+  "Executes a shell command inside an ephemeral Guix container if supported, falling back locally only if allowed by configuration."
+  (let ((workspace-path (get-workspace-path)))
     (if (guix-container-supported?)
         (let* ((wrapped-cmd (string-append "cd /workspace && " cmd))
                (res (run-cmd-with-output "guix" "shell" "--container"
-                                         (string-append "--share=" workspace-path "=/workspace")
-                                         "coreutils" "git" "bash" "findutils" "grep" "sed" "gawk" "texinfo" "guile"
-                                         "--" "bash" "-c" wrapped-cmd)))
+                                          (string-append "--share=" workspace-path "=/workspace")
+                                          "coreutils" "git" "bash" "findutils" "grep" "sed" "gawk" "texinfo" "guile"
+                                          "--" "bash" "-c" wrapped-cmd)))
           res)
-        ;; Local fallback since guix shell --container is restricted in this environment
-        (run-cmd-with-output "bash" "-c" (string-append "cd " workspace-path " && " cmd)))))
+        (if (get-config 'allow-sandbox-fallback)
+            ;; Local fallback since guix shell --container is restricted in this environment
+            (run-cmd-with-output "bash" "-c" (string-append "cd " workspace-path " && " cmd))
+            (error "Sandbox Error: guix shell --container is not supported in this environment, and local sandbox fallback is disabled.")))))
 
 (define (string-replace-substring str old new)
   (let ((len (string-length old)))

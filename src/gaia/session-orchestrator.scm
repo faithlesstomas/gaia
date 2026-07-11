@@ -29,11 +29,11 @@
   (spawn-promise-and-resolver))
 
 ;; Session Orchestrator Actor
-(define-actor (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model thinking)
+(define-actor (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model thinking #:optional (workspace-dir #f))
   #:self self
   (methods
    [(update-history new-history)
-    (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client new-history model thinking) 'ok)]
+    (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client new-history model thinking workspace-dir) 'ok)]
 
    [(handle-message msg)
     (match msg
@@ -167,10 +167,10 @@
        (gaia-log (format #f "[SERVER] Clearing session ~a environment and history." session-id))
        (save-session session-id '())
        (let* ((event-sink (lambda (event) (send-event client-socket event)))
-              (new-sb-actor (spawn ^repl-sandbox session-id event-sink permission-sink '()))
+              (new-sb-actor (spawn ^repl-sandbox session-id event-sink permission-sink '() workspace-dir))
               (new-agent-actor (spawn ^agent-actor session-id new-sb-actor llm-client event-sink permission-sink)))
          (send-event client-socket '(final "Environment and history cleared."))
-         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client '() model thinking) 'ok)))
+         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client '() model thinking workspace-dir) 'ok)))
 
       (('get-model)
        (send-event client-socket `(model-info ,model)))
@@ -220,18 +220,20 @@
              #:catch (lambda (err)
                        (send-event client-socket `(error ,(format #f "Ask Error: ~a" err)))))))
 
-      (('session new-id)
-       (if (string-null? new-id)
-           (send-event client-socket `(final ,(string-append "Current session ID: " session-id)))
-           (begin
-             (gaia-log (format #f "[SERVER] Swapping session to: ~a" new-id))
-             (let* ((new-history (load-session new-id))
-                    (event-sink (lambda (event) (send-event client-socket event)))
-                    (new-sb-actor (spawn ^repl-sandbox new-id event-sink permission-sink new-history))
-                    (new-agent-actor (spawn ^agent-actor new-id new-sb-actor llm-client event-sink permission-sink)))
-               (with-output-to-file ".last_session" (lambda () (display new-id)))
-               (send-event client-socket `(final ,(string-append "Session switched to: " new-id)))
-               (bcom (^session-orchestrator bcom new-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client new-history model thinking) 'ok)))))
+      (('session . args)
+       (let* ((new-id (if (null? args) "" (car args)))
+              (new-ws (if (and (not (null? args)) (not (null? (cdr args)))) (cadr args) workspace-dir)))
+         (if (string-null? new-id)
+             (send-event client-socket `(final ,(string-append "Current session ID: " session-id)))
+             (begin
+               (gaia-log (format #f "[SERVER] Swapping session to: ~a" new-id))
+               (let* ((new-history (load-session new-id))
+                      (event-sink (lambda (event) (send-event client-socket event)))
+                      (new-sb-actor (spawn ^repl-sandbox new-id event-sink permission-sink new-history new-ws))
+                      (new-agent-actor (spawn ^agent-actor new-id new-sb-actor llm-client event-sink permission-sink)))
+                 (with-output-to-file ".last_session" (lambda () (display new-id)))
+                 (send-event client-socket `(final ,(string-append "Session switched to: " new-id)))
+                 (bcom (^session-orchestrator bcom new-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client new-history model thinking new-ws) 'ok))))))
 
       (('list-sessions)
        (let ((sessions (if (file-exists? "sessions")

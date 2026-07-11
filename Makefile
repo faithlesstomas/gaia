@@ -1,10 +1,12 @@
 GAIA_LLM_URL ?= http://localhost:4000
 GAIA_MODEL ?= gemma4:e2b
 GAIA_BASE_MODEL ?= gemma4:e2b
+GAIA_ALLOW_SANDBOX_FALLBACK ?= 1
 
 export GAIA_LLM_URL
 export GAIA_MODEL
 export GAIA_BASE_MODEL
+export GAIA_ALLOW_SANDBOX_FALLBACK
 
 .PHONY: run repl check test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-actors test-server test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop clean-trajectories monitor client server
 

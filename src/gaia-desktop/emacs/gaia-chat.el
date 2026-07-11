@@ -119,7 +119,7 @@
               (unless (gaia-connected-p)
                 (gaia-connect)
                 ;; Send session command immediately
-                (gaia-send `(session ,gaia-chat--session-id))
+                (gaia-send `(session ,gaia-chat--session-id ,(expand-file-name default-directory)))
                 ;; Accept output to let socket process the queue
                 (accept-process-output gaia-connection-process 0.1))
               ;; Send command
@@ -178,7 +178,7 @@
               (pop-to-buffer new-buf)
               (unless (gaia-connected-p)
                 (gaia-connect))
-              (gaia-send `(session ,chosen))
+              (gaia-send `(session ,chosen ,(expand-file-name default-directory)))
               (gaia-send '(get-history))
               (message "Restored session %s" chosen))))))))
 
@@ -187,7 +187,7 @@
   (unless (gaia-connected-p)
     (gaia-connect)
     ;; Send session command immediately
-    (gaia-send `(session ,gaia-chat--session-id))
+    (gaia-send `(session ,gaia-chat--session-id ,(expand-file-name default-directory)))
     ;; Accept output to let socket process the queue
     (accept-process-output gaia-connection-process 0.1)))
 

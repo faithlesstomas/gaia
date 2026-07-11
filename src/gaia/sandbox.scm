@@ -8,6 +8,7 @@
   #:use-module (language wisp spec)
   #:use-module (system base language)
   #:use-module (gaia tools)
+  #:use-module (gaia config)
   #:export (make-sandbox
             sandbox-eval
             sandbox-definitions
@@ -19,10 +20,20 @@
             backup-module
             restore-module!))
 
+(define (strip-trailing-slash path)
+  (if (and (string? path)
+           (string-suffix? "/" path)
+           (not (string=? path "/")))
+      (substring path 0 (- (string-length path) 1))
+      path))
+
 (define (safe-path? path)
   (and (not (string-contains path ".."))
        (or (not (string-prefix? "/" path))
-           (string-prefix? (getcwd) path))))
+           (let ((normalized-path (strip-trailing-slash path))
+                 (normalized-ws (strip-trailing-slash (get-workspace-path))))
+             (or (string=? normalized-path normalized-ws)
+                 (string-prefix? (string-append normalized-ws "/") normalized-path))))))
 
 (define (expand-user-path path)
   (if (string? path)
@@ -35,7 +46,15 @@
       path))
 
 (define (validate-path path)
-  (let ((expanded (expand-user-path path)))
+  (let* ((resolved (if (and (string? path)
+                            (not (string-prefix? "/" path))
+                            (not (string-prefix? "~" path)))
+                       (let ((ws (get-workspace-path)))
+                         (if (string-suffix? "/" ws)
+                             (string-append ws path)
+                             (string-append ws "/" path)))
+                       path))
+         (expanded (expand-user-path resolved)))
     (if (and (string? expanded) (string-contains expanded ".."))
         (error "Access Denied: Path outside workspace" path)
         expanded)))
@@ -253,13 +272,14 @@
 
 ;; Sandbox Record holding state with persistent module
 (define-record-type <sandbox>
-  (%make-sandbox module initial-symbols python-process event-handler permission-handler)
+  (%make-sandbox module initial-symbols python-process event-handler permission-handler workspace-dir)
   sandbox?
   (module sandbox-module set-sandbox-module!)
   (initial-symbols sandbox-initial-symbols)
   (python-process sandbox-python-process set-sandbox-python-process!)
   (event-handler sandbox-event-handler)
-  (permission-handler sandbox-permission-handler))
+  (permission-handler sandbox-permission-handler)
+  (workspace-dir sandbox-workspace-dir set-sandbox-workspace-dir!))
 
 ;; Module backup and restore
 (define (backup-module m initial-symbols)
@@ -300,12 +320,12 @@
               current-symbols)
     new-m))
 
-(define (make-sandbox session-id event-handler permission-handler)
+(define* (make-sandbox session-id event-handler permission-handler #:optional (workspace-dir #f))
   "Creates a secure sandbox environment backing variables natively in a persistent module."
   (let* ((caps '())
          (m (make-safe-sandbox-module caps))
          (initial-symbols (module-map (lambda (sym var) sym) m)))
-    (%make-sandbox m initial-symbols #f event-handler permission-handler)))
+    (%make-sandbox m initial-symbols #f event-handler permission-handler workspace-dir)))
 
 (define (fork-sandbox original-sandbox)
   "Forks/clones the sandbox state functionally using module cloning."
@@ -317,7 +337,8 @@
                    (sandbox-initial-symbols original-sandbox)
                    new-py
                    (sandbox-event-handler original-sandbox)
-                   (sandbox-permission-handler original-sandbox))))
+                   (sandbox-permission-handler original-sandbox)
+                   (sandbox-workspace-dir original-sandbox))))
 
 (define (run-python-in-sandbox sandbox code)
   (let ((py (sandbox-python-process sandbox)))
@@ -499,8 +520,8 @@
                   (cons 'run-in-sandbox
                         (lambda (cmd)
                           (if perm-handler
-                              (begin
-                                (handle-perm-response (perm-handler `(run-in-sandbox ,cmd)))
+                              (let ((op-name (if (guix-container-supported?) 'run-in-sandbox 'run-local-fallback)))
+                                (handle-perm-response (perm-handler `(,op-name ,cmd)))
                                 (run-in-sandbox cmd))
                               (error "Permission Denied: No permission handler registered for dangerous operation"))))
                   ;; Python Polyglot Capability (python-cap)
@@ -622,12 +643,13 @@
             (lambda ()
               ;; Evaluate expression, capturing stdout
               (let* ((output-port (open-output-string))
-                     (res (with-output-to-port output-port
-                            (lambda ()
-                              (let ((val (eval (cadr parsed) m)))
-                                (when (and val (not (unspecified? val)))
-                                  (write val))
-                                val))))
+                     (res (parameterize ((*workspace-path* (sandbox-workspace-dir sandbox)))
+                            (with-output-to-port output-port
+                              (lambda ()
+                                (let ((val (eval (cadr parsed) m)))
+                                  (when (and val (not (unspecified? val)))
+                                    (write val))
+                                  val)))))
                      (output (get-output-string output-port))
                      (final-output (if (and (not is-wisp?) (> (car (analyze-parentheses code-string)) 0))
                                        (string-append "[Auto-healed " (number->string (car (analyze-parentheses code-string))) " missing parentheses]\n" output)

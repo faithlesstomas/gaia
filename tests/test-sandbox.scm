@@ -107,16 +107,17 @@
             (sandbox-eval sb-child "x")))))
 
 ;; 7. Test HITL Authorization Prompt Mocking
-(test-equal "hitl-approved"
-  "\"Deleted file: test_temp.txt\""
+(test-assert "hitl-approved"
   (let* ((sb (make-test-sandbox #t))) ;; HITL Mock: approved (#t)
     ;; Create temp file
     (sandbox-eval sb "(write-file \"test_temp.txt\" \"hello\")")
     ;; Delete temp file (should succeed because HITL is approved)
     (let ((res (sandbox-eval sb "(delete-file \"test_temp.txt\")")))
       (match res
-        (('ok msg) msg)
-        (_ res)))))
+        (('ok msg)
+         (or (string=? msg "\"Deleted file: test_temp.txt\"")
+             (string-suffix? "test_temp.txt\"" msg)))
+        (_ #f)))))
 
 (test-assert "hitl-denied throws user-interrupt"
   (let* ((sb-deny (make-test-sandbox #f))) ;; HITL Mock: denied (#f)

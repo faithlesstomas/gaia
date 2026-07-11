@@ -135,7 +135,8 @@
                                       #t))
     (test-assert "handler receives full expression"
       (and (pair? captured-expr)
-           (eq? (car captured-expr) 'run-in-sandbox)))))
+           (or (eq? (car captured-expr) 'run-in-sandbox)
+               (eq? (car captured-expr) 'run-local-fallback))))))
 
 ;; --- Syntax Error Handling ---
 

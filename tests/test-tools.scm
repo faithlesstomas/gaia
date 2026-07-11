@@ -2,6 +2,7 @@
 (use-modules (gaia sandbox)
              (gaia executor)
              (gaia tools)  ;; For direct testing
+             (gaia config)
              (srfi srfi-64)
              (ice-9 match)
              (ice-9 popen)
@@ -233,6 +234,11 @@
     ;; Force unsupported path
     (module-set! mod 'guix-container-supported? (lambda () #f))
     (run-in-sandbox "echo 1")
+    ;; Force unsupported path and disable fallback
+    (set-config! 'allow-sandbox-fallback #f)
+    (test-error "throws error when fallback is disabled"
+                (run-in-sandbox "echo 1"))
+    (set-config! 'allow-sandbox-fallback #t)
     ;; Restore
     (module-set! mod 'guix-container-supported? orig-supported?)
     #t))

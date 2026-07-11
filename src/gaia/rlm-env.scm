@@ -24,9 +24,9 @@
   (history rlm-env-history set-rlm-env-history!)
   (injected-bindings rlm-env-injected-bindings set-rlm-env-injected-bindings!))
 
-(define* (make-rlm-env #:optional (session-id "default") (event-handler #f) (permission-handler #f))
+(define* (make-rlm-env #:optional (session-id "default") (event-handler #f) (permission-handler #f) (workspace-dir #f))
   "Creates a new RLM environment backed by our capability-based Goblins-style sandbox."
-  (let ((sandbox (make-sandbox session-id event-handler permission-handler)))
+  (let ((sandbox (make-sandbox session-id event-handler permission-handler workspace-dir)))
     (%make-rlm-env sandbox '() '())))
 
 (define (rlm-inject! env name value)

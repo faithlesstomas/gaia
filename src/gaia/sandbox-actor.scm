@@ -40,8 +40,8 @@
             history))
 
 ;; Sandbox Actor
-(define-actor (^repl-sandbox bcom session-id event-handler permission-handler history)
-  (let ((env (make-rlm-env session-id event-handler permission-handler)))
+(define-actor (^repl-sandbox bcom session-id event-handler permission-handler history #:optional (workspace-dir #f))
+  (let ((env (make-rlm-env session-id event-handler permission-handler workspace-dir)))
     (rlm-inject! env 'llm-query
       (lambda (prompt)
         (let* ((sub-session (string-append session-id "-sub-" (number->string (random 1000000000))))

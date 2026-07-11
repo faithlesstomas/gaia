@@ -3,7 +3,9 @@
   #:use-module (ice-9 popen)
   #:use-module (ice-9 rdelim)
   #:use-module (srfi srfi-1)
-  #:export (load-config get-config set-config! gaia-version))
+  #:export (load-config get-config set-config! gaia-version *workspace-path*))
+
+(define *workspace-path* (make-parameter #f))
 
 (define gaia-version
   (let* ((port (open-input-pipe "git describe --tags --always --dirty 2>/dev/null"))
@@ -18,7 +20,8 @@
     (model . "gemma4:e2b")
     (base-model . "gemma4:e2b")
     (thinking . #t)
-    (system-prompt . #f))) ;; Default system prompt is usually hardcoded in core, but can be overridden
+    (system-prompt . #f)
+    (allow-sandbox-fallback . #f))) ;; Default system prompt is usually hardcoded in core, but can be overridden
 
 (define *config* (make-parameter %default-config))
 
@@ -29,13 +32,19 @@
 
 (define (get-env-override key)
   "Maps config keys to environment variables and returns value if set."
-  (let ((env-var (case key
-                   ((llm-url) "GAIA_LLM_URL")
-                   ((model) "GAIA_MODEL")
-                   ((base-model) "GAIA_BASE_MODEL")
-                   ((system-prompt) "GAIA_SYSTEM_PROMPT")
-                   (else #f))))
-    (and env-var (getenv env-var))))
+  (let ((env-val (let ((env-var (case key
+                                  ((llm-url) "GAIA_LLM_URL")
+                                  ((model) "GAIA_MODEL")
+                                  ((base-model) "GAIA_BASE_MODEL")
+                                  ((system-prompt) "GAIA_SYSTEM_PROMPT")
+                                  ((allow-sandbox-fallback) "GAIA_ALLOW_SANDBOX_FALLBACK")
+                                  (else #f))))
+                   (and env-var (getenv env-var)))))
+    (if (and env-val (eq? key 'allow-sandbox-fallback))
+        (or (string=? env-val "1")
+            (string-ci=? env-val "true")
+            (string-ci=? env-val "yes"))
+        env-val)))
 
 (define (load-config)
   "Loads configuration from defaults and environment variables."
