@@ -41,7 +41,10 @@
        ((string=? path "~")
         (or (getenv "HOME") "/"))
        ((string-prefix? "~/" path)
-        (string-append (or (getenv "HOME") "/") (substring path 2)))
+        (let ((home (or (getenv "HOME") "/")))
+          (if (string-suffix? "/" home)
+              (string-append home (substring path 2))
+              (string-append home "/" (substring path 2)))))
        (else path))
       path))
 

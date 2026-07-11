@@ -168,6 +168,14 @@ for i in range(10):
   (let ((sb (make-test-sandbox #t)))
     (sandbox-eval sb "(let ((s \"hello \\world\")) s)")))
 
+;; 12. Test expand-user-path slash separation
+(test-equal "expand-user-path-separator"
+  (let ((home (or (getenv "HOME") "/")))
+    (if (string-suffix? "/" home)
+        (string-append home "test-path")
+        (string-append home "/test-path")))
+  ((@@ (gaia sandbox) expand-user-path) "~/test-path"))
+
 (let* ((runner (test-runner-current))
        (fail (if runner (test-runner-fail-count runner) 0)))
   (test-end "gaia-sandbox-ocap-goblins")
