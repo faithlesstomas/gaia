@@ -27,6 +27,9 @@
 (defvar-local gaia-hitl--responded nil
   "Whether the current request has been responded to.")
 
+(defvar-local gaia-hitl--chat-buffer nil
+  "The chat buffer associated with the permission request.")
+
 (defvar gaia-hitl-font-lock-keywords
   '(("^\\+.*" . 'diff-added)
     ("^\\-.*" . 'diff-removed)
@@ -59,15 +62,20 @@
   "Send VALUE as the permission response and clean up."
   (let ((buf (get-buffer "*gaia-permission*")))
     (when buf
-      (with-current-buffer buf
-        (unless gaia-hitl--responded
-          (setq gaia-hitl--responded t)
-          (gaia-send `(permission-response ,value))
-          (message "Sent permission response: %S" value)))
-      (let ((win (get-buffer-window buf t)))
-        (if win
-            (quit-window t win)
-          (kill-buffer buf))))))
+      (let (chat-buf)
+        (with-current-buffer buf
+          (setq chat-buf gaia-hitl--chat-buffer)
+          (unless gaia-hitl--responded
+            (setq gaia-hitl--responded t)
+            (if (and chat-buf (buffer-live-p chat-buf))
+                (with-current-buffer chat-buf
+                  (gaia-send `(permission-response ,value)))
+              (gaia-send `(permission-response ,value)))
+            (message "Sent permission response: %S" value)))
+        (let ((win (get-buffer-window buf t)))
+          (if win
+              (quit-window t win)
+            (kill-buffer buf)))))))
 
 (defun gaia-hitl-approve ()
   "Approve the proposed action."
@@ -129,19 +137,20 @@
   "Callback for incoming permission-request event."
   (if ob-gaia-in-progress
       (gaia-hitl--prompt-user-blocking expr)
-    (let ((handled nil))
+    (let ((handled nil)
+          (chat-buf (current-buffer)))
       (when (listp expr)
         (cond
          ;; Handle write-file
          ((eq (car expr) 'write-file)
           (let ((path (cadr expr))
                 (content (caddr expr)))
-            (gaia-hitl--handle-write-file path content expr)
+            (gaia-hitl--handle-write-file path content expr chat-buf)
             (setq handled t)))
          (t nil)))
       ;; Handle general command/eval expressions
       (unless handled
-        (gaia-hitl--handle-generic expr)))))
+        (gaia-hitl--handle-generic expr chat-buf)))))
 
 (defun gaia-hitl--insert-buttons ()
   "Insert interactive response buttons."
@@ -169,7 +178,7 @@
   "Display the HITL buffer BUF and select it."
   (pop-to-buffer buf '((display-buffer-reuse-window display-buffer-below-selected))))
 
-(defun gaia-hitl--handle-write-file (path content expr)
+(defun gaia-hitl--handle-write-file (path content expr chat-buf)
   "Display diff for proposed write to PATH and prompt."
   (let* ((buf-name "*gaia-permission*")
          (buf (get-buffer-create buf-name))
@@ -179,6 +188,7 @@
         (erase-buffer)
         (gaia-hitl-mode)
         (setq gaia-hitl--request expr)
+        (setq gaia-hitl--chat-buffer chat-buf)
         (setq gaia-hitl--responded nil)
         (add-hook 'kill-buffer-hook #'gaia-hitl--on-kill-buffer nil t)
 
@@ -205,7 +215,7 @@
         (setq buffer-read-only t)))
     (gaia-hitl--display-buffer buf)))
 
-(defun gaia-hitl--handle-generic (expr)
+(defun gaia-hitl--handle-generic (expr chat-buf)
   "Display generic expression to be executed and prompt."
   (let* ((buf-name "*gaia-permission*")
          (buf (get-buffer-create buf-name)))
@@ -214,6 +224,7 @@
         (erase-buffer)
         (gaia-hitl-mode)
         (setq gaia-hitl--request expr)
+        (setq gaia-hitl--chat-buffer chat-buf)
         (setq gaia-hitl--responded nil)
         (add-hook 'kill-buffer-hook #'gaia-hitl--on-kill-buffer nil t)
 

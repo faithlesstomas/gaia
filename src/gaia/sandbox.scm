@@ -339,7 +339,7 @@
                              git-ls-files guix-search guix-package-info
                              get-system-logs get-recent-logs get-boot-logs
                              list-boots get-kernel-logs fork-sandbox
-                             read-files patch-file map-files)))
+                             read-files patch-file map-files find-files)))
     (filter (lambda (pair)
               (not (memq (car pair) capability-names)))
             all-bindings)))
@@ -600,6 +600,16 @@
                                     (begin
                                       (handle-perm-response (perm-handler `(map-files ,validated)))
                                       (map-files validated pattern proc))
+                                    (error "Permission Denied: No permission handler registered for dangerous operation"))))))
+                  (cons 'find-files
+                        (lambda (base-dir pattern)
+                          (let ((validated (validate-path base-dir)))
+                            (if (safe-path? validated)
+                                (find-files validated pattern)
+                                (if perm-handler
+                                    (begin
+                                      (handle-perm-response (perm-handler `(find-files ,validated ,pattern)))
+                                      (find-files validated pattern))
                                     (error "Permission Denied: No permission handler registered for dangerous operation"))))))
                  )))
 

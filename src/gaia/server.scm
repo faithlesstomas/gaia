@@ -145,11 +145,13 @@
                             (lambda _ 'error)))))
             (cond
              ((eof-object? line)
+              (gaia-log "[SERVER] Client connection closed (EOF).")
               (put-message channel 'eof)
               (with-mutex perm-mutex
                 (set! perm-state 'eof)
                 (signal-condition-variable perm-cond)))
              ((equal? msg '(interrupt))
+              (gaia-log "[SERVER] Received (interrupt) from client.")
               ;; Set the global *interrupted* flag in core
               (let ((core-mod (resolve-module '(gaia core) #:ensure #f)))
                 (when core-mod
@@ -163,6 +165,7 @@
                 (signal-condition-variable perm-cond))
               (loop))
              ((and (pair? msg) (eq? (car msg) 'permission-response))
+              (gaia-log (format #f "[SERVER] Received permission response: ~s" msg))
               (with-mutex perm-mutex
                 (let ((res (cadr msg)))
                   (match res
@@ -178,6 +181,7 @@
                 (signal-condition-variable perm-cond))
               (loop))
              (else
+              (gaia-log (format #f "[SERVER] Received client message: ~s" msg))
               (put-message channel msg)
               (loop)))))))
     (let* ((event-sink (lambda (event) (send-event client-socket event)))
@@ -187,8 +191,11 @@
                                   (when (operation-matches-scopes? expr approved-scopes)
                                     (set! bypass? #t)))
                                 (if bypass?
-                                    #t
                                     (begin
+                                      (gaia-log (format #f "[SERVER] Permission request bypassed by scope rules: ~s" expr))
+                                      #t)
+                                    (begin
+                                      (gaia-log (format #f "[SERVER] Prompting client for permission-request: ~s" expr))
                                       (with-mutex perm-mutex
                                         (set! perm-state 'pending))
                                       (send-event client-socket `(permission-request ,expr))
@@ -198,12 +205,15 @@
                                            ((eq? perm-state 'resolved)
                                             (let ((val perm-value))
                                               (set! perm-state 'idle)
+                                              (gaia-log (format #f "[SERVER] Permission request resolved: ~s -> ~s" expr val))
                                               val))
                                            ((eq? perm-state 'interrupted)
                                             (set! perm-state 'idle)
+                                            (gaia-log (format #f "[SERVER] Permission request interrupted: ~s" expr))
                                             (throw 'user-interrupt))
                                            ((eq? perm-state 'eof)
                                             (set! perm-state 'idle)
+                                            (gaia-log (format #f "[SERVER] Permission request EOF: ~s" expr))
                                             (throw 'user-interrupt))
                                             (else
                                              (wait-condition-variable perm-cond perm-mutex)

@@ -91,6 +91,7 @@ and spawning auxiliary sub-agents (via `delegate` blocks) to divide and conquer 
 
 # AVAILABLE TOOLS (from `(gaia tools)`, already loaded)
 - `(list-files path)` — Returns list of files in directory.
+- `(find-files base-dir pattern)` — Recursively searches for files/directories matching the regex PATTERN starting from BASE-DIR. Example: `(find-files \"/home/user/projects\" \"\\\\.scm$\")`.
 - `(read-file path)` — Returns file content as string. WARNING: for large files, do NOT display the output! Use search-file instead.
 - `(write-file path content)` — Writes string to file.
 - `(delete-file path)` — Safely deletes a file (requires user permission).
@@ -114,6 +115,8 @@ and spawning auxiliary sub-agents (via `delegate` blocks) to divide and conquer 
 - `(guix-package-info name)` — Gets detailed package metadata.
 - `(run-in-sandbox cmd)` — Executes a shell command inside an isolated Guix container (has git, coreutils, grep, sed, awk).
   Starts in the `/workspace` directory. Use for complex shell pipelines like `(run-in-sandbox \"ls | wc -l\")`.
+  WARNING: The container is fully isolated and does NOT mount the user's home directory or sibling directories outside the current workspace.
+  It cannot access any files outside the `/workspace` directory (which maps to the active project workspace).
 - `(run-python code)` — Stateful, persistent Python execution. Runs the given `code` string in a secure Python REPL container.
   Variables, functions, and imports in Python persist across `(run-python ...)` calls within the session.
 - `(guile-syntax-check code-string)` — Validates Scheme syntax without evaluating it.
@@ -146,6 +149,7 @@ and spawning auxiliary sub-agents (via `delegate` blocks) to divide and conquer 
 - FLAT CODE: Write simple, flat code blocks instead of deeply nested lists to minimize parenthesis mismatches.
   Let-loops and state accumulators work well.
 - CHEATSHEET: If you are repeatedly failing checks, read the common gotchas via `(read-file \"docs/guile-gotchas.md\")`.
+- SANDBOX WHITELIST: For security, the Scheme REPL runs in a restricted sandbox. Functions like `getenv` and mathematical primitives like `sqrt` are NOT whitelisted and will throw `unbound-variable` errors. If you need to access files outside the workspace (e.g. sibling directories or home directory), use GAIA tool functions (like `list-files`, `find-files` or `read-file`) with absolute paths instead of `run-in-sandbox`, as they will run on the host filesystem and trigger user-facing HITL prompts for approval.
 
 # HOW TO WRITE CODE
 - CRITICAL: ALL code and tool calls (like `llm-query`) that you want the system to AUTOMATICALLY execute in the REPL (to fetch data, run commands, or solve tasks) MUST be wrapped in a ```repl block!

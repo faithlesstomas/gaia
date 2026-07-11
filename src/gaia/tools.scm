@@ -30,7 +30,8 @@
             run-in-sandbox
             read-files
             patch-file
-            map-files))
+            map-files
+            find-files))
 
 (define (guile-syntax-check code-string)
   "Checks if the Guile Scheme code string has valid syntax (matched parentheses, valid expressions) without evaluating it."
@@ -80,11 +81,7 @@
 
 (define (run-cmd-with-output cmd . args)
   "Runs a command and returns its stdout and stderr merged."
-  (let* ((cmd-str (if (null? args) 
-                      cmd 
-                      (string-join (map (lambda (a) (format #f "~a" a)) (cons cmd args)) " ")))
-         ;; Use shell to merge stderr and stdout
-         (pipe (open-pipe (string-append cmd-str " 2>&1") OPEN_READ))
+  (let* ((pipe (apply open-pipe* OPEN_READ "sh" "-c" "exec \"$@\" 2>&1" "--" cmd args))
          (output (read-string pipe)))
     (close-pipe pipe)
     (or output "")))
@@ -95,7 +92,7 @@
 
 (define (search-guile-manual pattern)
   "Searches the official Guile manual using the info command."
-  (run-cmd-with-output (string-append "info --output=- --subnodes guile 2>/dev/null | grep -i -C 5 '" pattern "' | head -n 50")))
+  (run-cmd-with-output "sh" "-c" (string-append "info --output=- --subnodes guile 2>/dev/null | grep -i -C 5 '" pattern "' | head -n 50")))
 
 (define (file-info path)
   "Returns 'stat' like info."
@@ -105,11 +102,21 @@
 
 (define (run-sed expression path)
   "Runs sed expression on file (stdout only, no -i)."
-  (run-cmd-with-output "sed" expression path))
+  (let ((clean-expr (if (and (string-prefix? "'" expression)
+                             (string-suffix? "'" expression)
+                             (>= (string-length expression) 2))
+                        (substring expression 1 (- (string-length expression) 1))
+                        expression)))
+    (run-cmd-with-output "sed" clean-expr path)))
 
 (define (run-awk program path)
   "Runs awk program on file."
-  (run-cmd-with-output "awk" program path))
+  (let ((clean-prog (if (and (string-prefix? "'" program)
+                             (string-suffix? "'" program)
+                             (>= (string-length program) 2))
+                        (substring program 1 (- (string-length program) 1))
+                        program)))
+    (run-cmd-with-output "awk" clean-prog path)))
 
 ;; --- Git Tools ---
 
@@ -261,3 +268,30 @@
                                 (string-append dir "/" f))))
              (proc full-path)))
          matching-files)))
+
+(define (find-files base-dir pattern)
+  "Recursively searches for files/directories matching the regex PATTERN starting from BASE-DIR."
+  (let ((regex (make-regexp pattern)))
+    (let loop ((dir base-dir)
+               (results '()))
+      (catch #t
+        (lambda ()
+          (let* ((files (list-files dir))
+                 (sub-results
+                  (fold (lambda (file acc)
+                          (if (or (string=? file ".") (string=? file ".."))
+                              acc
+                              (let* ((full-path (if (string-suffix? "/" dir)
+                                                   (string-append dir file)
+                                                   (string-append dir "/" file)))
+                                     (st (catch #t (lambda () (stat full-path)) (lambda _ #f)))
+                                     (is-dir? (and st (eq? (stat:type st) 'directory)))
+                                     (matches? (regexp-exec regex file)))
+                                (let ((new-acc (if matches? (cons full-path acc) acc)))
+                                  (if is-dir?
+                                      (loop full-path new-acc)
+                                      new-acc)))))
+                        '()
+                        files)))
+            (append sub-results results)))
+        (lambda _ results)))))

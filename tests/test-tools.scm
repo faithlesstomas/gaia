@@ -253,6 +253,11 @@
       (test-assert "map-files matches"
         (and (member "world A" results)
              (member "hello B" results))))
+    ;; Test find-files
+    (let ((results (find-files "." "^test_temp_a\\.txt$")))
+      (test-assert "find-files matches"
+        (or (member "./test_temp_a.txt" results)
+            (member "test_temp_a.txt" results))))
     ;; Cleanup
     (delete-file "test_temp_a.txt")
     (delete-file "test_temp_b.txt")

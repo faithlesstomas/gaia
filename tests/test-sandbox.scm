@@ -56,6 +56,14 @@
         #f)
       (lambda _ #t))))
 
+(test-assert "ocap-path-restriction-find"
+  (let ((sb (make-test-sandbox #f)))
+    (catch 'user-interrupt
+      (lambda ()
+        (sandbox-eval sb "(find-files \"/etc\" \"\\\\.txt$\")")
+        #f)
+      (lambda _ #t))))
+
 (test-equal "ocap-path-restriction-denied-feedback"
   '(error permission "Reason text")
   (let ((sb (make-sandbox "test-session" 
