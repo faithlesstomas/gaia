@@ -176,6 +176,47 @@ for i in range(10):
         (string-append home "/test-path")))
   ((@@ (gaia sandbox) expand-user-path) "~/test-path"))
 
+;; 13. Test newly whitelisted primitives (math, comparisons, alists, hash tables, bitwise, strings, helpers)
+(test-equal "whitelisted-math"
+  '(ok "6")
+  (let ((sb (make-test-sandbox #t)))
+    (sandbox-eval sb "(inexact->exact (sqrt (* (+ 3 3) (+ 3 3))))")))
+
+(test-equal "whitelisted-comparisons"
+  '(ok "#t")
+  (let ((sb (make-test-sandbox #t)))
+    (sandbox-eval sb "(equal? '(1 2 (a)) '(1 2 (a)))")))
+
+(test-equal "whitelisted-list-accessors"
+  '(ok "3")
+  (let ((sb (make-test-sandbox #t)))
+    (sandbox-eval sb "(caddr '(1 2 3 4))")))
+
+(test-equal "whitelisted-alist-accessors"
+  '(ok "val")
+  (let ((sb (make-test-sandbox #t)))
+    (sandbox-eval sb "(assoc-ref '((key . val)) 'key)")))
+
+(test-equal "whitelisted-hash-tables"
+  '(ok "hash-val")
+  (let ((sb (make-test-sandbox #t)))
+    (sandbox-eval sb "(let ((h (make-hash-table))) (hash-set! h 'key 'hash-val) (hash-ref h 'key))")))
+
+(test-equal "whitelisted-bitwise-ops"
+  '(ok "2")
+  (let ((sb (make-test-sandbox #t)))
+    (sandbox-eval sb "(logand 6 3)")))
+
+(test-equal "whitelisted-string-helpers"
+  '(ok "\"a-b-c\"")
+  (let ((sb (make-test-sandbox #t)))
+    (sandbox-eval sb "(string-join '(\"a\" \"b\" \"c\") \"-\")")))
+
+(test-equal "whitelisted-core-helpers"
+  '(ok "6")
+  (let ((sb (make-test-sandbox #t)))
+    (sandbox-eval sb "(apply + '(1 2 3))")))
+
 (let* ((runner (test-runner-current))
        (fail (if runner (test-runner-fail-count runner) 0)))
   (test-end "gaia-sandbox-ocap-goblins")

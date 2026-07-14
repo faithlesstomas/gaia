@@ -88,18 +88,32 @@
     ;; Arithmetic
     + - * / = > < >= <= quotient remainder modulo
     positive? negative? zero? odd? even? abs max min
+    sqrt expt exp log sin cos tan asin acos atan sinh cosh tanh asinh acosh atanh
+    floor ceiling truncate round gcd lcm number? complex? real? rational? integer?
+    exact? inexact? exact->inexact inexact->exact nan? inf? random real-part imag-part magnitude angle exact-integer-sqrt
 
-    ;; Booleans
-    not and or boolean?
+    ;; Booleans and Comparisons
+    not and or boolean? eq? eqv? equal?
 
     ;; Lists
     list cons car cdr pair? null? list? length append reverse
     list-ref member memq memv assoc assq assv
     map for-each filter
+    cadr cddr caddr cadddr caar cdar caadr cdadr cadar cddar
+    assoc-ref assq-ref assv-ref assoc-set! assq-set! assv-set! assoc-remove! assq-remove! assv-remove!
+
+    ;; Hash Tables
+    make-hash-table hash-ref hash-set! hash-remove! hash-clear! hash-count
+    hash-for-each hash-map->list hash-fold hashq-ref hashq-set! hashq-remove!
+    hashv-ref hashv-set! hashv-remove!
+
+    ;; Bitwise
+    logand logior logxor lognot ash
 
     ;; Strings
     string? string-length string-append substring string->number number->string
     string=? string<? string>? string-suffix? string-prefix? string-contains
+    string-null? string-copy string-join string-trim string-trim-right string-trim-both
 
     ;; Symbols
     symbol? symbol->string string->symbol
@@ -107,10 +121,11 @@
     ;; Vectors
     vector? vector-length vector-ref vector-set! make-vector vector
 
-    ;; Control Flow
+    ;; Control Flow & Helpers
     if cond else => case begin let let* letrec lambda define set!
     do while when unless
     quote quasiquote unquote unquote-splicing
+    apply values call-with-values gensym identity
 
     ;; Basic I/O (Stdout only)
     display newline format write read
