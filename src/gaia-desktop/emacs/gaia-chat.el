@@ -74,10 +74,12 @@
   "Lock the history in the current buffer, making everything up to the prompt read-only."
   (let ((inhibit-read-only t))
     (save-excursion
-      (add-text-properties (point-min) (point-max) '(read-only t))
       (goto-char (point-max))
       (when (search-backward "GAIA > " nil t)
-        (remove-text-properties (match-end 0) (point-max) '(read-only nil))))))
+        (let ((prompt-end (match-end 0)))
+          (add-text-properties (point-min) prompt-end '(read-only t))
+          (add-text-properties (match-beginning 0) prompt-end '(rear-nonsticky t))
+          (remove-text-properties prompt-end (point-max) '(read-only nil)))))))
 
 (defun gaia-chat--initialize-buffer ()
   "Set up the initial contents of the GAIA buffer."
