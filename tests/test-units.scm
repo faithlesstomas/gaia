@@ -94,6 +94,59 @@
        #:drain? #t)
       #t))
 
+  (test-group "rlm-execute meta-commands"
+    (let ((env (make-rlm-env "test-meta-commands")))
+      ;; Define a custom variable and function in the sandbox first
+      (rlm-execute env "(define my-test-val 42)")
+      (rlm-execute env "(define (my-test-proc x) (* x x))")
+
+      ;; 1. Test ,globals
+      (test-assert ",globals returns safe primitives and capability names"
+        (let ((res (rlm-execute env ",globals")))
+          (and (pair? res)
+               (eq? (car res) 'ok)
+               (string-contains (cadr res) "Safe Guile Primitives:")
+               (string-contains (cadr res) "car")
+               (string-contains (cadr res) "read-file"))))
+
+      ;; 2. Test ,bindings
+      (test-assert ",bindings shows our custom defined variable/function"
+        (let ((res (rlm-execute env ",bindings")))
+          (and (pair? res)
+               (eq? (car res) 'ok)
+               (string-contains (cadr res) "my-test-val = 42"))))
+
+      ;; 3. Test ,describe
+      (test-assert ",describe lists details of a variable"
+        (let ((res (rlm-execute env ",describe my-test-val")))
+          (and (pair? res)
+               (eq? (car res) 'ok)
+               (string-contains (cadr res) "Symbol: my-test-val")
+               (string-contains (cadr res) "Type: number")
+               (string-contains (cadr res) "Value: 42"))))
+
+      (test-assert ",describe lists details of a procedure"
+        (let ((res (rlm-execute env ",describe my-test-proc")))
+          (and (pair? res)
+               (eq? (car res) 'ok)
+               (string-contains (cadr res) "Symbol: my-test-proc")
+               (string-contains (cadr res) "Type: procedure")
+               (string-contains (cadr res) "Arguments:"))))
+
+      ;; 4. Test ,apropos
+      (test-assert ",apropos searches for symbols matching pattern"
+        (let ((res (rlm-execute env ",apropos my-test")))
+          (and (pair? res)
+               (eq? (car res) 'ok)
+               (string-contains (cadr res) "my-test-val")
+               (string-contains (cadr res) "my-test-proc"))))
+
+      ;; 5. Test ,source
+      (test-assert ",source shows source code response"
+        (let ((res (rlm-execute env ",source my-test-proc")))
+          (and (pair? res)
+               (eq? (car res) 'ok))))))
+
   (test-assert "guix-investigate: simulate guix container execution"
     (let* ((mod (resolve-module '(gaia executor) #:ensure #f))
            (orig-supported? (module-ref mod 'guix-container-supported?)))
