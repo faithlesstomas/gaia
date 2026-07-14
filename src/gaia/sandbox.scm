@@ -18,7 +18,9 @@
             sandbox-module
             sandbox-initial-symbols
             backup-module
-            restore-module!))
+            restore-module!
+            SAFE-GUILE-EXPORTS
+            CAPABILITY-NAMES))
 
 (define (strip-trailing-slash path)
   (if (and (string? path)
@@ -351,21 +353,23 @@
           (run-python-code new-py code))
         (run-python-code py code))))
 
+(define CAPABILITY-NAMES
+  '(read-file write-file delete-file list-files run-command
+    system system* run-in-sandbox run-python search-file
+    search-guile-manual run-sed run-awk file-info
+    guile-syntax-check git-status git-diff git-log
+    git-ls-files guix-search guix-package-info
+    get-system-logs get-recent-logs get-boot-logs
+    list-boots get-kernel-logs fork-sandbox
+    read-files patch-file map-files find-files))
+
 (define (sandbox-definitions sandbox)
   "Returns an alist of (symbol . value) for all user-defined bindings in the sandbox module."
   (let* ((m (sandbox-module sandbox))
          (initial-symbols (sandbox-initial-symbols sandbox))
-         (all-bindings (backup-module m initial-symbols))
-         (capability-names '(read-file write-file delete-file list-files run-command
-                             system system* run-in-sandbox run-python search-file
-                             search-guile-manual run-sed run-awk file-info
-                             guile-syntax-check git-status git-diff git-log
-                             git-ls-files guix-search guix-package-info
-                             get-system-logs get-recent-logs get-boot-logs
-                             list-boots get-kernel-logs fork-sandbox
-                             read-files patch-file map-files find-files)))
+         (all-bindings (backup-module m initial-symbols)))
     (filter (lambda (pair)
-              (not (memq (car pair) capability-names)))
+              (not (memq (car pair) CAPABILITY-NAMES)))
             all-bindings)))
 
 (define (parse-wisp-string code-str)

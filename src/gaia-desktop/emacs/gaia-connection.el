@@ -21,6 +21,79 @@
   :type 'string
   :group 'gaia-connection)
 
+(defcustom gaia-project-root nil
+  "Path to the GAIA project root directory.
+If nil, it is automatically detected by traversing upwards."
+  :type '(choice (const :tag "Auto Detect" nil)
+                 directory)
+  :group 'gaia-connection)
+
+(defvar gaia-server-process nil
+  "The active GAIA server process spawned by Emacs.")
+
+(defun gaia--find-project-root ()
+  "Find the GAIA project root."
+  (or gaia-project-root
+      (let* ((lib-path (locate-library "gaia-connection"))
+             (lib-dir (and lib-path (file-name-directory lib-path)))
+             (dir (or lib-dir
+                      (and load-file-name (file-name-directory load-file-name))
+                      default-directory)))
+        (while (and dir
+                    (not (file-exists-p (expand-file-name "bin/gaia-server" dir)))
+                    (not (string= dir (directory-file-name dir))))
+          (setq dir (file-name-directory (directory-file-name dir))))
+        (if (file-exists-p (expand-file-name "bin/gaia-server" dir))
+            dir
+          default-directory))))
+
+(defun gaia-server-running-p ()
+  "Return non-nil if GAIA server is running and accepting connections."
+  (let ((socket-path gaia-connection-socket-path))
+    (and (file-exists-p socket-path)
+         (condition-case nil
+             (let ((proc (make-network-process
+                          :name "gaia-ping"
+                          :family 'local
+                          :service socket-path
+                          :coding 'utf-8)))
+               (delete-process proc)
+               t)
+           (error nil)))))
+
+(defun gaia-server-start ()
+  "Start the GAIA server process if not already running."
+  (interactive)
+  (let ((socket-path gaia-connection-socket-path))
+    (cond
+     ((gaia-server-running-p)
+      (message "GAIA server is already running."))
+     (t
+      (when (file-exists-p socket-path)
+        (condition-case nil
+            (delete-file socket-path)
+          (error nil)))
+      (let* ((root (gaia--find-project-root))
+             (server-bin (expand-file-name "bin/gaia-server" root))
+             (buf (get-buffer-create "*gaia-server*")))
+        (unless (file-exists-p server-bin)
+          (error "GAIA server executable not found at %s. Please check project files." server-bin))
+        (message "Starting GAIA server from %s..." server-bin)
+        (let ((default-directory root))
+          (setq gaia-server-process
+                (start-process "gaia-server" buf server-bin)))
+        (set-process-query-on-exit-flag gaia-server-process nil)
+        (let ((retry 0)
+              (connected nil))
+          (while (and (not connected) (< retry 10))
+            (sleep-for 0.5)
+            (setq retry (1+ retry))
+            (when (gaia-server-running-p)
+              (setq connected t)))
+          (if connected
+              (message "GAIA server started successfully.")
+            (message "Warning: GAIA server started but socket is not accepting connections yet."))))))))
+
 (defvar-local gaia-connection-process nil
   "The active network process connecting to GAIA.")
 
@@ -57,6 +130,9 @@
         (chat-buf (current-buffer)))
     (when (gaia-connected-p)
       (gaia-disconnect))
+    ;; Auto-start server if not running
+    (unless (gaia-server-running-p)
+      (gaia-server-start))
     (setq-local gaia-connection-buffer "")
     (message "Connecting to GAIA server at %s..." path)
     (condition-case err
