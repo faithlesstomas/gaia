@@ -48,6 +48,15 @@
                 (gaia-send `(repl ,clean-input)))))
         (error "Associated chat buffer is not available")))))
 
+(defun gaia-repl--lock-history ()
+  "Lock the history in the current buffer, making everything up to the prompt read-only."
+  (let ((inhibit-read-only t))
+    (save-excursion
+      (add-text-properties (point-min) (point-max) '(read-only t))
+      (goto-char (point-max))
+      (when (search-backward "gaia-repl > " nil t)
+        (remove-text-properties (match-end 0) (point-max) '(read-only nil))))))
+
 (defun gaia-repl--initialize-process ()
   "Start a dummy cat process for comint."
   (unless (get-buffer-process (current-buffer))
@@ -65,7 +74,8 @@
     ;; Set prompt
     (goto-char (point-max))
     (insert "gaia-repl > ")
-    (set-marker (process-mark (get-buffer-process (current-buffer))) (point))))
+    (set-marker (process-mark (get-buffer-process (current-buffer))) (point))
+    (gaia-repl--lock-history)))
 
 ;;;###autoload
 (defun gaia-repl ()
@@ -99,7 +109,8 @@
     (insert result "\n\n")
     (insert "gaia-repl > ")
     (when proc
-      (set-marker (process-mark proc) (point)))))
+      (set-marker (process-mark proc) (point)))
+    (gaia-repl--lock-history)))
 
 (defun gaia-repl--on-error (err)
   "Insert the REPL error into the active REPL buffer."
@@ -109,7 +120,8 @@
     (insert "ERROR: " err "\n\n")
     (insert "gaia-repl > ")
     (when proc
-      (set-marker (process-mark proc) (point)))))
+      (set-marker (process-mark proc) (point)))
+    (gaia-repl--lock-history)))
 
 (provide 'gaia-repl)
 ;;; gaia-repl.el ends here

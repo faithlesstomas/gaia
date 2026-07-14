@@ -70,6 +70,15 @@
         (gaia-chat--initialize-buffer)))
     buf))
 
+(defun gaia-chat--lock-history ()
+  "Lock the history in the current buffer, making everything up to the prompt read-only."
+  (let ((inhibit-read-only t))
+    (save-excursion
+      (add-text-properties (point-min) (point-max) '(read-only t))
+      (goto-char (point-max))
+      (when (search-backward "GAIA > " nil t)
+        (remove-text-properties (match-end 0) (point-max) '(read-only nil))))))
+
 (defun gaia-chat--initialize-buffer ()
   "Set up the initial contents of the GAIA buffer."
   (let ((inhibit-read-only t))
@@ -89,7 +98,8 @@
     ;; Ensure prompt is not read-only but user cannot delete the text of prompt
     (let ((prompt-start (- (point) 7)))
       (add-text-properties prompt-start (point)
-                           '(read-only t rear-nonsticky t face bold)))))
+                           '(read-only t rear-nonsticky t face bold)))
+    (gaia-chat--lock-history)))
 
 (defun gaia-chat-send ()
   "Send the text written after the prompt to the GAIA server."
@@ -115,6 +125,7 @@
               (goto-char (point-max))
               (insert (format "** User [%s]\n" (format-time-string "%Y-%m-%d %H:%M:%S")))
               (insert input "\n\n")
+              (add-text-properties (point-min) (point-max) '(read-only t))
               ;; Start connection if not active
               (unless (gaia-connected-p)
                 (gaia-connect)
