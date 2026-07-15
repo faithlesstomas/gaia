@@ -36,6 +36,10 @@
   (test-equal "session" '(session "test-session") (parse-slash-command "/session test-session"))
   (test-equal "list-sessions" '(list-sessions) (parse-slash-command "/sessions"))
   (test-equal "history" '(get-history) (parse-slash-command "/history"))
+  (test-equal "get-state" '(get-state-injection) (parse-slash-command "/state"))
+  (test-equal "set-state" '(set-state-injection "on") (parse-slash-command "/state on"))
+  (test-equal "get-wisp" '(get-wisp-mode) (parse-slash-command "/wisp"))
+  (test-equal "set-wisp" '(set-wisp-mode "off") (parse-slash-command "/wisp off"))
   (test-equal "invalid" #f (parse-slash-command "/unknown-command")))
 
 
@@ -337,5 +341,27 @@
         (when (file-exists? "test-hitl.txt") (delete-file "test-hitl.txt"))
         (and got-permission-request got-eval-success)))))
 
+
+;; --- 6. Test system prompt dynamic formatting & toggles ---
+
+(test-group "get-system-prompt-dynamic"
+  (test-assert "system prompt strips wisp instructions when wisp-mode is off"
+    (begin
+      (set-config! 'wisp-mode #f)
+      (let ((prompt (get-system-prompt)))
+        (and (string-contains prompt "You are GAIA")
+             (not (string-contains prompt "Wisp (SRFI-119)"))))))
+  (test-assert "system prompt includes wisp instructions when wisp-mode is on"
+    (begin
+      (set-config! 'wisp-mode #t)
+      (let ((prompt (get-system-prompt)))
+        (and (string-contains prompt "You are GAIA")
+             (string-contains prompt "Wisp (SRFI-119)")))))
+  (test-assert "get-system-prompt does not contain completion signals section"
+    (let ((prompt (get-system-prompt)))
+      (not (string-contains prompt "# COMPLETION SIGNALS"))))
+  (test-assert "get-solver-system-prompt contains completion signals section"
+    (let ((prompt (get-solver-system-prompt)))
+      (string-contains prompt "# COMPLETION SIGNALS"))))
 
 (test-end "gaia-server")

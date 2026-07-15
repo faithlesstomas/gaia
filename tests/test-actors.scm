@@ -535,7 +535,62 @@
                 (run-turns-synchronously)
                 (<- orch 'handle-message 'eof)
                 (run-turns-synchronously)
-                (port-closed? mock-socket))))))
+                (port-closed? mock-socket))))
+            
+            ;; 5. Test session-orchestrator eval command (non-recursive notebook mode)
+            (let* ((sandbox (spawn ^repl-sandbox "direct-eval-session" (lambda _ #t) (lambda _ #t) '()))
+                   (mock-llm
+                    (spawn
+                     (lambda (bcom)
+                       (methods
+                        [(chat session-id prompt model system-prompt think history stream-callback #:optional (role "user"))
+                         (let-values (((promo resolver) (spawn-promise-and-resolver)))
+                           (<-np resolver 'fulfill
+                                 `(("payload" . (("content" . "Let's run some code:\n```repl\n(define eval-var 888)\n```")
+                                                 ("reasoning" . "Reasoning...")))))
+                           promo)]))))
+                   (agent (spawn ^agent-actor "direct-eval-session" sandbox mock-llm (lambda _ #t) (lambda _ #t)))
+                   (mock-socket (open-output-string))
+                   (mock-channel #f)
+                   (orch (spawn ^session-orchestrator "direct-eval-session" mock-socket mock-channel (lambda (expr) #t) sandbox agent mock-llm '() "gemma4:e2b" #t)))
+              (test-assert "direct-orchestrator: eval (notebook mode) runs code block once and sends notebook-done"
+                (begin
+                  (<- orch 'handle-message '(eval "run this code"))
+                  (run-turns-synchronously)
+                  (let ((output (get-output-string mock-socket)))
+                    (and (string-contains output "code")
+                         (string-contains output "result")
+                         (string-contains output "notebook-done"))))))
+
+            ;; 6. Test session-orchestrator solve command (recursive solver mode)
+            (let* ((sandbox (spawn ^repl-sandbox "direct-solve-session" (lambda _ #t) (lambda _ #t) '()))
+                   (llm-calls 0)
+                   (mock-llm
+                    (spawn
+                     (lambda (bcom)
+                       (methods
+                        [(chat session-id prompt model system-prompt think history stream-callback #:optional (role "user"))
+                         (set! llm-calls (+ llm-calls 1))
+                         (let-values (((promo resolver) (spawn-promise-and-resolver)))
+                           (<-np resolver 'fulfill
+                                 `(("payload" . (("content" . ,(if (= llm-calls 1)
+                                                                   "Run code:\n```repl\n(define solve-var 999)\n```"
+                                                                   "FINAL(999) CONFIDENCE(100)"))
+                                                 ("reasoning" . "Reasoning...")))))
+                           promo)]))))
+                   (agent (spawn ^agent-actor "direct-solve-session" sandbox mock-llm (lambda _ #t) (lambda _ #t)))
+                   (mock-socket (open-output-string))
+                   (mock-channel #f)
+                   (orch (spawn ^session-orchestrator "direct-solve-session" mock-socket mock-channel (lambda (expr) #t) sandbox agent mock-llm '() "gemma4:e2b" #t)))
+              (test-assert "direct-orchestrator: solve (solver mode) runs recursively until final answer"
+                (begin
+                  (<- orch 'handle-message '(solve "run this solve"))
+                  (run-turns-synchronously)
+                  (let ((output (get-output-string mock-socket)))
+                    (and (string-contains output "code")
+                         (string-contains output "result")
+                         (string-contains output "final")
+                         (> llm-calls 1))))))))
       
       (lambda ()
         ;; Restore original actors bindings

@@ -20,6 +20,9 @@
 (defvar-local gaia-chat--stream-state nil
   "Current streaming state: nil, \\='token, \\='thought.")
 
+(defvar-local gaia-chat--stream-start-pos nil
+  "Marker tracking the starting position of the token stream.")
+
 (defvar-local gaia-chat--session-id nil
   "Active session ID in the buffer.")
 
@@ -28,6 +31,9 @@
 
 (defvar-local gaia-chat--active-request nil
   "Non-nil if the Assistant is currently running a request.")
+
+(defvar-local gaia-chat--code-executed nil
+  "Non-nil if code was executed during the current request cycle.")
 
 (defvar gaia-chat-mode-map
   (let ((map (make-sparse-keymap)))
@@ -137,6 +143,7 @@
                 (accept-process-output gaia-connection-process 0.1))
               ;; Send command
               (setq gaia-chat--active-request t)
+              (setq gaia-chat--code-executed nil)
               (gaia-send `(eval ,input))
               (setq gaia-chat--stream-state nil)
               (message "Prompt sent to GAIA..."))))))))
@@ -334,6 +341,7 @@
         (when (eq gaia-chat--stream-state 'thought)
           (insert "\n#+END_QUOTE\n\n"))
         (insert "*** Response\n")
+        (setq gaia-chat--stream-start-pos (point-marker))
         (setq gaia-chat--stream-state 'token))
        (t nil))
       (insert token)
@@ -360,13 +368,31 @@
   (message "GAIA Status: %s" status))
 
 (defun gaia-chat--on-code (code)
-  "Insert executing code block."
+  "Insert executing code block, cleaning raw code from streamed response."
   (with-current-buffer (gaia-chat-buffer)
     (let ((inhibit-read-only t))
       (goto-char (point-max))
       (when (eq gaia-chat--stream-state 'thought)
-        (insert "\n#+END_QUOTE\n\n")
-        (setq gaia-chat--stream-state nil))
+        (insert "\n#+END_QUOTE\n\n"))
+      ;; Clean raw code blocks from the streamed response text
+      (when (and gaia-chat--stream-start-pos
+                 (markerp gaia-chat--stream-start-pos)
+                 (marker-position gaia-chat--stream-start-pos))
+        (let* ((start (marker-position gaia-chat--stream-start-pos))
+               (raw-text (buffer-substring-no-properties start (point-max)))
+               ;; Remove ALL ```repl...``` and ```wisp...``` blocks from streamed text
+               (cleaned (replace-regexp-in-string
+                         "```\\(?:repl\\|wisp\\)\\(?:\n\\|.\\)*?```" ""
+                         raw-text))
+               (cleaned (string-trim cleaned)))
+          (delete-region start (point-max))
+          (goto-char start)
+          (when (and cleaned (not (string-empty-p cleaned)))
+            (insert cleaned "\n\n"))
+          (set-marker gaia-chat--stream-start-pos nil)
+          (setq gaia-chat--stream-start-pos nil)))
+      (setq gaia-chat--stream-state nil)
+      (setq gaia-chat--code-executed t)
       (insert "*** Code Execution\n")
       (insert "#+BEGIN_SRC scheme\n" code "\n#+END_SRC\n\n")
       (gaia-chat--scroll-to-bottom))))
@@ -465,6 +491,17 @@
         (insert user-input))
       (gaia-chat--scroll-to-bottom))))
 
+(defun gaia-chat--on-notebook-done (_val)
+  "Handle notebook-done event: code was executed successfully, just insert the prompt."
+  (with-current-buffer (gaia-chat-buffer)
+    (let ((inhibit-read-only t))
+      (setq gaia-chat--active-request nil)
+      (setq gaia-chat--stream-state nil)
+      (setq gaia-chat--code-executed nil)
+      (gaia-chat--insert-prompt)
+      (gaia-chat--scroll-to-bottom)
+      (pop-to-buffer (current-buffer) '((display-buffer-reuse-window display-buffer-same-window))))))
+
 (defun gaia-chat--on-final (answer)
   "Insert the final response and prepare the next prompt."
   (with-current-buffer (gaia-chat-buffer)
@@ -473,8 +510,25 @@
       (goto-char (point-max))
       (when (eq gaia-chat--stream-state 'thought)
         (insert "\n#+END_QUOTE\n\n"))
-      (insert "*** Final Answer\n" answer "\n")
+      (cond
+       ;; Case 1: Token stream is active — replace streamed tokens with clean answer
+       ((and (eq gaia-chat--stream-state 'token)
+             gaia-chat--stream-start-pos
+             (markerp gaia-chat--stream-start-pos)
+             (buffer-live-p (marker-buffer gaia-chat--stream-start-pos)))
+        (delete-region gaia-chat--stream-start-pos (point-max))
+        (insert answer "\n")
+        (set-marker gaia-chat--stream-start-pos nil)
+        (setq gaia-chat--stream-start-pos nil))
+       ;; Case 2: Code was executed during this cycle — don't add a redundant heading
+       (gaia-chat--code-executed
+        (unless (string-empty-p answer)
+          (insert "\n*** Assistant\n" answer "\n")))
+       ;; Case 3: Pure conversational reply — show as Final Answer
+       (t
+        (insert "\n*** Final Answer\n" answer "\n")))
       (setq gaia-chat--stream-state nil)
+      (setq gaia-chat--code-executed nil)
       (gaia-chat--insert-prompt)
       (gaia-chat--scroll-to-bottom)
       (pop-to-buffer (current-buffer) '((display-buffer-reuse-window display-buffer-same-window))))))
@@ -513,6 +567,7 @@
 (gaia-connection-register-handler 'result #'gaia-chat--on-result)
 (gaia-connection-register-handler 'repl-error #'gaia-chat--on-repl-error)
 (gaia-connection-register-handler 'final #'gaia-chat--on-final)
+(gaia-connection-register-handler 'notebook-done #'gaia-chat--on-notebook-done)
 (gaia-connection-register-handler 'error #'gaia-chat--on-error)
 (gaia-connection-register-handler 'session-list #'gaia-chat--on-session-list)
 (gaia-connection-register-handler 'history-list #'gaia-chat--on-history-list)

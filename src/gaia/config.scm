@@ -21,6 +21,8 @@
     (base-model . "gemma4:e2b")
     (thinking . #t)
     (system-prompt . #f)
+    (state-injection . #f)
+    (wisp-mode . #f)
     (allow-sandbox-fallback . #f))) ;; Default system prompt is usually hardcoded in core, but can be overridden
 
 (define *config* (make-parameter %default-config))
@@ -37,10 +39,12 @@
                                   ((model) "GAIA_MODEL")
                                   ((base-model) "GAIA_BASE_MODEL")
                                   ((system-prompt) "GAIA_SYSTEM_PROMPT")
+                                  ((state-injection) "GAIA_STATE_INJECTION")
+                                  ((wisp-mode) "GAIA_WISP_MODE")
                                   ((allow-sandbox-fallback) "GAIA_ALLOW_SANDBOX_FALLBACK")
                                   (else #f))))
                    (and env-var (getenv env-var)))))
-    (if (and env-val (eq? key 'allow-sandbox-fallback))
+    (if (and env-val (member key '(allow-sandbox-fallback state-injection wisp-mode)))
         (or (string=? env-val "1")
             (string-ci=? env-val "true")
             (string-ci=? env-val "yes"))

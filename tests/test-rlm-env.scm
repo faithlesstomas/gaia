@@ -144,7 +144,7 @@
   (let ((env (make-rlm-env)))
     ;; Unmatched parens - auto-healing
     (test-equal "heals unmatched closing parentheses"
-      '(ok "[Auto-healed 1 missing parentheses]\n42")
+      '(ok "[System Warning: Auto-healed 1 missing parentheses. Evaluation succeeded. Result follows:]\n42")
       (rlm-eval! env "(display 42"))
 
     ;; Unmatched parens - extra closing parens (cannot heal)

@@ -75,7 +75,16 @@
                                                                (put-message channel `(stream ,evt))))))
                    (put-message channel `(done ,res))))
                (lambda (key . args)
-                 (put-message channel `(error ,(format #f "~s ~s" key args))))))))
+                 (let* ((core-mod (resolve-module '(gaia core) #:ensure #f))
+                        (int? (and core-mod (module-ref core-mod '*interrupted* #f))))
+                   (if (or (eq? key 'user-interrupt)
+                           int?
+                           (and (eq? key 'wrong-type-arg)
+                                (pair? args)
+                                (string? (car args))
+                                (string-contains (car args) "port-read-buffer")))
+                       (put-message channel `(error "user-interrupt"))
+                       (put-message channel `(error ,(format #f "~s ~s" key args))))))))))
 
         ;; Spawn a fiber to read from the channel and fulfill the resolver
         (spawn-fiber
@@ -171,163 +180,183 @@
                                     (let ((err-str (format #f "Failed with consecutive errors, diagnostic sub-agent also failed: ~a" err)))
                                       (when event-handler (event-handler `(repl-error ,err-str)))
                                       (<- resolve-promise 'fulfill (cons err-str history))))))))
-                (let* ((prompt last-output)
-                       (stream-callback (lambda (evt)
-                                          (when event-handler
-                                            (event-handler evt)))))
-                  (let ((chat-promise (<- llm-client 'chat session-id prompt model
-                                           (or (get-config 'system-prompt) SYSTEM_PROMPT)
-                                           thinking history stream-callback
-                                           "user")))
-                    (on chat-promise
-                        (lambda (response)
-                          (let* ((payload (assoc-ref response "payload"))
-                                 (response-text (if payload
-                                                    (assoc-ref payload "content")
-                                                    (let ((err (assoc-ref response "error")))
-                                                      (if err
-                                                          (string-append "Error from LLM API: " (if (string? err) err (format #f "~a" err)))
-                                                          "Error: No payload in response"))))
-                                 (reasoning-text (if payload (assoc-ref payload "reasoning") ""))
-                                 (prose (clean-assistant-content response-text))
-                                 (conf-val (extract-confidence response-text)))
+                (let* ((stream-callback (lambda (evt)
+                                           (when event-handler
+                                             (event-handler evt))))
+                       (defs-promise (<- sandbox 'definitions)))
+                  (on defs-promise
+                      (lambda (bindings)
+                        (let* ((state-header
+                                (if (and (get-config 'state-injection)
+                                         (not (null? bindings)))
+                                    (let* ((binding-strings
+                                            (map (lambda (pair)
+                                                   (format #f "(~a -> ~a)" (car pair) (cdr pair)))
+                                                 bindings))
+                                           (joined (string-join binding-strings ", ")))
+                                      (format #f "[REPL State: Defined variables and functions: ~a]\n\n" joined))
+                                    ""))
+                               (prompt (string-append state-header last-output))
+                               (chat-promise (<- llm-client 'chat session-id prompt model
+                                                 (get-solver-system-prompt)
+                                                 thinking history stream-callback
+                                                 "user")))
+                          (on chat-promise
+                              (lambda (response)
+                                (let* ((payload (assoc-ref response "payload"))
+                                       (err (assoc-ref response "error")))
+                                  (cond
+                                   ((and err (string=? err "user-interrupt"))
+                                    (gaia-log "[GAIA] LLM call aborted due to user interrupt. Bailing out.")
+                                    (<- resolve-promise 'fulfill (cons "Interrupted" history)))
+                                   (else
+                                    (let* ((response-text (if payload
+                                                              (assoc-ref payload "content")
+                                                              (string-append "Error from LLM API: " (if (string? err) err (format #f "~a" err)))))
+                                           (reasoning-text (if payload (assoc-ref payload "reasoning") ""))
+                                           (prose (clean-assistant-content response-text))
+                                           (conf-val (extract-confidence response-text)))
 
-                            (when (and reasoning-text (> (string-length reasoning-text) 0))
-                              (when event-handler (event-handler `(thought-full ,reasoning-text)))
-                              (gaia-log (string-append C-GREY "[GAIA] Thinking Complete." C-RESET "\n")))
+                                      (when (and reasoning-text (> (string-length reasoning-text) 0))
+                                        (when event-handler (event-handler `(thought-full ,reasoning-text)))
+                                        (gaia-log (string-append C-GREY "[GAIA] Thinking Complete." C-RESET "\n")))
 
-                            (when (> (string-length prose) 0)
-                              (when event-handler (event-handler `(analysis ,prose)))
-                              (gaia-log (string-append C-BLUE "\n[GAIA] Analysis: " C-RESET (markdown->ansi prose) "\n")))
+                                      (when (> (string-length prose) 0)
+                                        (when event-handler (event-handler `(analysis ,prose)))
+                                        (gaia-log (string-append C-BLUE "\n[GAIA] Analysis: " C-RESET (markdown->ansi prose) "\n")))
 
-                            (let* ((updated-transcript
-                                    (append transcript
-                                            (if (= step 1)
-                                                (list (cons "original-task" last-output)
-                                                      (cons "assistant" (truncate-for-transcript response-text))
-                                                      (cons "user" last-output))
-                                                (list (cons "user" last-output)
-                                                      (cons "assistant" (truncate-for-transcript response-text)))))))
+                                      (let* ((updated-transcript
+                                              (append transcript
+                                                      (if (= step 1)
+                                                          (list (cons "original-task" last-output)
+                                                                (cons "assistant" (truncate-for-transcript response-text))
+                                                                (cons "user" last-output))
+                                                          (list (cons "user" last-output)
+                                                                (cons "assistant" (truncate-for-transcript response-text)))))))
 
-                              (let ((action-code (extract-code response-text))
-                                    (action-delegate (extract-delegation response-text))
-                                    (final-sig (extract-final-signal response-text)))
-                                (cond
-                                 ;; Case A: Delegation
-                                 (action-delegate
-                                  (match action-delegate
-                                    (('delegate goal context-str)
-                                     (gaia-log (string-append C-BOLD C-YELLOW "\n[GAIA] Spawning Sub-Agent (Delegation):\n" C-RESET "Goal: " goal "\nContext: " context-str "\n"))
-                                     (let* ((sub-vat (spawn-vat))
-                                            (sub-session-id (string-append session-id "-sub-" (number->string (random 1000000000))))
-                                            (sub-agent
-                                             (with-vat sub-vat
-                                               (spawn ^agent-actor sub-session-id
-                                                      (spawn ^repl-sandbox sub-session-id event-handler permission-handler '())
-                                                      llm-client event-handler permission-handler))))
-                                       (let-values (((sub-promise resolve-sub) (new-promise-pair)))
-                                         (<- sub-agent 'solve goal (+ depth 1) '() resolve-sub model thinking)
-                                         (on sub-promise
-                                             (lambda (sub-res-pair)
-                                               (let* ((sub-ans (car sub-res-pair))
-                                                      (formatted-sub-output (string-append "[System Sub-agent]:\nSub-agent execution finished. Result: " sub-ans)))
-                                                 (gaia-log (string-append C-BOLD C-GREEN "\n[GAIA] Sub-Agent completed.\n" C-RESET "Result length: "
-                                                                         (number->string (string-length sub-ans)) " chars\n"))
-                                                 (if final-sig
-                                                     (let* ((loop-steps (drop history (length outer-history)))
-                                                            (clean-history (append outer-history
-                                                                                   (list `(("role" . "user") ("content" . ,task))
-                                                                                         `(("role" . "assistant") ("content" . ,(match final-sig (('final ans) ans) (('final-var var) var) (_ "Sub-agent executed successfully")))
-                                                                                               ("trajectory" . ,(list->vector loop-steps)))))))
-                                                       (<- resolve-promise 'fulfill (cons (match final-sig (('final ans) ans) (('final-var var) var) (_ "Sub-agent executed successfully"))
-                                                                                          clean-history)))
-                                                     (<- self 'solve-step task depth outer-history
-                                                         (append history (list `(("role" . "user") ("content" . ,last-output))
-                                                                               `(("role" . "assistant") ("content" . ,response-text))))
-                                                         (+ step 1) updated-transcript formatted-sub-output resolve-promise model thinking))))
-                                             #:catch (lambda (err)
-                                                       (let ((err-str (format #f "[System Error]:\nSub-agent failed: ~a" err)))
-                                                         (when event-handler (event-handler `(repl-error ,err-str)))
-                                                         (<- self 'solve-step task depth outer-history
-                                                             (append history (list `(("role" . "user") ("content" . ,last-output))
-                                                                                   `(("role" . "assistant") ("content" . ,response-text))))
-                                                             (+ step 1) updated-transcript err-str resolve-promise model thinking)))))))
-                                    (_
-                                     (<- self 'solve-step task depth outer-history
-                                         (append history (list `(("role" . "user") ("content" . ,last-output))
-                                                               `(("role" . "assistant") ("content" . ,response-text))))
-                                         (+ step 1) updated-transcript "[System Error]:\nInvalid delegation format. Use (delegate \"Goal\" \"Context\")" resolve-promise model thinking))))
+                                        (let ((action-code (extract-code response-text))
+                                              (action-delegate (extract-delegation response-text))
+                                              (final-sig (extract-final-signal response-text)))
+                                          (cond
+                                           ;; Case A: Delegation
+                                           (action-delegate
+                                            (match action-delegate
+                                              (('delegate goal context-str)
+                                               (gaia-log (string-append C-BOLD C-YELLOW "\n[GAIA] Spawning Sub-Agent (Delegation):\n" C-RESET "Goal: " goal "\nContext: " context-str "\n"))
+                                               (let* ((sub-vat (spawn-vat))
+                                                      (sub-session-id (string-append session-id "-sub-" (number->string (random 1000000000))))
+                                                      (sub-agent
+                                                       (with-vat sub-vat
+                                                         (spawn ^agent-actor sub-session-id
+                                                                (spawn ^repl-sandbox sub-session-id event-handler permission-handler '())
+                                                                llm-client event-handler permission-handler))))
+                                                 (let-values (((sub-promise resolve-sub) (new-promise-pair)))
+                                                   (<- sub-agent 'solve goal (+ depth 1) '() resolve-sub model thinking)
+                                                   (on sub-promise
+                                                       (lambda (sub-res-pair)
+                                                         (let* ((sub-ans (car sub-res-pair))
+                                                                (formatted-sub-output (string-append "[System Sub-agent]:\nSub-agent execution finished. Result: " sub-ans)))
+                                                           (gaia-log (string-append C-BOLD C-GREEN "\n[GAIA] Sub-Agent completed.\n" C-RESET "Result length: "
+                                                                                   (number->string (string-length sub-ans)) " chars\n"))
+                                                           (if final-sig
+                                                               (let* ((loop-steps (drop history (length outer-history)))
+                                                                      (clean-history (append outer-history
+                                                                                             (list `(("role" . "user") ("content" . ,task))
+                                                                                                   `(("role" . "assistant") ("content" . ,(match final-sig (('final ans) ans) (('final-var var) var) (_ "Sub-agent executed successfully")))
+                                                                                                         ("trajectory" . ,(list->vector loop-steps)))))))
+                                                                 (<- resolve-promise 'fulfill (cons (match final-sig (('final ans) ans) (('final-var var) var) (_ "Sub-agent executed successfully"))
+                                                                                                    clean-history)))
+                                                               (<- self 'solve-step task depth outer-history
+                                                                   (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                                                         `(("role" . "assistant") ("content" . ,response-text))))
+                                                                   (+ step 1) updated-transcript formatted-sub-output resolve-promise model thinking))))
+                                                       #:catch (lambda (err)
+                                                                 (let ((err-str (format #f "[System Error]:\nSub-agent failed: ~a" err)))
+                                                                   (when event-handler (event-handler `(repl-error ,err-str)))
+                                                                   (<- self 'solve-step task depth outer-history
+                                                                       (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                                                             `(("role" . "assistant") ("content" . ,response-text))))
+                                                                       (+ step 1) updated-transcript err-str resolve-promise model thinking)))))))
+                                              (_
+                                               (<- self 'solve-step task depth outer-history
+                                                   (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                                         `(("role" . "assistant") ("content" . ,response-text))))
+                                                   (+ step 1) updated-transcript "[System Error]:\nInvalid delegation format. Use (delegate \"Goal\" \"Context\")" resolve-promise model thinking))))
 
-                                 ;; Case B: Code execution
-                                 (action-code
-                                  (if (and action-code (> (string-length action-code) 0) (not (string=? action-code response-text)))
-                                      (begin
-                                        (when event-handler (event-handler `(code ,action-code)))
-                                        (gaia-log (string-append C-BOLD C-CYAN "\n[GAIA] Executing Scheme Code:\n" C-RESET action-code "\n"))
-                                        (let ((eval-promise (<- sandbox 'eval action-code)))
-                                          (on eval-promise
-                                              (lambda (eval-res)
-                                                (match eval-res
-                                                  (('ok result)
-                                                   (when event-handler (event-handler `(result ,result)))
-                                                   (gaia-log (string-append C-GREEN "\n[REPL] Success:\n" C-RESET result "\n"))
-                                                   (<- self 'solve-step task depth outer-history
-                                                       (append history (list `(("role" . "user") ("content" . ,last-output))
-                                                                             `(("role" . "assistant") ("content" . ,response-text))))
-                                                       (+ step 1) updated-transcript (string-append "[System REPL Output]:\nCode executed successfully. Result:\n" result) resolve-promise model thinking))
-                                                  (('error type msg)
-                                                   (let ((feedback (string-append "[System Error]:\nRuntime Error (" (symbol->string type) "): " msg)))
-                                                     (when event-handler (event-handler `(repl-error ,feedback)))
-                                                     (gaia-log (string-append C-RED "\n[REPL] Runtime Error:\n" C-RESET feedback "\n"))
-                                                     (<- self 'solve-step task depth outer-history
-                                                         (append history (list `(("role" . "user") ("content" . ,last-output))
-                                                                               `(("role" . "assistant") ("content" . ,response-text))))
-                                                         (+ step 1) updated-transcript feedback resolve-promise model thinking)))))
-                                              #:catch (lambda (err)
-                                                        (let ((err-str (format #f "[System Error]:\nSandbox evaluation crash: ~a" err)))
-                                                          (when event-handler (event-handler `(repl-error ,err-str)))
-                                                          (<- self 'solve-step task depth outer-history
-                                                              (append history (list `(("role" . "user") ("content" . ,last-output))
-                                                                                    `(("role" . "assistant") ("content" . ,response-text))))
-                                                              (+ step 1) updated-transcript err-str resolve-promise model thinking))))))
-                                      (let* ((loop-steps (drop history (length outer-history)))
-                                             (clean-history (append outer-history
-                                                                    (list `(("role" . "user") ("content" . ,task))
-                                                                          `(("role" . "assistant") ("content" . ,response-text) ("trajectory" . ,(list->vector loop-steps)))))))
-                                        (<- resolve-promise 'fulfill (cons response-text clean-history)))))
+                                           ;; Case B: Code execution
+                                           (action-code
+                                            (if (and action-code (> (string-length action-code) 0) (not (string=? action-code response-text)))
+                                                (begin
+                                                  (when event-handler (event-handler `(code ,action-code)))
+                                                  (gaia-log (string-append C-BOLD C-CYAN "\n[GAIA] Executing Scheme Code:\n" C-RESET action-code "\n"))
+                                                  (let ((eval-promise (<- sandbox 'eval action-code)))
+                                                    (on eval-promise
+                                                        (lambda (eval-res)
+                                                          (match eval-res
+                                                            (('ok result)
+                                                             (when event-handler (event-handler `(result ,result)))
+                                                             (gaia-log (string-append C-GREEN "\n[REPL] Success:\n" C-RESET result "\n"))
+                                                             (<- self 'solve-step task depth outer-history
+                                                                 (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                                                       `(("role" . "assistant") ("content" . ,response-text))))
+                                                                 (+ step 1) updated-transcript (string-append "[System REPL Output]:\nCode executed successfully. Result:\n" result) resolve-promise model thinking))
+                                                            (('error type msg)
+                                                             (let ((feedback (string-append "[System Error]:\nRuntime Error (" (symbol->string type) "): " msg)))
+                                                               (when event-handler (event-handler `(repl-error ,feedback)))
+                                                               (gaia-log (string-append C-RED "\n[REPL] Runtime Error:\n" C-RESET feedback "\n"))
+                                                               (<- self 'solve-step task depth outer-history
+                                                                   (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                                                         `(("role" . "assistant") ("content" . ,response-text))))
+                                                                   (+ step 1) updated-transcript feedback resolve-promise model thinking)))))
+                                                        #:catch (lambda (err)
+                                                                  (let ((err-str (format #f "[System Error]:\nSandbox evaluation crash: ~a" err)))
+                                                                    (when event-handler (event-handler `(repl-error ,err-str)))
+                                                                    (<- self 'solve-step task depth outer-history
+                                                                        (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                                                              `(("role" . "assistant") ("content" . ,response-text))))
+                                                                        (+ step 1) updated-transcript err-str resolve-promise model thinking))))))
+                                                (let* ((loop-steps (drop history (length outer-history)))
+                                                       (clean-history (append outer-history
+                                                                              (list `(("role" . "user") ("content" . ,task))
+                                                                                    `(("role" . "assistant") ("content" . ,response-text) ("trajectory" . ,(list->vector loop-steps)))))))
+                                                  (<- resolve-promise 'fulfill (cons response-text clean-history)))))
 
-                                 ;; Case C: Final Signal
-                                 ((and final-sig (match final-sig (('final ans) ans) (('final-var var) var) (_ #f))) =>
-                                  (lambda (answer)
-                                    (when event-handler (event-handler `(final ,answer)))
-                                    (if (equal? (car final-sig) 'final)
-                                        (gaia-log (string-append C-BOLD "[GAIA] Final Answer: " C-RESET (markdown->ansi answer) "\n"))
-                                        (gaia-log (string-append C-BOLD "[GAIA] Answer stored in: " C-RESET answer "\n")))
-                                    (let* ((loop-steps (drop history (length outer-history)))
-                                           (clean-history (append outer-history
-                                                                  (list `(("role" . "user") ("content" . ,task))
-                                                                        `(("role" . "assistant") ("content" . ,answer) ("trajectory" . ,(list->vector loop-steps)))))))
-                                      (<- resolve-promise 'fulfill (cons answer clean-history)))))
+                                           ;; Case C: Final Signal
+                                           ((and final-sig (match final-sig (('final ans) ans) (('final-var var) var) (_ #f))) =>
+                                            (lambda (answer)
+                                              (when event-handler (event-handler `(final ,answer)))
+                                              (if (equal? (car final-sig) 'final)
+                                                  (gaia-log (string-append C-BOLD "[GAIA] Final Answer: " C-RESET (markdown->ansi answer) "\n"))
+                                                  (gaia-log (string-append C-BOLD "[GAIA] Answer stored in: " C-RESET answer "\n")))
+                                              (let* ((loop-steps (drop history (length outer-history)))
+                                                     (clean-history (append outer-history
+                                                                            (list `(("role" . "user") ("content" . ,task))
+                                                                                  `(("role" . "assistant") ("content" . ,answer) ("trajectory" . ,(list->vector loop-steps)))))))
+                                                (<- resolve-promise 'fulfill (cons answer clean-history)))))
 
-                                 ;; Case D: High confidence
-                                 ((and conf-val (>= conf-val CONFIDENCE-THRESHOLD))
-                                  (when event-handler (event-handler `(final ,response-text)))
-                                  (gaia-log (string-append C-GREEN "\n[GAIA] ✓ High confidence (" (number->string conf-val) "%) - stopping." C-RESET "\n"))
-                                  (let* ((loop-steps (drop history (length outer-history)))
-                                         (clean-history (append outer-history
-                                                                (list `(("role" . "user") ("content" . ,task))
-                                                                      `(("role" . "assistant") ("content" . ,response-text) ("trajectory" . ,(list->vector loop-steps)))))))
-                                    (<- resolve-promise 'fulfill (cons response-text clean-history))))
+                                           ;; Case D: High confidence
+                                           ((and conf-val (>= conf-val CONFIDENCE-THRESHOLD))
+                                            (when event-handler (event-handler `(final ,response-text)))
+                                            (gaia-log (string-append C-GREEN "\n[GAIA] ✓ High confidence (" (number->string conf-val) "%) - stopping." C-RESET "\n"))
+                                            (let* ((loop-steps (drop history (length outer-history)))
+                                                   (clean-history (append outer-history
+                                                                          (list `(("role" . "user") ("content" . ,task))
+                                                                                `(("role" . "assistant") ("content" . ,response-text) ("trajectory" . ,(list->vector loop-steps)))))))
+                                              (<- resolve-promise 'fulfill (cons response-text clean-history))))
 
-                                 ;; Case E: Fallback
-                                 (else
-                                  (when event-handler (event-handler `(final ,response-text)))
-                                  (let* ((loop-steps (drop history (length outer-history)))
-                                         (clean-history (append outer-history
-                                                                (list `(("role" . "user") ("content" . ,task))
-                                                                      `(("role" . "assistant") ("content" . ,response-text) ("trajectory" . ,(list->vector loop-steps)))))))
-                                    (<- resolve-promise 'fulfill (cons response-text clean-history)))))))))
-                        #:catch (lambda (err)
-                                  (let ((err-msg (format #f "LLM Call Error: ~a" err)))
-                                    (gaia-log (string-append C-RED err-msg C-RESET "\n"))
-                                    (<- resolve-promise 'fulfill (cons err-msg history)))))))))))] ) )
+                                           ;; Case E: Fallback
+                                           (else
+                                            (when event-handler (event-handler `(final ,response-text)))
+                                            (let* ((loop-steps (drop history (length outer-history)))
+                                                   (clean-history (append outer-history
+                                                                          (list `(("role" . "user") ("content" . ,task))
+                                                                                `(("role" . "assistant") ("content" . ,response-text) ("trajectory" . ,(list->vector loop-steps)))))))
+                                              (<- resolve-promise 'fulfill (cons response-text clean-history)))))))))))
+                              #:catch (lambda (err)
+                                        (let ((err-msg (format #f "LLM Call Error: ~a" err)))
+                                          (gaia-log (string-append C-RED err-msg C-RESET "\n"))
+                                          (<- resolve-promise 'fulfill (cons err-msg history)))))))))
+                      #:catch (lambda (err)
+                                (let ((err-msg (format #f "Definitions Error: ~a" err)))
+                                  (gaia-log (string-append C-RED err-msg C-RESET "\n"))
+                                  (<- resolve-promise 'fulfill (cons err-msg history)))))))))] ) )

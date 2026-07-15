@@ -11,7 +11,7 @@
   #:use-module (srfi srfi-13)
   #:use-module (srfi srfi-43)
   #:use-module (gaia config)
-  #:export (start-gaia SYSTEM_PROMPT extract-code extract-final-signal extract-confidence
+  #:export (start-gaia SYSTEM_PROMPT get-system-prompt get-solver-system-prompt extract-code extract-final-signal extract-confidence
             extract-delegation markdown->ansi MAX-RECURSION-DEPTH CONFIDENCE-THRESHOLD
             C-RESET C-BOLD C-RED C-GREEN C-YELLOW C-BLUE C-CYAN C-GREY
             start-gaia rlm-loop *interrupted* check-interrupt! gaia-log clean-assistant-content
@@ -169,13 +169,6 @@ Step 2 (uses \"my-files\" from Step 1):
 
 The system will execute your code and return the output. You can then reason about the output and write more code.
 
-# COMPLETION SIGNALS
-When you have solved the task COMPLETELY, use ONE of these signals:
-- `FINAL(answer)` — For direct text answers. Example: `FINAL(The file contains 42 errors)`
-- `FINAL_VAR(variable_name)` — For answers stored in a variable from code execution.
-
-After each step, rate your confidence:
-- `CONFIDENCE(score)` — 0-100%. If >= 95%, the system stops automatically.
 
 # RESEARCH & DEBUGGING PROTOCOL
 1. **Search Before You Leap**: If you are unsure about a function signature, return type, or which module to use,
@@ -238,6 +231,61 @@ The directory contains 8 .scm files.
 FINAL(8)
 CONFIDENCE(100)
 ")
+
+(define (get-system-prompt)
+  (let* ((base (if (get-config 'wisp-mode)
+                   SYSTEM_PROMPT
+                   (let* ((start (string-contains SYSTEM_PROMPT "- **Wisp (SRFI-119) Support:**"))
+                          (end (string-contains SYSTEM_PROMPT "# PRE-LOADED MODULES")))
+                     (if (and start end)
+                         (string-append (substring SYSTEM_PROMPT 0 start)
+                                        (substring SYSTEM_PROMPT end))
+                         SYSTEM_PROMPT))))
+         ;; Strip FINAL/CONFIDENCE signals from notebook prompt — they belong to solver only
+         ;; Remove CRITICAL RULE 1 about FINAL
+         (cleaned (regexp-substitute/global #f
+                    "1\\. NEVER put FINAL\\(\\) or FINAL_VAR\\(\\) in the same response as a ```repl code block![^\n]*\n[^\n]*\n[^\n]*\n"
+                    base 'pre "" 'post))
+         ;; Remove example FINAL/CONFIDENCE lines
+         (cleaned (regexp-substitute/global #f "FINAL\\([^)]*\\)\n" cleaned 'pre "" 'post))
+         (cleaned (regexp-substitute/global #f "CONFIDENCE\\([^)]*\\)\n" cleaned 'pre "" 'post))
+         ;; Add notebook-specific instructions before CRITICAL RULES
+         (insert-idx (string-contains cleaned "# CRITICAL RULES"))
+         (notebook-instructions
+           (string-append
+            "# INTERACTIVE NOTEBOOK MODE\n"
+            "You are operating in an interactive notebook mode. When you write a ```repl code block:\n"
+            "1. The system will AUTOMATICALLY execute it and show the result or error inline.\n"
+            "2. If the code produces an error, the system will ask you to fix it. Analyze the error carefully and provide corrected code.\n"
+            "3. After successful execution, the result is shown to the user. Do NOT repeat or summarize the result.\n"
+            "4. Do NOT use FINAL(), FINAL_VAR(), or CONFIDENCE() signals — those are only for the solver mode.\n"
+            "5. Keep your responses concise. Explain what the code does briefly, then write the code.\n\n")))
+    (if insert-idx
+        (string-append (substring cleaned 0 insert-idx)
+                        notebook-instructions
+                        (substring cleaned insert-idx))
+        (string-append cleaned "\n" notebook-instructions))))
+
+
+(define (get-solver-system-prompt)
+  (let* ((base (get-system-prompt))
+         (insert-idx (string-contains base "# RESEARCH & DEBUGGING PROTOCOL")))
+    (if insert-idx
+        (string-append (substring base 0 insert-idx)
+                       "\n# COMPLETION SIGNALS\n"
+                       "When you have solved the task COMPLETELY, use ONE of these signals:\n"
+                       "- `FINAL(answer)` — For direct text answers. Example: `FINAL(The file contains 42 errors)`\n"
+                       "- `FINAL_VAR(variable_name)` — For answers stored in a variable from code execution.\n\n"
+                       "After each step, rate your confidence:\n"
+                       "- `CONFIDENCE(score)` — 0-100%. If >= 95%, the system stops automatically.\n\n"
+                       (substring base insert-idx))
+        (string-append base
+                       "\n# COMPLETION SIGNALS\n"
+                       "When you have solved the task COMPLETELY, use ONE of these signals:\n"
+                       "- `FINAL(answer)` — For direct text answers. Example: `FINAL(The file contains 42 errors)`\n"
+                       "- `FINAL_VAR(variable_name)` — For answers stored in a variable from code execution.\n\n"
+                       "After each step, rate your confidence:\n"
+                       "- `CONFIDENCE(score)` — 0-100%. If >= 95%, the system stops automatically.\n\n"))))
 
 (define (string-contains-last str pattern)
   (let loop ((start 0)
@@ -460,15 +508,18 @@ Prefers the LAST code block (either ```repl or ```wisp) to support LLM self-corr
           t))))
 
 (define (strip-macros text)
-  (let* ((t (regexp-substitute/global #f "FINAL_VAR\\([^)]*\\)" text 'pre "" 'post))
-         (t (regexp-substitute/global #f "FINAL\\([^)]*\\)" t 'pre "" 'post))
-         (t (regexp-substitute/global #f "CONFIDENCE\\([^)]*\\)" t 'pre "" 'post)))
+  (let* ((t (regexp-substitute/global #f (make-regexp "FINAL_VAR\\s*\\([^)]*\\)" regexp/icase) text 'pre "" 'post))
+         (t (regexp-substitute/global #f (make-regexp "FINAL\\s*\\([^)]*\\)" regexp/icase) t 'pre "" 'post))
+         (t (regexp-substitute/global #f (make-regexp "CONFIDENCE\\s*\\([^)]*\\)" regexp/icase) t 'pre "" 'post))
+         (t (regexp-substitute/global #f (make-regexp "CONFIDENCE:\\s*[0-9]+%?" regexp/icase) t 'pre "" 'post))
+         (t (regexp-substitute/global #f (make-regexp "CONFIDENCE\\s+[0-9]+%?" regexp/icase) t 'pre "" 'post))
+         (t (regexp-substitute/global #f (make-regexp "Final Answer:\\s*.*" regexp/icase) t 'pre "" 'post)))
     t))
 
 (define (strip-internal-tokens text)
   (let* ((t (regexp-substitute/global #f "<channel\\|>" text 'pre "" 'post))
-         (t (regexp-substitute/global #f "<unused87>tool_code" text 'pre "" 'post))
-         (t (regexp-substitute/global #f "<unused88>" text 'pre "" 'post)))
+         (t (regexp-substitute/global #f "<unused87>tool_code" t 'pre "" 'post))
+         (t (regexp-substitute/global #f "<unused88>" t 'pre "" 'post)))
     t))
 
 (define (clean-assistant-content text)

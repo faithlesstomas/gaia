@@ -100,6 +100,14 @@
     "Hello"
     (clean-assistant-content "Hello FINAL(42) CONFIDENCE(90)"))
 
+  (test-equal "Strip case-insensitive and format variations"
+    "Hello"
+    (clean-assistant-content "Hello Confidence: 95% CONFIDENCE: 90"))
+
+  (test-equal "Strip Final Answer text"
+    "Hello"
+    (clean-assistant-content "Hello Final Answer: 42"))
+
   (test-equal "Strip multiline mix"
     "Real answer here"
     (clean-assistant-content "<think>\nThinking hard\n</think>\nReal answer here\n```repl\n(write-file \"a.txt\" \"content\")\n```\nCONFIDENCE(98)\nFINAL(answer)")))

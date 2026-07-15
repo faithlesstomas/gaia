@@ -674,7 +674,7 @@
                                   val)))))
                      (output (get-output-string output-port))
                      (final-output (if (and (not is-wisp?) (> (car (analyze-parentheses code-string)) 0))
-                                       (string-append "[Auto-healed " (number->string (car (analyze-parentheses code-string))) " missing parentheses]\n" output)
+                                       (string-append "[System Warning: Auto-healed " (number->string (car (analyze-parentheses code-string))) " missing parentheses. Evaluation succeeded. Result follows:]\n" output)
                                        output)))
                  (close-port output-port)
                  (list 'ok final-output)))
