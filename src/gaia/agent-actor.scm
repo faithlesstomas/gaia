@@ -14,9 +14,19 @@
   #:use-module (gaia executor)
   #:use-module (gaia llm-client)
   #:use-module (gaia utils)
+  ;; GCAS 0.1: Cognitive Object Model and Cognitive Bus
+  #:use-module (gaia com)
+  #:use-module (gaia cognitive-bus)
   #:export (^llm-client
             ^agent-actor
-            current-<-np-extern))
+            current-<-np-extern
+            make-agent-cognitive-bus))
+
+;; GCAS 0.1: Each agent session has its own Cognitive Bus instance
+;; accessible from outside for testing and monitoring.
+(define (make-agent-cognitive-bus)
+  "Creates a fresh Cognitive Bus for a new agent session."
+  (make-cognitive-bus))
 
 (define current-<-np-extern (make-parameter <-np-extern))
 
@@ -135,6 +145,12 @@
    [(solve task depth current-history resolve-promise . optional-args)
     (define model (if (null? optional-args) (get-config 'model) (car optional-args)))
     (define thinking (if (or (null? optional-args) (null? (cdr optional-args))) (get-config 'thinking) (cadr optional-args)))
+    ;; GCAS 0.1: Wrap user task in a Goal Cognitive Object and publish GoalCreated event
+    (let* ((bus (make-agent-cognitive-bus))
+           (goal-co (make-cognitive-object 'goal task
+                                           #:provenance 'USER
+                                           #:epistemic-status 'BELIEF)))
+      (bus-publish bus (make-goal-created-event goal-co)))
     (<- self 'solve-step task depth current-history current-history 1 '() task resolve-promise model thinking)
     'ok]
 
@@ -215,7 +231,13 @@
                                                               (string-append "Error from LLM API: " (if (string? err) err (format #f "~a" err)))))
                                            (reasoning-text (if payload (assoc-ref payload "reasoning") ""))
                                            (prose (clean-assistant-content response-text))
-                                           (conf-val (extract-confidence response-text)))
+                                           (conf-val (extract-confidence response-text))
+                                           ;; GCAS 0.1: Wrap LLM response as a Hypothesis Cognitive Object
+                                           (hyp-co (make-cognitive-object 'hypothesis response-text
+                                                                          #:provenance 'LLM
+                                                                          #:confidence (if conf-val (/ conf-val 100.0) 0.5)))
+                                           (agent-bus (make-agent-cognitive-bus)))
+                                      (bus-publish agent-bus (make-hypothesis-proposed-event hyp-co))
 
                                       (when (and reasoning-text (> (string-length reasoning-text) 0))
                                         (when event-handler (event-handler `(thought-full ,reasoning-text)))
@@ -294,14 +316,28 @@
                                                         (lambda (eval-res)
                                                           (match eval-res
                                                             (('ok result)
-                                                             (when event-handler (event-handler `(result ,result)))
-                                                             (gaia-log (string-append C-GREEN "\n[REPL] Success:\n" C-RESET result "\n"))
-                                                             (<- self 'solve-step task depth outer-history
-                                                                 (append history (list `(("role" . "user") ("content" . ,last-output))
-                                                                                       `(("role" . "assistant") ("content" . ,response-text))))
-                                                                 (+ step 1) updated-transcript (string-append "[System REPL Output]:\nCode executed successfully. Result:\n" result) resolve-promise model thinking))
+                                                             ;; GCAS 0.1: Successful REPL execution is a Verified Fact
+                                                             (let* ((result-co (make-cognitive-object 'result result
+                                                                                                      #:provenance 'REPL
+                                                                                                      #:epistemic-status 'ACCEPTED
+                                                                                                      #:verification-status 'VERIFIED))
+                                                                    (exec-bus (make-agent-cognitive-bus)))
+                                                               (bus-publish exec-bus (make-action-completed-event result-co))
+                                                               (when event-handler (event-handler `(result ,result)))
+                                                               (gaia-log (string-append C-GREEN "\n[REPL] Success:\n" C-RESET result "\n"))
+                                                               (<- self 'solve-step task depth outer-history
+                                                                   (append history (list `(("role" . "user") ("content" . ,last-output))
+                                                                                         `(("role" . "assistant") ("content" . ,response-text))))
+                                                                   (+ step 1) updated-transcript (string-append "[System REPL Output]:\nCode executed successfully. Result:\n" result) resolve-promise model thinking)))
                                                             (('error type msg)
-                                                             (let ((feedback (string-append "[System Error]:\nRuntime Error (" (symbol->string type) "): " msg)))
+                                                             ;; GCAS 0.1: REPL error creates a REFUTED hypothesis CO
+                                                             (let* ((feedback (string-append "[System Error]:\nRuntime Error (" (symbol->string type) "): " msg))
+                                                                    (err-co (make-cognitive-object 'result msg
+                                                                                                   #:provenance 'REPL
+                                                                                                   #:epistemic-status 'REFUTED
+                                                                                                   #:verification-status 'VERIFIED))
+                                                                    (exec-bus (make-agent-cognitive-bus)))
+                                                               (bus-publish exec-bus (make-action-failed-event err-co))
                                                                (when event-handler (event-handler `(repl-error ,feedback)))
                                                                (gaia-log (string-append C-RED "\n[REPL] Runtime Error:\n" C-RESET feedback "\n"))
                                                                (<- self 'solve-step task depth outer-history

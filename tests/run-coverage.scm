@@ -38,7 +38,10 @@
          "test-traceback.scm"
          "test-curator.scm"
          "test-llm-client.scm"
-         "test-hitl-sync.scm")))
+         "test-hitl-sync.scm"
+         ;; GCAS 0.1: Cognitive Object Model and Cognitive Bus tests
+         "test-com.scm"
+         "test-cognitive-bus.scm")))
 
 (define failed-tests '())
 

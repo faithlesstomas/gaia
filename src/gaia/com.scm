@@ -1,0 +1,167 @@
+(define-module (gaia com)
+  #:use-module (srfi srfi-1)
+  #:use-module (srfi srfi-9)
+  #:use-module (ice-9 match)
+  #:export (<cognitive-object>
+            make-cognitive-object
+            cognitive-object?
+            co-id
+            co-type
+            co-content
+            co-provenance
+            co-epistemic-status
+            co-verification-status
+            co-confidence
+            co-valid-from
+            co-valid-to
+            co-invalidated-by
+            co-relations
+            fact?
+            hypothesis?
+            co->alist
+            alist->co
+            co-update-epistemic
+            co-add-relation
+            VALID-PROVENANCES
+            VALID-EPISTEMIC-STATUSES
+            VALID-VERIFICATION-STATUSES
+            VALID-TYPES))
+
+;; Permissible values per GCAS 0.1 taxonomy
+(define VALID-TYPES
+  '(claim hypothesis observation evidence goal plan action result question conflict reflection rule procedure))
+
+(define VALID-PROVENANCES
+  '(USER LLM REPL SENSOR MEMORY EXTERNAL_SOURCE SYMBOLIC_INFERENCE FORMAL_PROOF EXECUTION))
+
+(define VALID-EPISTEMIC-STATUSES
+  '(UNKNOWN HYPOTHESIS ASSUMPTION BELIEF ACCEPTED REFUTED DISPUTED))
+
+(define VALID-VERIFICATION-STATUSES
+  '(UNVERIFIED PARTIALLY_VERIFIED VERIFIED FORMALLY_VERIFIED))
+
+;; Definition of Cognitive Object Record
+(define-record-type <cognitive-object>
+  (%make-co id type content provenance epistemic-status verification-status confidence valid-from valid-to invalidated-by relations)
+  cognitive-object?
+  (id co-id)
+  (type co-type)
+  (content co-content)
+  (provenance co-provenance)
+  (epistemic-status co-epistemic-status)
+  (verification-status co-verification-status)
+  (confidence co-confidence)
+  (valid-from co-valid-from)
+  (valid-to co-valid-to)
+  (invalidated-by co-invalidated-by)
+  (relations co-relations))
+
+(define (generate-co-id)
+  (format #f "co-~a-~a" (current-time) (random 1000000)))
+
+(define* (make-cognitive-object type content
+                                #:key
+                                (id #f)
+                                (provenance 'LLM)
+                                (epistemic-status #f)
+                                (verification-status #f)
+                                (confidence 1.0)
+                                (valid-from 0)
+                                (valid-to 'INF)
+                                (invalidated-by #f)
+                                (relations '()))
+  "Constructor for Cognitive Objects enforcing GCAS epistemic classification rules."
+  (let* ((actual-id (or id (generate-co-id)))
+         ;; Rule 1: LLM outputs automatically carry HYPOTHESIS & UNVERIFIED unless specified
+         (actual-epistemic
+          (or epistemic-status
+              (case provenance
+                ((LLM) 'HYPOTHESIS)
+                ((USER SENSOR) 'BELIEF)
+                ((REPL EXECUTION) 'ACCEPTED)
+                ((FORMAL_PROOF SYMBOLIC_INFERENCE) 'ACCEPTED)
+                (else 'UNKNOWN))))
+         (actual-verification
+          (or verification-status
+              (case provenance
+                ((FORMAL_PROOF) 'FORMALLY_VERIFIED)
+                ((REPL EXECUTION) 'VERIFIED)
+                ((LLM USER SENSOR) 'UNVERIFIED)
+                (else 'UNVERIFIED)))))
+    (%make-co actual-id type content provenance actual-epistemic actual-verification confidence valid-from valid-to invalidated-by relations)))
+
+(define (fact? co)
+  "Predicate: Returns #t if Cognitive Object is an ACCEPTED Fact with VERIFIED or FORMALLY_VERIFIED status."
+  (and (cognitive-object? co)
+       (eq? (co-epistemic-status co) 'ACCEPTED)
+       (memq (co-verification-status co) '(VERIFIED FORMALLY_VERIFIED))))
+
+(define (hypothesis? co)
+  "Predicate: Returns #t if Cognitive Object is a HYPOTHESIS."
+  (and (cognitive-object? co)
+       (eq? (co-epistemic-status co) 'HYPOTHESIS)))
+
+(define (co-update-epistemic co new-epistemic new-verification . optional-args)
+  "Immutably creates a new Cognitive Object with updated epistemic/verification status and optional new confidence & invalidated-by tag."
+  (let ((new-confidence (if (null? optional-args) (co-confidence co) (car optional-args)))
+        (new-invalidated (if (or (null? optional-args) (null? (cdr optional-args))) (co-invalidated-by co) (cadr optional-args))))
+    (%make-co (co-id co)
+              (co-type co)
+              (co-content co)
+              (co-provenance co)
+              new-epistemic
+              new-verification
+              new-confidence
+              (co-valid-from co)
+              (co-valid-to co)
+              new-invalidated
+              (co-relations co))))
+
+(define (co-add-relation co relation-type target-id)
+  "Immutably adds a relational link ((relation-type . target-id)) to Cognitive Object."
+  (%make-co (co-id co)
+            (co-type co)
+            (co-content co)
+            (co-provenance co)
+            (co-epistemic-status co)
+            (co-verification-status co)
+            (co-confidence co)
+            (co-valid-from co)
+            (co-valid-to co)
+            (co-invalidated-by co)
+            (cons (cons relation-type target-id) (co-relations co))))
+
+(define (co->alist co)
+  "Serializes Cognitive Object to Guile alist for IPC / Goblins actor transmission."
+  `(("id" . ,(co-id co))
+    ("type" . ,(symbol->string (co-type co)))
+    ("content" . ,(co-content co))
+    ("provenance" . ,(symbol->string (co-provenance co)))
+    ("epistemic-status" . ,(symbol->string (co-epistemic-status co)))
+    ("verification-status" . ,(symbol->string (co-verification-status co)))
+    ("confidence" . ,(co-confidence co))
+    ("valid-from" . ,(co-valid-from co))
+    ("valid-to" . ,(if (symbol? (co-valid-to co)) (symbol->string (co-valid-to co)) (co-valid-to co)))
+    ("invalidated-by" . ,(or (co-invalidated-by co) "null"))
+    ("relations" . ,(map (lambda (p) (cons (symbol->string (car p)) (cdr p))) (co-relations co)))))
+
+(define (alist->co alist)
+  "Deserializes alist representation into a <cognitive-object> record."
+  (let ((id (assoc-ref alist "id"))
+        (type (string->symbol (or (assoc-ref alist "type") "claim")))
+        (content (or (assoc-ref alist "content") ""))
+        (prov (string->symbol (or (assoc-ref alist "provenance") "LLM")))
+        (epistemic (string->symbol (or (assoc-ref alist "epistemic-status") "HYPOTHESIS")))
+        (verif (string->symbol (or (assoc-ref alist "verification-status") "UNVERIFIED")))
+        (conf (or (assoc-ref alist "confidence") 1.0))
+        (valid-from (or (assoc-ref alist "valid-from") 0))
+        (valid-to-val (assoc-ref alist "valid-to"))
+        (invalidated-by (let ((inv (assoc-ref alist "invalidated-by")))
+                          (if (or (not inv) (string=? inv "null")) #f inv)))
+        (relations (let ((rel (assoc-ref alist "relations")))
+                     (if rel
+                         (map (lambda (pair) (cons (string->symbol (car pair)) (cdr pair))) rel)
+                         '()))))
+    (%make-co id type content prov epistemic verif conf valid-from
+              (if (and (string? valid-to-val) (string=? valid-to-val "INF")) 'INF valid-to-val)
+              invalidated-by relations)))
