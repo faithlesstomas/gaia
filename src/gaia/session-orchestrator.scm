@@ -14,6 +14,8 @@
   #:use-module (gaia cognitive-session)
   #:use-module (gaia cognitive-state)
   #:use-module (gaia cognitive-bus)
+  #:use-module (gaia cognitive-memory)
+  #:use-module (gaia workspace)
   #:export (^session-orchestrator))
 
 (define (clean-history history)
@@ -48,7 +50,7 @@
        (state-events (session-state cognitive-session))))
 
 ;; Session Orchestrator Actor
-(define-actor (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model thinking #:optional (workspace-dir #f) (cognitive-session (make-cognitive-session)))
+(define-actor (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model thinking #:optional (workspace-dir #f) (cognitive-session (make-cognitive-session #:memory-path (string-append "sessions/" session-id ".gcas-memory.scm"))))
   #:self self
   (methods
    [(update-history new-history)
@@ -152,10 +154,19 @@
        (let ((question-co (make-cognitive-object 'question task #:provenance 'USER))
              (goal-co (make-cognitive-object 'goal task #:provenance 'USER)))
          (submit-cognitive-object! cognitive-session question-co 10 'USER)
-         (submit-cognitive-object! cognitive-session goal-co 100 'USER))
-       (let* ((event-sink (lambda (event) (send-event client-socket event)))
-              (chat-promise (<- llm-client 'chat session-id task model
-                                (get-solver-system-prompt) thinking history event-sink)))
+         (submit-cognitive-object! cognitive-session goal-co 100 'USER)
+         (memory-store! (session-memory cognitive-session) question-co)
+         (memory-store! (session-memory cognitive-session) goal-co)
+         (let* ((selected-memory (memory-retrieve (session-memory cognitive-session) task))
+                (context (reconstruct-context goal-co
+                                              (workspace-active (session-workspace cognitive-session))
+                                              selected-memory
+                                              #:constraints '("Use an explicit Action before requesting execution."
+                                                              "Do not present an execution result as a world fact without verification.")))
+                (event-sink (lambda (event) (send-event client-socket event)))
+                ;; History remains an episodic record.  It is not prompt memory.
+                (chat-promise (<- llm-client 'chat session-id context model
+                                  (get-solver-system-prompt) thinking '() event-sink)))
          (on chat-promise
              (lambda (response)
                (let* ((payload (assoc-ref response "payload"))
@@ -206,7 +217,7 @@
                                    #:catch (lambda (err)
                                              (send-event client-socket `(error ,(format #f "GCAS action execution crash: ~a" err)))))))))))
              #:catch (lambda (err)
-                       (send-event client-socket `(error ,(format #f "LLM request failed: ~a" err)))))))))
+                       (send-event client-socket `(error ,(format #f "LLM request failed: ~a" err))))))))))
 
       ;; Explicit compatibility path for the legacy recursive LLM–REPL loop.
       ;; It is an investigation processor, not the default cognitive control loop.
@@ -287,7 +298,7 @@
               (new-sb-actor (spawn ^repl-sandbox session-id event-sink permission-sink '() workspace-dir))
               (new-agent-actor (spawn ^agent-actor session-id new-sb-actor llm-client event-sink permission-sink)))
          (send-event client-socket '(final "Environment and history cleared."))
-         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client '() model thinking workspace-dir (make-cognitive-session)) 'ok)))
+         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client '() model thinking workspace-dir (make-cognitive-session #:memory-path (string-append "sessions/" session-id ".gcas-memory.scm"))) 'ok)))
 
       (('get-model)
        (send-event client-socket `(model-info ,model)))
@@ -374,7 +385,7 @@
                       (new-agent-actor (spawn ^agent-actor new-id new-sb-actor llm-client event-sink permission-sink)))
                  (with-output-to-file ".last_session" (lambda () (display new-id)))
                  (send-event client-socket `(final ,(string-append "Session switched to: " new-id)))
-                 (bcom (^session-orchestrator bcom new-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client new-history model thinking new-ws (make-cognitive-session)) 'ok))))))
+                 (bcom (^session-orchestrator bcom new-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client new-history model thinking new-ws (make-cognitive-session #:memory-path (string-append "sessions/" new-id ".gcas-memory.scm"))) 'ok))))))
 
       (('list-sessions)
        (let ((sessions (if (file-exists? "sessions")

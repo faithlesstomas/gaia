@@ -5,6 +5,7 @@
   #:use-module (gaia cognitive-state)
   #:use-module (gaia workspace)
   #:use-module (gaia cognitive-control)
+  #:use-module (gaia cognitive-memory)
   #:export (<cognitive-session>
             make-cognitive-session
             cognitive-session?
@@ -12,6 +13,7 @@
             session-workspace
             session-bus
             session-control
+            session-memory
             session-submit!
             session-advance!
             session-emit!
@@ -23,18 +25,20 @@
 ;; an LLM or a REPL: processors are attached through bus subscriptions and make
 ;; their own proposals.  That keeps cognition separate from any one processor.
 (define-record-type <cognitive-session>
-  (%make-session state workspace bus control)
+  (%make-session state workspace bus control memory)
   cognitive-session?
   (state session-state)
   (workspace session-workspace)
   (bus session-bus)
-  (control session-control))
+  (control session-control)
+  (memory session-memory))
 
-(define* (make-cognitive-session #:key (workspace-capacity 7) (max-transitions 32))
+(define* (make-cognitive-session #:key (workspace-capacity 7) (max-transitions 32) (memory-path #f))
   (%make-session (make-cognitive-state)
                  (make-global-workspace #:capacity workspace-capacity)
                  (make-cognitive-bus)
-                 (make-cognitive-control #:max-transitions max-transitions)))
+                 (make-cognitive-control #:max-transitions max-transitions)
+                 (make-cognitive-memory #:path memory-path)))
 
 (define (emit! session event)
   (state-record-event! (session-state session) event)

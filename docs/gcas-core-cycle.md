@@ -87,3 +87,9 @@ an execution observation first becomes `Evidence`, then an independently
 supplied verifier may create an accepted, verified `Claim`. A failed verifier
 creates `ConflictDetected` and never an accepted claim. It is intentionally
 separate from the LLM proposal path.
+
+`gaia cognitive-memory` persists structured COs locally, retrieves only memory
+relevant to the current goal, and reconstructs an LLM context from the current
+goal, admitted workspace, selected memory, and active constraints. Server
+`solve` sends this reconstruction with empty chat history; the transcript stays
+an episodic audit record rather than becoming prompt memory.
