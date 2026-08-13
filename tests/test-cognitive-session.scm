@@ -4,6 +4,7 @@
   #:use-module (gaia com)
   #:use-module (gaia cognitive-bus)
   #:use-module (gaia cognitive-session)
+  #:use-module (gaia cognitive-control)
   #:use-module (gaia cognitive-state)
   #:use-module (gaia workspace)
   #:use-module (gaia cognitive-processor))
@@ -124,5 +125,17 @@
         (delete-file path)
         (and (null? (state-objects (session-state cleared)))
              (null? (state-events (session-state cleared)))))))
+
+  (test-assert "control records execution progress, failure budgets, and user interruption"
+    (let* ((session (make-cognitive-session #:max-transitions 10))
+           (action (make-cognitive-object 'action "(+ 1 1)" #:provenance 'LLM))
+           (result (make-cognitive-object 'result "2" #:provenance 'REPL
+                                          #:relations `((produced-by . ,(co-id action))))))
+      (session-submit! session action #:origin 'CONTROL)
+      (session-advance! session)
+      (session-record-result! session (co-id action) result)
+      (and (= (control-progress-count (session-control session)) 1)
+           (eq? (session-request-interrupt! session) 'USER_INTERRUPTED)
+           (eq? (control-termination-reason (session-control session)) 'USER_INTERRUPTED))))
 
 (test-end "gaia-cognitive-session")

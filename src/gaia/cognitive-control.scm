@@ -1,5 +1,6 @@
 (define-module (gaia cognitive-control)
   #:use-module (srfi srfi-9)
+  #:use-module (srfi srfi-1)
   #:use-module (gaia com)
   #:use-module (gaia workspace)
   #:export (<cognitive-control>
@@ -8,6 +9,11 @@
             control-transition-count
             control-max-transitions
             control-record-transition!
+            control-record-progress!
+            control-progress-count
+            control-record-failure!
+            control-failure-count
+            control-request-interrupt!
             control-termination-reason
             control-select-candidate
             control-action-permitted?))
@@ -15,15 +21,26 @@
 ;; Minimal explicit control policy.  Richer scheduling and cost models can be
 ;; substituted without changing workspace or processor semantics.
 (define-record-type <cognitive-control>
-  (%make-control transitions-cell max-transitions)
+  (%make-control transitions-cell progress-cell stalled-cell failures-cell interrupted-cell
+                 max-transitions max-stalled-transitions max-failures)
   cognitive-control?
   (transitions-cell control-transitions-cell)
-  (max-transitions control-max-transitions))
+  (progress-cell control-progress-cell)
+  (stalled-cell control-stalled-cell)
+  (failures-cell control-failures-cell)
+  (interrupted-cell control-interrupted-cell)
+  (max-transitions control-max-transitions)
+  (max-stalled-transitions control-max-stalled-transitions)
+  (max-failures control-max-failures))
 
-(define* (make-cognitive-control #:key (max-transitions 32))
-  (unless (and (integer? max-transitions) (> max-transitions 0))
-    (error "max-transitions must be a positive integer" max-transitions))
-  (%make-control (list 0) max-transitions))
+(define* (make-cognitive-control #:key (max-transitions 32) (max-stalled-transitions 8)
+                                (max-failures 3))
+  (unless (every (lambda (value) (and (integer? value) (> value 0)))
+                 (list max-transitions max-stalled-transitions max-failures))
+    (error "control budgets must be positive integers"
+           max-transitions max-stalled-transitions max-failures))
+  (%make-control (list 0) (list 0) (list 0) (list 0) (list #f)
+                 max-transitions max-stalled-transitions max-failures))
 
 (define (control-transition-count control)
   (car (control-transitions-cell control)))
@@ -31,11 +48,42 @@
 (define (control-record-transition! control)
   (let ((cell (control-transitions-cell control)))
     (set-car! cell (+ 1 (car cell))))
+  (let ((cell (control-stalled-cell control)))
+    (set-car! cell (+ 1 (car cell))))
   (control-transition-count control))
 
+(define (control-progress-count control)
+  (car (control-progress-cell control)))
+
+(define (control-record-progress! control)
+  "Register an externally observable state advance, not an LLM confidence claim."
+  (let ((cell (control-progress-cell control)))
+    (set-car! cell (+ 1 (car cell))))
+  (set-car! (control-stalled-cell control) 0)
+  (control-progress-count control))
+
+(define (control-failure-count control)
+  (car (control-failures-cell control)))
+
+(define (control-record-failure! control)
+  (let ((cell (control-failures-cell control)))
+    (set-car! cell (+ 1 (car cell))))
+  (control-failure-count control))
+
+(define (control-request-interrupt! control)
+  (set-car! (control-interrupted-cell control) #t)
+  'USER_INTERRUPTED)
+
 (define (control-termination-reason control)
-  (and (>= (control-transition-count control) (control-max-transitions control))
-       'BUDGET_EXHAUSTED))
+  (cond
+   ((car (control-interrupted-cell control)) 'USER_INTERRUPTED)
+   ((>= (control-transition-count control) (control-max-transitions control))
+    'BUDGET_EXHAUSTED)
+   ((>= (control-failure-count control) (control-max-failures control))
+    'FAILURE_BUDGET_EXHAUSTED)
+   ((>= (car (control-stalled-cell control)) (control-max-stalled-transitions control))
+    'NO_PROGRESS)
+   (else #f)))
 
 (define (control-candidate-score candidate)
   "A transparent baseline policy for GCAS-Core.  Priority is explicit intent;

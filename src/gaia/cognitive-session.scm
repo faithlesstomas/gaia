@@ -21,6 +21,7 @@
             session-emit!
             session-release-workspace-object!
             session-clear-workspace!
+            session-request-interrupt!
             session-record-result!
             session-record-failure!))
 
@@ -116,6 +117,13 @@ Memory. A later goal reconstructs its own bounded working set from them."
             (workspace-active (session-workspace session)))
   'ok)
 
+(define (session-request-interrupt! session)
+  "Let cognitive control terminate the active process on an explicit user stop."
+  (let ((reason (control-request-interrupt! (session-control session))))
+    (emit! session (make-cognitive-event 'ProcessTerminated reason #:origin 'CONTROL))
+    (session-clear-workspace! session)
+    reason))
+
 (define (make-reproducibility-record session action-id result-co outcome environment)
   (let ((action-co (state-find (session-state session) action-id)))
     (make-cognitive-object
@@ -138,6 +146,7 @@ Memory. A later goal reconstructs its own bounded working set from them."
   (state-store! (session-state session)
                 (make-reproducibility-record session action-id result-co 'SUCCEEDED environment))
   (emit! session (make-cognitive-event 'ActionCompleted result-co #:origin 'EXECUTION))
+  (control-record-progress! (session-control session))
   result-co)
 
 (define* (session-record-failure! session action-id failure-co #:key (environment "Guile sandbox"))
@@ -148,4 +157,5 @@ Memory. A later goal reconstructs its own bounded working set from them."
   (state-store! (session-state session)
                 (make-reproducibility-record session action-id failure-co 'FAILED environment))
   (emit! session (make-cognitive-event 'ActionFailed failure-co #:origin 'EXECUTION))
+  (control-record-failure! (session-control session))
   failure-co)

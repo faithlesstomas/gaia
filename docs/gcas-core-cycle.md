@@ -35,6 +35,12 @@ the same cognitive process without requiring a network source or model service.
 5. Every `Result` or `Failure` references the Action that caused it.
 6. Control terminates a process from its budget, progress, and goal criterion—not only an LLM's declared confidence.
 
+Control tracks transitions, observable progress, consecutive non-progressing
+transitions, execution failures, and explicit user interruption. Its baseline
+termination reasons are `BUDGET_EXHAUSTED`, `NO_PROGRESS`,
+`FAILURE_BUDGET_EXHAUSTED`, and `USER_INTERRUPTED`; all are durable terminal
+events rather than implicit loop exits.
+
 ## Workspace and Processor Contract
 
 The current workspace is a bounded candidate queue, separate from Cognitive

@@ -74,6 +74,7 @@ The CO graph and durable memory remain available for audit and retrieval."
        (let ((core-mod (resolve-module '(gaia core) #:ensure #f)))
          (when core-mod
            (module-set! core-mod '*interrupted* #f)))
+       (session-request-interrupt! cognitive-session)
        'ok)
 
       (('eval task . retry-args)
