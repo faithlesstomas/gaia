@@ -57,7 +57,7 @@ The CO graph and durable memory remain available for audit and retrieval."
   (session-clear-workspace! cognitive-session))
 
 ;; Session Orchestrator Actor
-(define-actor (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model thinking #:optional (workspace-dir #f) (cognitive-session (make-cognitive-session #:memory-path (string-append "sessions/" session-id ".gcas-memory.scm"))))
+(define-actor (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model thinking #:optional (workspace-dir #f) (cognitive-session (make-cognitive-session #:memory-path (string-append "sessions/" session-id ".gcas-memory.scm") #:state-path (string-append "sessions/" session-id ".gcas-state.scm"))))
   #:self self
   (methods
    [(update-history new-history)
@@ -328,7 +328,7 @@ The CO graph and durable memory remain available for audit and retrieval."
               (new-sb-actor (spawn ^repl-sandbox session-id event-sink permission-sink '() workspace-dir))
               (new-agent-actor (spawn ^agent-actor session-id new-sb-actor llm-client event-sink permission-sink)))
          (send-event client-socket '(final "Environment and history cleared."))
-         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client '() model thinking workspace-dir (make-cognitive-session #:memory-path (string-append "sessions/" session-id ".gcas-memory.scm"))) 'ok)))
+         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client '() model thinking workspace-dir (make-cognitive-session #:memory-path (string-append "sessions/" session-id ".gcas-memory.scm") #:state-path (string-append "sessions/" session-id ".gcas-state.scm") #:restore? #f)) 'ok)))
 
       (('get-model)
        (send-event client-socket `(model-info ,model)))
@@ -415,7 +415,7 @@ The CO graph and durable memory remain available for audit and retrieval."
                       (new-agent-actor (spawn ^agent-actor new-id new-sb-actor llm-client event-sink permission-sink)))
                  (with-output-to-file ".last_session" (lambda () (display new-id)))
                  (send-event client-socket `(final ,(string-append "Session switched to: " new-id)))
-                 (bcom (^session-orchestrator bcom new-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client new-history model thinking new-ws (make-cognitive-session #:memory-path (string-append "sessions/" new-id ".gcas-memory.scm"))) 'ok))))))
+                 (bcom (^session-orchestrator bcom new-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client new-history model thinking new-ws (make-cognitive-session #:memory-path (string-append "sessions/" new-id ".gcas-memory.scm") #:state-path (string-append "sessions/" new-id ".gcas-state.scm"))) 'ok))))))
 
       (('list-sessions)
        (let ((sessions (if (file-exists? "sessions")

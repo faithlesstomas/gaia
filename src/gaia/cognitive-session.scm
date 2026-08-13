@@ -14,6 +14,8 @@
             session-bus
             session-control
             session-memory
+            session-state-path
+            session-persist!
             session-submit!
             session-advance!
             session-emit!
@@ -26,24 +28,43 @@
 ;; an LLM or a REPL: processors are attached through bus subscriptions and make
 ;; their own proposals.  That keeps cognition separate from any one processor.
 (define-record-type <cognitive-session>
-  (%make-session state workspace bus control memory)
+  (%make-session state workspace bus control memory state-path)
   cognitive-session?
   (state session-state)
   (workspace session-workspace)
   (bus session-bus)
   (control session-control)
-  (memory session-memory))
+  (memory session-memory)
+  (state-path session-state-path))
 
-(define* (make-cognitive-session #:key (workspace-capacity 7) (max-transitions 32) (memory-path #f))
-  (%make-session (make-cognitive-state)
-                 (make-global-workspace #:capacity workspace-capacity)
-                 (make-cognitive-bus)
-                 (make-cognitive-control #:max-transitions max-transitions)
-                 (make-cognitive-memory #:path memory-path)))
+(define* (make-cognitive-session #:key (workspace-capacity 7) (max-transitions 32)
+                                (memory-path #f) (state-path #f) (restore? #t))
+  (let ((session
+         (%make-session (if (and state-path restore?)
+                            (load-cognitive-state state-path)
+                            (make-cognitive-state))
+                        (make-global-workspace #:capacity workspace-capacity)
+                        (make-cognitive-bus)
+                        (make-cognitive-control #:max-transitions max-transitions)
+                        (make-cognitive-memory #:path memory-path #:restore? restore?)
+                        state-path)))
+    ;; Start an explicitly cleared session with an empty, durable state rather
+    ;; than letting an old audit graph be restored later.
+    (when (and state-path (not restore?))
+      (session-persist! session))
+    session))
+
+(define (session-persist! session)
+  (let ((path (session-state-path session)))
+    (when path
+      (save-cognitive-state! (session-state session) path))
+    path))
 
 (define (emit! session event)
   (state-record-event! (session-state session) event)
-  (bus-publish (session-bus session) event))
+  (bus-publish (session-bus session) event)
+  (session-persist! session)
+  event)
 
 (define* (session-emit! session type payload #:key (origin 'KERNEL))
   "Record and broadcast a semantic state-change event."
@@ -95,18 +116,36 @@ Memory. A later goal reconstructs its own bounded working set from them."
             (workspace-active (session-workspace session)))
   'ok)
 
-(define (session-record-result! session action-id result-co)
+(define (make-reproducibility-record session action-id result-co outcome environment)
+  (let ((action-co (state-find (session-state session) action-id)))
+    (make-cognitive-object
+     'observation
+     `((action-id . ,action-id)
+       (action-payload . ,(co-content action-co))
+       (outcome . ,outcome)
+       (output . ,(co-content result-co))
+       (runtime . ,environment)
+       (recorded-at . ,(current-time)))
+     #:provenance 'EXECUTION
+     #:relations `((reproduces . ,action-id)
+                   (observes . ,(co-id result-co))))))
+
+(define* (session-record-result! session action-id result-co #:key (environment "Guile sandbox"))
   (unless (and (state-has-object? (session-state session) action-id)
                (control-action-permitted? (state-find (session-state session) action-id)))
     (error "Result must reference a permitted Action CO" action-id))
   (state-store! (session-state session) result-co)
+  (state-store! (session-state session)
+                (make-reproducibility-record session action-id result-co 'SUCCEEDED environment))
   (emit! session (make-cognitive-event 'ActionCompleted result-co #:origin 'EXECUTION))
   result-co)
 
-(define (session-record-failure! session action-id failure-co)
+(define* (session-record-failure! session action-id failure-co #:key (environment "Guile sandbox"))
   (unless (and (state-has-object? (session-state session) action-id)
                (control-action-permitted? (state-find (session-state session) action-id)))
     (error "Failure must reference a permitted Action CO" action-id))
   (state-store! (session-state session) failure-co)
+  (state-store! (session-state session)
+                (make-reproducibility-record session action-id failure-co 'FAILED environment))
   (emit! session (make-cognitive-event 'ActionFailed failure-co #:origin 'EXECUTION))
   failure-co)

@@ -66,6 +66,13 @@ session-advance! → selective admission → WorkspaceBroadcast
 session-record-result! / session-record-failure! → ActionCompleted / ActionFailed
 ```
 
+Each server session durably records its CO graph and chronological event log in
+`sessions/<session-id>.gcas-state.scm`. An execution outcome also creates a
+reproducibility observation linked to its Action and Result/Failure, containing
+the submitted payload, outcome, output, runtime label, and timestamp. `/clear`
+creates a fresh durable cognitive boundary; it does not silently restore the
+previous graph.
+
 Run the executable deterministic showcase with:
 
 ```sh

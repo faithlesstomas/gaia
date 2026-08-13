@@ -2,6 +2,7 @@
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-9)
   #:use-module (ice-9 rdelim)
+  #:use-module (ice-9 ftw)
   #:use-module (gaia com)
   #:export (<cognitive-memory>
             make-cognitive-memory
@@ -28,8 +29,13 @@
             (if (list? data) (map alist->co data) '()))))
       '()))
 
-(define* (make-cognitive-memory #:key (path #f))
-  (%make-memory (list (load-objects path)) path))
+(define* (make-cognitive-memory #:key (path #f) (restore? #t))
+  (let ((memory (%make-memory (list (if restore? (load-objects path) '())) path)))
+    ;; `/clear` must establish a new durable memory boundary rather than loading
+    ;; the preceding session's memories on the next constructor call.
+    (when (and path (not restore?))
+      (persist! memory))
+    memory))
 
 (define (memory-objects memory)
   (car (memory-objects-cell memory)))
@@ -37,6 +43,9 @@
 (define (persist! memory)
   (let ((path (memory-path memory)))
     (when path
+      (let ((directory (dirname path)))
+        (unless (file-exists? directory)
+          (mkdir directory)))
       (call-with-output-file path
         (lambda (port) (write (map co->alist (memory-objects memory)) port))))))
 

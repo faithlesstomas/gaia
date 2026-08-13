@@ -97,4 +97,32 @@
       (and (null? (workspace-active (session-workspace session)))
            (state-has-object? (session-state session) (co-id goal))))))
 
+  (test-assert "state, event log, and reproducibility record survive session restoration"
+    (let* ((path "/tmp/gaia-gcas-state-test.scm")
+           (_ (when (file-exists? path) (delete-file path)))
+           (session (make-cognitive-session #:state-path path))
+           (action (make-cognitive-object 'action "(+ 20 22)" #:provenance 'LLM))
+           (result (make-cognitive-object 'result "42" #:provenance 'REPL
+                                          #:relations `((produced-by . ,(co-id action))))))
+      (session-submit! session action #:priority 90 #:origin 'CONTROL)
+      (session-advance! session)
+      (session-record-result! session (co-id action) result #:environment "test-runtime")
+      (let* ((restored (make-cognitive-session #:state-path path))
+             (objects (state-objects (session-state restored))))
+        (delete-file path)
+        (and (state-has-object? (session-state restored) (co-id result))
+             (member 'ActionCompleted (map event-type (state-events (session-state restored))))
+             (= (length (filter (lambda (co) (eq? (co-type co) 'observation)) objects)) 1)))))
+
+  (test-assert "an explicitly cleared durable session does not restore old state"
+    (let* ((path "/tmp/gaia-gcas-cleared-state-test.scm")
+           (_ (when (file-exists? path) (delete-file path)))
+           (original (make-cognitive-session #:state-path path))
+           (goal (make-cognitive-object 'goal "Old goal" #:provenance 'USER)))
+      (session-submit! original goal #:origin 'USER)
+      (let ((cleared (make-cognitive-session #:state-path path #:restore? #f)))
+        (delete-file path)
+        (and (null? (state-objects (session-state cleared)))
+             (null? (state-events (session-state cleared)))))))
+
 (test-end "gaia-cognitive-session")
