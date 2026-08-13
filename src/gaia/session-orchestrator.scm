@@ -33,10 +33,12 @@
   (spawn-promise-and-resolver))
 
 (define (submit-cognitive-object! cognitive-session co priority origin)
-  "Submit a CO to the session's GCAS workspace and advance one transition."
+  "Submit a CO to the session's GCAS workspace and require its admission."
   (session-submit! cognitive-session co #:priority priority #:origin origin)
-  (session-advance! cognitive-session)
-  co)
+  (let ((admitted (session-advance! cognitive-session)))
+    (unless (and admitted (equal? (co-id admitted) (co-id co)))
+      (error "Cognitive Object was not admitted by Control" (co-id co)))
+    co))
 
 (define (cognitive-event-summary cognitive-session)
   (map (lambda (event)
@@ -153,81 +155,74 @@
          (submit-cognitive-object! cognitive-session goal-co 100 'USER))
        (let* ((event-sink (lambda (event) (send-event client-socket event)))
               (chat-promise (<- llm-client 'chat session-id task model
-                                (get-solver-system-prompt)
-                                thinking history event-sink)))
+                                (get-solver-system-prompt) thinking history event-sink)))
          (on chat-promise
              (lambda (response)
                (let* ((payload (assoc-ref response "payload"))
                       (err (assoc-ref response "error"))
-                      (response-text (if payload
-                                         (assoc-ref payload "content")
-                                         (string-append "Error from LLM API: " (if (string? err) err (format #f "~a" err))))))
+                      (response-text (if payload (assoc-ref payload "content")
+                                         (string-append "Error from LLM API: "
+                                                        (if (string? err) err (format #f "~a" err))))))
                  (if (and err (string=? err "user-interrupt"))
-                     (begin
-                       (gaia-log "[SERVER] Solve interrupted by user.")
-                       (send-event client-socket `(error "user-interrupt")))
-                     (let ((action-code (extract-code response-text)))
-                       (if action-code
-                           ;; Spawning agent-actor solver recursively
+                     (send-event client-socket `(error "user-interrupt"))
+                     (let* ((hypothesis-co (make-cognitive-object 'hypothesis response-text #:provenance 'LLM))
+                            (action-code (extract-code response-text))
+                            (updated-history (append history
+                                                     (list `(("role" . "user") ("content" . ,task))
+                                                           `(("role" . "assistant") ("content" . ,response-text))))))
+                       (submit-cognitive-object! cognitive-session hypothesis-co 70 'LLM)
+                       (session-emit! cognitive-session 'HypothesisProposed hypothesis-co #:origin 'LLM)
+                       (if (not action-code)
                            (begin
-                             (gaia-log "[SERVER] LLM initiated code execution. Spawning agent-actor solver.")
+                             (save-session session-id updated-history)
+                             (send-event client-socket `(final ,(clean-assistant-content response-text)))
+                             (<- self 'update-history updated-history))
+                           (let ((action-co (make-cognitive-object 'action action-code #:provenance 'LLM
+                                                                    #:relations `((tests . ,(co-id hypothesis-co))))))
+                             (submit-cognitive-object! cognitive-session action-co 85 'PLANNER)
+                             (session-emit! cognitive-session 'ActionRequested action-co #:origin 'CONTROL)
                              (send-event client-socket `(code ,action-code))
-                             (gaia-log (string-append C-BOLD C-CYAN "\n[GAIA] Executing Scheme Code:\n" C-RESET action-code "\n"))
                              (let ((eval-promise (<- sandbox-actor 'eval action-code)))
                                (on eval-promise
                                    (lambda (eval-res)
-                                     (let* ((result-str (match eval-res
-                                                          (('ok res)
-                                                           (send-event client-socket `(result ,res))
-                                                           (gaia-log (string-append C-GREEN "\n[REPL] Success:\n" C-RESET res "\n"))
-                                                           (string-append "Code executed successfully. Result:\n" res))
-                                                          (('error type msg)
-                                                           (let ((err-msg (string-append "Runtime Error (" (symbol->string type) "): " msg)))
-                                                             (send-event client-socket `(repl-error ,err-msg))
-                                                             (gaia-log (string-append C-RED "\n[REPL] Runtime Error:\n" C-RESET err-msg "\n"))
-                                                             err-msg))))
-                                            (step-history (append history
-                                                                  (list `(("role" . "user") ("content" . ,task))
-                                                                        `(("role" . "assistant") ("content" . ,response-text)))))
-                                            (step-transcript (list (cons "original-task" task)
-                                                                   (cons "assistant" (truncate-for-transcript response-text))
-                                                                   (cons "user" task))))
-                                       (let-values (((solve-promise resolve-solve) (new-promise-pair)))
-                                         (<- agent-actor 'solve-step task 0 history step-history 2 step-transcript result-str resolve-solve model thinking)
-                                         (on solve-promise
-                                             (lambda (res-pair)
-                                               (let ((answer (car res-pair))
-                                                     (updated-history (cdr res-pair)))
-                                                 (if (string=? answer "Interrupted")
-                                                     (begin
-                                                       (gaia-log "[SERVER] Solve-step interrupted by user.")
-                                                       (send-event client-socket `(error "user-interrupt")))
-                                                     (begin
-                                                       (gaia-log (format #f "[SERVER] Solve completed. Saving session ~a." session-id))
-                                                       (save-session session-id updated-history)
-                                                       (with-output-to-file ".last_session" (lambda () (display session-id)))
-                                                       (send-event client-socket `(final ,answer))
-                                                       (<- self 'update-history updated-history)))))
-                                             #:catch (lambda (err)
-                                                       (send-event client-socket `(error ,(format #f "Solver Error: ~a" err))))))))
+                                     (match eval-res
+                                       (('ok res)
+                                        (session-record-result! cognitive-session (co-id action-co)
+                                                                (make-cognitive-object 'result res #:provenance 'REPL
+                                                                                       #:relations `((produced-by . ,(co-id action-co)))))
+                                        (save-session session-id updated-history)
+                                        (send-event client-socket `(result ,res))
+                                        (send-event client-socket `(final ,(string-append "GCAS action completed. The observed execution result is:\n" res)))
+                                        (<- self 'update-history updated-history)
+                                        (session-emit! cognitive-session 'ProcessTerminated 'AWAITING_DELIBERATION #:origin 'CONTROL))
+                                       (('error type msg)
+                                        (let ((err-msg (string-append "Runtime Error (" (symbol->string type) "): " msg)))
+                                          (session-record-failure! cognitive-session (co-id action-co)
+                                                                   (make-cognitive-object 'result err-msg #:provenance 'REPL
+                                                                                          #:relations `((produced-by . ,(co-id action-co)))))
+                                          (send-event client-socket `(repl-error ,err-msg))
+                                          (send-event client-socket `(final ,(string-append "GCAS action failed: " err-msg)))
+                                          (session-emit! cognitive-session 'ProcessTerminated 'FAILED #:origin 'CONTROL))))
                                    #:catch (lambda (err)
-                                             (send-event client-socket `(error ,(format #f "Initial code execution crash: ~a" err)))))))
-                           ;; Conversational reply
-                           (let* ((prose (clean-assistant-content response-text))
-                                  (final-sig (extract-final-signal response-text))
-                                  (final-ans (if final-sig
-                                                 (match final-sig (('final ans) ans) (('final-var var) var) (_ prose))
-                                                 prose))
-                                  (updated-history (append history
-                                                           (list `(("role" . "user") ("content" . ,task))
-                                                                 `(("role" . "assistant") ("content" . ,response-text))))))
-                             (gaia-log "[SERVER] LLM responded conversationally to solve task.")
-                             (send-event client-socket `(final ,final-ans))
-                             (save-session session-id updated-history)
-                             (with-output-to-file ".last_session" (lambda () (display session-id)))
-                             (<- self 'update-history updated-history)))))))
+                                             (send-event client-socket `(error ,(format #f "GCAS action execution crash: ~a" err)))))))))))
              #:catch (lambda (err)
-                       (send-event client-socket `(error ,(format #f "LLM request failed: ~a" err)))))))
+                       (send-event client-socket `(error ,(format #f "LLM request failed: ~a" err)))))))))
+
+      ;; Explicit compatibility path for the legacy recursive LLM–REPL loop.
+      ;; It is an investigation processor, not the default cognitive control loop.
+      (('investigate task)
+       (gaia-log (format #f "[SERVER] Received legacy investigation task: ~a" task))
+       (let-values (((investigation-promise resolve-investigation) (new-promise-pair)))
+         (<- agent-actor 'solve task 0 history resolve-investigation model thinking)
+         (on investigation-promise
+             (lambda (result-pair)
+               (let ((answer (car result-pair))
+                     (updated-history (cdr result-pair)))
+                 (save-session session-id updated-history)
+                 (send-event client-socket `(final ,answer))
+                 (<- self 'update-history updated-history)))
+             #:catch (lambda (err)
+                       (send-event client-socket `(error ,(format #f "Legacy investigation failed: ~a" err)))))))
 
       (('repl code)
        (gaia-log (format #f "[SERVER] Received REPL code execution request."))
@@ -403,6 +398,7 @@
   /clear            - Clear current session history and environment
   /env              - Show variables defined in REPL
   /eval <scheme>    - Execute Scheme code directly in REPL
+  /investigate <q>  - Use the legacy recursive LLM–REPL investigation processor
   /ask <query>      - Ask a one-off question to AI (no recursion)
   /model [name]     - Show or change the active LLM model
   /models           - List available models

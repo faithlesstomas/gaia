@@ -76,5 +76,8 @@ It demonstrates the confirmed, conflicting-evidence, and failed-execution
 outcomes without an external model service. The automated showcase test verifies
 the full event trace for all three outcomes.
 
-The next steps are to route all legacy solver execution through the same action
-boundary, then add memory, planning, and deliberative processors.
+The default server `solve` path now routes model output through
+`HypothesisProposed` and an explicitly admitted `ActionRequested` before it can
+reach the sandbox. The former recursive LLM–REPL loop is retained behind the
+separate `investigate` command as an optional legacy Investigation Processor.
+The next steps are a deliberative processor and structured memory/retrieval.

@@ -569,7 +569,7 @@
                          (string-contains output "notebook-done")
                          (string-contains output "ActionCompleted"))))))
 
-            ;; 6. Test session-orchestrator solve command (recursive solver mode)
+            ;; 6. The default solve command is a single GCAS-controlled cycle.
             (let* ((sandbox (spawn ^repl-sandbox "direct-solve-session" (lambda _ #t) (lambda _ #t) '()))
                    (llm-calls 0)
                    (mock-llm
@@ -589,14 +589,47 @@
                    (mock-socket (open-output-string))
                    (mock-channel #f)
                    (orch (spawn ^session-orchestrator "direct-solve-session" mock-socket mock-channel (lambda (expr) #t) sandbox agent mock-llm '() "gemma4:e2b" #t)))
-              (test-assert "direct-orchestrator: solve (solver mode) runs recursively until final answer"
+              (test-assert "direct-orchestrator: solve records LLM hypothesis, approved Action, and result without invoking RLM recursion"
                 (begin
                   (<- orch 'handle-message '(solve "run this solve"))
+                  (run-turns-synchronously)
+                  (<- orch 'handle-message '(get-cognitive-events))
                   (run-turns-synchronously)
                   (let ((output (get-output-string mock-socket)))
                     (and (string-contains output "code")
                          (string-contains output "result")
                          (string-contains output "final")
+                         (string-contains output "HypothesisProposed")
+                         (string-contains output "ActionRequested")
+                         (string-contains output "ActionCompleted")
+                         (= llm-calls 1))))))
+
+            ;; 7. The retained RLM loop is intentionally opt-in as an
+            ;; investigation processor rather than the solve control loop.
+            (let* ((sandbox (spawn ^repl-sandbox "direct-investigate-session" (lambda _ #t) (lambda _ #t) '()))
+                   (llm-calls 0)
+                   (mock-llm
+                    (spawn
+                     (lambda (bcom)
+                       (methods
+                        [(chat session-id prompt model system-prompt think history stream-callback #:optional (role "user"))
+                         (set! llm-calls (+ llm-calls 1))
+                         (let-values (((promo resolver) (spawn-promise-and-resolver)))
+                           (<-np resolver 'fulfill
+                                 `(("payload" . (("content" . ,(if (= llm-calls 1)
+                                                                   "```repl\n(define investigated 7)\n```"
+                                                                   "FINAL(investigated) CONFIDENCE(100)"))
+                                                 ("reasoning" . "Reasoning...")))))
+                           promo)]))))
+                   (agent (spawn ^agent-actor "direct-investigate-session" sandbox mock-llm (lambda _ #t) (lambda _ #t)))
+                   (mock-socket (open-output-string))
+                   (orch (spawn ^session-orchestrator "direct-investigate-session" mock-socket #f (lambda (expr) #t) sandbox agent mock-llm '() "gemma4:e2b" #t)))
+              (test-assert "direct-orchestrator: investigate explicitly invokes the legacy recursive loop"
+                (begin
+                  (<- orch 'handle-message '(investigate "run this investigation"))
+                  (run-turns-synchronously)
+                  (let ((output (get-output-string mock-socket)))
+                    (and (string-contains output "final")
                          (> llm-calls 1))))))))
       
       (lambda ()

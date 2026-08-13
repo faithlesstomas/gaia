@@ -64,7 +64,7 @@ The legacy RLM loop is retained only as a compatibility and long-context investi
 - [/] **Bounded Global Workspace** — Candidate competition, bounded capacity, selective admission, post-admission broadcast, and a transparent baseline policy are implemented. Adaptive attention and long-lived active-context management remain.
 - [/] **Cognitive Control** — Transition budgets, the Action type gate, and a baseline relevance/risk/cost/uncertainty selection policy exist. Resource accounting, progress monitoring, interruption, and richer policy gates remain.
 - [/] **Vertical GCAS acceptance scenario** — Specified in [docs/gcas-core-cycle.md](docs/gcas-core-cycle.md); its state/workspace/control portion is now tested. Remaining work: server-session integration, retrieval, deliberation, and final answer policy.
-- [/] **Execution / Investigation Processor** — Direct REPL requests now cross an explicit Action → Result/Failure boundary. Legacy solver execution and reproducibility records remain.
+- [/] **Execution / Investigation Processor** — Direct REPL and default `solve` both cross explicit Action → Result/Failure boundaries. The recursive RLM behavior is available only as an opt-in legacy Investigation Processor; reproducibility records remain.
 - [ ] **Generative and Deliberative processors** — Keep the LLM as hypothesis generator; add explicit verification/reasoning processor contracts before treating outputs as beliefs.
 - [ ] **Memory and context reconstruction** — Replace transcript-driven prompt growth with goal-driven retrieval from structured episodic, semantic, and procedural memory.
 
