@@ -589,7 +589,7 @@
                    (mock-socket (open-output-string))
                    (mock-channel #f)
                    (orch (spawn ^session-orchestrator "direct-solve-session" mock-socket mock-channel (lambda (expr) #t) sandbox agent mock-llm '() "gemma4:e2b" #t)))
-              (test-assert "direct-orchestrator: solve records LLM hypothesis, approved Action, and result without invoking RLM recursion"
+              (test-assert "direct-orchestrator: solve completes Evidence and deliberation, then reports an explicit inconclusive outcome"
                 (begin
                   (<- orch 'handle-message '(solve "run this solve"))
                   (run-turns-synchronously)
@@ -602,6 +602,11 @@
                          (string-contains output "HypothesisProposed")
                          (string-contains output "ActionRequested")
                          (string-contains output "ActionCompleted")
+                         (string-contains output "EvidenceFound")
+                         (string-contains output "BeliefUpdated")
+                         (string-contains output "ReflectionRaised")
+                         (string-contains output "ProcessTerminated")
+                         (string-contains output "INCONCLUSIVE")
                          (= llm-calls 1))))))
 
             ;; 7. The retained RLM loop is intentionally opt-in as an

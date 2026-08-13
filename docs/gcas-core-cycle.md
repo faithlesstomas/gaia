@@ -76,11 +76,15 @@ It demonstrates the confirmed, conflicting-evidence, and failed-execution
 outcomes without an external model service. The automated showcase test verifies
 the full event trace for all three outcomes.
 
-The default server `solve` path now routes model output through
+The default server `solve` path routes model output through
 `HypothesisProposed` and an explicitly admitted `ActionRequested` before it can
-reach the sandbox. The former recursive LLM–REPL loop is retained behind the
-separate `investigate` command as an optional legacy Investigation Processor.
-The next steps are a deliberative processor and structured memory/retrieval.
+reach the sandbox. A successful action becomes `Result`, `Evidence`, a verified
+claim about the observed execution, and `ReflectionRaised`. Unless an
+independent verifier establishes that this observation resolves the user's
+original goal, the terminal outcome is `INCONCLUSIVE`; an LLM hypothesis is
+never returned as accepted knowledge. The former recursive LLM–REPL loop is
+retained behind the separate `investigate` command as an optional legacy
+Investigation Processor.
 
 `gaia deliberative-processor` now provides the first deliberative contract:
 an execution observation first becomes `Evidence`, then an independently

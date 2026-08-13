@@ -18,6 +18,7 @@
             session-advance!
             session-emit!
             session-release-workspace-object!
+            session-clear-workspace!
             session-record-result!
             session-record-failure!))
 
@@ -86,6 +87,13 @@
   "Remove a processed object from bounded active workspace without deleting it
 from Cognitive State."
   (workspace-retract! (session-workspace session) object-id))
+
+(define (session-clear-workspace! session)
+  "Release all active COs at a terminal boundary while preserving State and
+Memory. A later goal reconstructs its own bounded working set from them."
+  (for-each (lambda (co) (workspace-retract! (session-workspace session) (co-id co)))
+            (workspace-active (session-workspace session)))
+  'ok)
 
 (define (session-record-result! session action-id result-co)
   (unless (and (state-has-object? (session-state session) action-id)

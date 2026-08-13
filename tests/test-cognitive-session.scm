@@ -86,6 +86,15 @@
         (and (= (length plans) 1)
              (not (member 'WorkspaceBroadcast
                           (map event-type (state-events (session-state session)))))
-             (eq? (co-provenance (car plans)) 'SYMBOLIC_INFERENCE))))))
+             (eq? (co-provenance (car plans)) 'SYMBOLIC_INFERENCE)))))
+
+  (test-assert "terminal cleanup releases capacity without deleting the cognitive record"
+    (let* ((session (make-cognitive-session #:workspace-capacity 1))
+           (goal (make-cognitive-object 'goal "Complete a bounded process" #:provenance 'USER)))
+      (session-submit! session goal #:priority 100 #:origin 'USER)
+      (session-advance! session)
+      (session-clear-workspace! session)
+      (and (null? (workspace-active (session-workspace session)))
+           (state-has-object? (session-state session) (co-id goal))))))
 
 (test-end "gaia-cognitive-session")
