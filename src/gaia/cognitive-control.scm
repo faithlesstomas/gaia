@@ -1,6 +1,7 @@
 (define-module (gaia cognitive-control)
   #:use-module (srfi srfi-9)
   #:use-module (gaia com)
+  #:use-module (gaia workspace)
   #:export (<cognitive-control>
             make-cognitive-control
             cognitive-control?
@@ -8,6 +9,7 @@
             control-max-transitions
             control-record-transition!
             control-termination-reason
+            control-select-candidate
             control-action-permitted?))
 
 ;; Minimal explicit control policy.  Richer scheduling and cost models can be
@@ -34,6 +36,28 @@
 (define (control-termination-reason control)
   (and (>= (control-transition-count control) (control-max-transitions control))
        'BUDGET_EXHAUSTED))
+
+(define (control-candidate-score candidate)
+  "A transparent baseline policy for GCAS-Core.  Priority is explicit intent;
+the other fields penalize proposals that are less relevant, more risky, more
+expensive, or less certain.  Equal scores preserve submission order."
+  (+ (candidate-priority candidate)
+     (* 10 (candidate-relevance candidate))
+     (* -10 (candidate-risk candidate))
+     (* -10 (candidate-cost candidate))
+     (* -10 (candidate-uncertainty candidate))))
+
+(define (control-select-candidate control candidates)
+  "Choose one pending workspace candidate under the current Control policy."
+  (let loop ((best (car candidates)) (rest (cdr candidates)))
+    (if (null? rest)
+        best
+        (let ((next (car rest)))
+          (loop (if (> (control-candidate-score next)
+                       (control-candidate-score best))
+                    next
+                    best)
+                (cdr rest))))))
 
 (define (control-action-permitted? action-co)
   ;; Proposal is not deployment: only an explicit Action CO can reach an

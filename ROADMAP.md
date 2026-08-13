@@ -61,8 +61,8 @@ The legacy RLM loop is retained only as a compatibility and long-context investi
 
 - [/] **Cognitive Object Model** — Introduce validated COs with provenance, epistemic status, verification status, temporal validity, and relations. The initial records exist; invariant enforcement and lifecycle events remain.
 - [/] **Session Cognitive State** — Each active server session now owns a State/Workspace/Bus/Control coordinator; durable restoration and processor task state remain.
-- [ ] **Bounded Global Workspace** — Implement candidate competition, selective admission, bounded capacity, and post-admission broadcast. A bus alone is not a workspace.
-- [ ] **Cognitive Control** — Implement resource budgets, policy gates, progress/loop monitoring, interruption, and termination decisions independent of LLM confidence signals.
+- [/] **Bounded Global Workspace** — Candidate competition, bounded capacity, selective admission, post-admission broadcast, and a transparent baseline policy are implemented. Adaptive attention and long-lived active-context management remain.
+- [/] **Cognitive Control** — Transition budgets, the Action type gate, and a baseline relevance/risk/cost/uncertainty selection policy exist. Resource accounting, progress monitoring, interruption, and richer policy gates remain.
 - [/] **Vertical GCAS acceptance scenario** — Specified in [docs/gcas-core-cycle.md](docs/gcas-core-cycle.md); its state/workspace/control portion is now tested. Remaining work: server-session integration, retrieval, deliberation, and final answer policy.
 - [/] **Execution / Investigation Processor** — Direct REPL requests now cross an explicit Action → Result/Failure boundary. Legacy solver execution and reproducibility records remain.
 - [ ] **Generative and Deliberative processors** — Keep the LLM as hypothesis generator; add explicit verification/reasoning processor contracts before treating outputs as beliefs.

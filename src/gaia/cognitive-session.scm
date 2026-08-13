@@ -44,9 +44,21 @@
   "Record and broadcast a semantic state-change event."
   (emit! session (make-cognitive-event type payload #:origin origin)))
 
-(define* (session-submit! session co #:key (priority 0) (origin 'KERNEL))
+(define* (session-submit! session co
+                         #:key
+                         (priority 0)
+                         (relevance 0)
+                         (risk 0)
+                         (cost 0)
+                         (uncertainty 0)
+                         (origin 'KERNEL))
   (state-store! (session-state session) co)
-  (workspace-propose! (session-workspace session) co #:priority priority)
+  (workspace-propose! (session-workspace session) co
+                      #:priority priority
+                      #:relevance relevance
+                      #:risk risk
+                      #:cost cost
+                      #:uncertainty uncertainty)
   (emit! session (make-cognitive-event 'CandidateSubmitted co #:origin origin))
   co)
 
@@ -54,7 +66,12 @@
   (let ((reason (control-termination-reason (session-control session))))
     (if reason
         (emit! session (make-cognitive-event 'ProcessTerminated reason #:origin 'CONTROL))
-        (let ((admitted (workspace-admit-next! (session-workspace session))))
+        (let ((admitted (workspace-admit-next!
+                         (session-workspace session)
+                         #:selector (lambda (candidates)
+                                      (control-select-candidate
+                                       (session-control session)
+                                       candidates)))))
           (and admitted
                (begin
                  (control-record-transition! (session-control session))

@@ -5,7 +5,8 @@
   #:use-module (gaia cognitive-bus)
   #:use-module (gaia cognitive-session)
   #:use-module (gaia cognitive-state)
-  #:use-module (gaia workspace))
+  #:use-module (gaia workspace)
+  #:use-module (gaia cognitive-processor))
 
 (test-begin "gaia-cognitive-session")
 
@@ -49,5 +50,42 @@
       (session-advance! session)
       (session-advance! session)
       (event-payload (last (state-events (session-state session)))))))
+
+(test-group "workspace-policy-and-processors"
+  (test-assert "control selects the safer, more relevant candidate and enforces workspace capacity"
+    (let* ((session (make-cognitive-session #:workspace-capacity 1))
+           (risky (make-cognitive-object 'action "Network-wide destructive scan" #:provenance 'LLM))
+           (useful (make-cognitive-object 'action "Read the goal-local evidence" #:provenance 'LLM)))
+      (session-submit! session risky #:priority 100 #:risk 1 #:cost 1 #:uncertainty 1 #:origin 'PLANNER)
+      (session-submit! session useful #:priority 85 #:relevance 1 #:origin 'PLANNER)
+      (let ((first (session-advance! session)))
+        (and (equal? (co-id first) (co-id useful))
+             (not (session-advance! session))
+             (= (length (workspace-candidates (session-workspace session))) 1)
+             (session-release-workspace-object! session (co-id first))
+             (equal? (co-id (session-advance! session)) (co-id risky))))))
+
+  (test-assert "an event-driven processor submits a candidate instead of broadcasting directly"
+    (let* ((session (make-cognitive-session #:workspace-capacity 2))
+           (planner
+            (make-cognitive-processor
+             'PLANNER '(GoalCreated)
+             (lambda (event)
+               (let ((goal (event-payload event)))
+                 (list (make-processor-proposal
+                        (make-cognitive-object 'plan "Inspect executable evidence"
+                                               #:provenance 'SYMBOLIC_INFERENCE
+                                               #:relations `((serves . ,(co-id goal))))
+                        #:priority 80 #:relevance 1))))))
+           (goal (make-cognitive-object 'goal "Verify a runtime result" #:provenance 'USER)))
+      (attach-processor! session planner)
+      (session-submit! session goal #:priority 100 #:origin 'USER)
+      (session-emit! session 'GoalCreated goal #:origin 'CONTROL)
+      (let ((plans (filter (lambda (co) (eq? (co-type co) 'plan))
+                           (workspace-candidates (session-workspace session)))))
+        (and (= (length plans) 1)
+             (not (member 'WorkspaceBroadcast
+                          (map event-type (state-events (session-state session)))))
+             (eq? (co-provenance (car plans)) 'SYMBOLIC_INFERENCE))))))
 
 (test-end "gaia-cognitive-session")

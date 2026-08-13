@@ -35,6 +35,23 @@ the same cognitive process without requiring a network source or model service.
 5. Every `Result` or `Failure` references the Action that caused it.
 6. Control terminates a process from its budget, progress, and goal criterion—not only an LLM's declared confidence.
 
+## Workspace and Processor Contract
+
+The current workspace is a bounded candidate queue, separate from Cognitive
+State. A processor subscribes to semantic events and may return proposals; its
+proposals are stored as COs and enter the workspace as `CandidateSubmitted`.
+They are never broadcast or executed merely because a processor produced them.
+
+Each proposal carries explicit scheduling metadata: `priority`, `relevance`,
+`risk`, `cost`, and `uncertainty`. Cognitive Control uses a deterministic,
+inspectable baseline policy: it prefers higher priority and relevance while
+penalizing risk, cost, and uncertainty. It preserves submission order for equal
+scores. Capacity prevents a further admission until an active CO is released.
+
+This is a deliberately small policy, not an assertion that these weights are a
+final model of attention. It provides a tested replacement point for future
+goal-, budget-, and safety-aware scheduling.
+
 ## Current Implementation Scope
 
 `gaia gcas-showcase` implements all ten stages for the executable reference
