@@ -10,6 +10,10 @@
   #:use-module (gaia core)
   #:use-module (gaia executor)
   #:use-module (gaia utils)
+  #:use-module (gaia com)
+  #:use-module (gaia cognitive-session)
+  #:use-module (gaia cognitive-state)
+  #:use-module (gaia cognitive-bus)
   #:export (^session-orchestrator))
 
 (define (clean-history history)
@@ -28,12 +32,25 @@
 (define (new-promise-pair)
   (spawn-promise-and-resolver))
 
+(define (submit-cognitive-object! cognitive-session co priority origin)
+  "Submit a CO to the session's GCAS workspace and advance one transition."
+  (session-submit! cognitive-session co #:priority priority #:origin origin)
+  (session-advance! cognitive-session)
+  co)
+
+(define (cognitive-event-summary cognitive-session)
+  (map (lambda (event)
+         `((id . ,(event-id event))
+           (type . ,(event-type event))
+           (origin . ,(event-origin event))))
+       (state-events (session-state cognitive-session))))
+
 ;; Session Orchestrator Actor
-(define-actor (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model thinking #:optional (workspace-dir #f))
+(define-actor (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model thinking #:optional (workspace-dir #f) (cognitive-session (make-cognitive-session)))
   #:self self
   (methods
    [(update-history new-history)
-    (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client new-history model thinking workspace-dir) 'ok)]
+    (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client new-history model thinking workspace-dir cognitive-session) 'ok)]
 
    [(handle-message msg)
     (match msg
@@ -130,6 +147,10 @@
 
       (('solve task)
        (gaia-log (format #f "[SERVER] Received solve task: ~a" task))
+       (let ((question-co (make-cognitive-object 'question task #:provenance 'USER))
+             (goal-co (make-cognitive-object 'goal task #:provenance 'USER)))
+         (submit-cognitive-object! cognitive-session question-co 10 'USER)
+         (submit-cognitive-object! cognitive-session goal-co 100 'USER))
        (let* ((event-sink (lambda (event) (send-event client-socket event)))
               (chat-promise (<- llm-client 'chat session-id task model
                                 (get-solver-system-prompt)
@@ -210,7 +231,9 @@
 
       (('repl code)
        (gaia-log (format #f "[SERVER] Received REPL code execution request."))
-       (let ((before-promise (<- sandbox-actor 'definitions)))
+       (let* ((action-co (make-cognitive-object 'action code #:provenance 'USER))
+              (_ (submit-cognitive-object! cognitive-session action-co 50 'USER))
+              (before-promise (<- sandbox-actor 'definitions)))
          (on before-promise
              (lambda (before-defs)
                (let ((eval-promise (<- sandbox-actor 'eval code)))
@@ -218,6 +241,10 @@
                      (lambda (eval-res)
                        (match eval-res
                          (('ok val-str)
+                          (session-record-result!
+                           cognitive-session (co-id action-co)
+                           (make-cognitive-object 'result val-str #:provenance 'REPL
+                                                  #:relations `((produced-by . ,(co-id action-co)))))
                           (gaia-log (format #f "[SERVER] REPL success. Result: ~a" val-str))
                           (let ((after-promise (<- sandbox-actor 'definitions)))
                             (on after-promise
@@ -234,6 +261,10 @@
                                       (send-event client-socket `(repl-private-result ,val-str)))))))
                          (('error type msg)
                           (let ((err-msg (format #f "REPL Error (~a): ~a" type msg)))
+                            (session-record-failure!
+                             cognitive-session (co-id action-co)
+                             (make-cognitive-object 'result err-msg #:provenance 'REPL
+                                                    #:relations `((produced-by . ,(co-id action-co)))))
                             (gaia-log (format #f "[SERVER] REPL error: ~a" err-msg))
                             (send-event client-socket `(repl-private-result-error ,err-msg))))))
                      #:catch (lambda (err)
@@ -248,6 +279,12 @@
              (lambda (bindings)
                (send-event client-socket `(env-list ,bindings))))))
 
+      ;; Internal protocol endpoint for observability and integration tests.
+      ;; The interactive client does not expose this until it can render CO graphs.
+      (('get-cognitive-events)
+       (send-event client-socket
+                   `(cognitive-events ,(cognitive-event-summary cognitive-session))))
+
       (('clear)
        (gaia-log (format #f "[SERVER] Clearing session ~a environment and history." session-id))
        (save-session session-id '())
@@ -255,7 +292,7 @@
               (new-sb-actor (spawn ^repl-sandbox session-id event-sink permission-sink '() workspace-dir))
               (new-agent-actor (spawn ^agent-actor session-id new-sb-actor llm-client event-sink permission-sink)))
          (send-event client-socket '(final "Environment and history cleared."))
-         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client '() model thinking workspace-dir) 'ok)))
+         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client '() model thinking workspace-dir (make-cognitive-session)) 'ok)))
 
       (('get-model)
        (send-event client-socket `(model-info ,model)))
@@ -264,7 +301,7 @@
        (let ((new-model-str (format #f "~a" new-model)))
          (gaia-log (format #f "[SERVER] Hot-swapping model to: ~a" new-model-str))
          (send-event client-socket `(final ,(string-append "Model switched to: " new-model-str)))
-         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history new-model-str thinking) 'ok)))
+         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history new-model-str thinking workspace-dir cognitive-session) 'ok)))
 
       (('list-models)
        (let ((models-promise (<- llm-client 'get-models)))
@@ -284,7 +321,7 @@
        (gaia-log (format #f "[SERVER] Set thinking mode to: ~a" state))
        (let* ((on? (or (eq? state #t) (string=? (format #f "~a" state) "on"))))
          (send-event client-socket `(final ,(string-append "Thinking mode set to: " (if on? "on" "off"))))
-         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model on? workspace-dir) 'ok)))
+         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model on? workspace-dir cognitive-session) 'ok)))
 
       (('get-state-injection)
        (let ((state-str (if (get-config 'state-injection) "on" "off")))
@@ -342,7 +379,7 @@
                       (new-agent-actor (spawn ^agent-actor new-id new-sb-actor llm-client event-sink permission-sink)))
                  (with-output-to-file ".last_session" (lambda () (display new-id)))
                  (send-event client-socket `(final ,(string-append "Session switched to: " new-id)))
-                 (bcom (^session-orchestrator bcom new-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client new-history model thinking new-ws) 'ok))))))
+                 (bcom (^session-orchestrator bcom new-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client new-history model thinking new-ws (make-cognitive-session)) 'ok))))))
 
       (('list-sessions)
        (let ((sessions (if (file-exists? "sessions")

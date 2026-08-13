@@ -557,10 +557,17 @@
                 (begin
                   (<- orch 'handle-message '(eval "run this code"))
                   (run-turns-synchronously)
+                  ;; A direct REPL request must enter the session GCAS cycle as
+                  ;; Action → ActionCompleted, rather than bypassing it.
+                  (<- orch 'handle-message '(repl "(+ 20 22)"))
+                  (run-turns-synchronously)
+                  (<- orch 'handle-message '(get-cognitive-events))
+                  (run-turns-synchronously)
                   (let ((output (get-output-string mock-socket)))
                     (and (string-contains output "code")
                          (string-contains output "result")
-                         (string-contains output "notebook-done"))))))
+                         (string-contains output "notebook-done")
+                         (string-contains output "ActionCompleted"))))))
 
             ;; 6. Test session-orchestrator solve command (recursive solver mode)
             (let* ((sandbox (spawn ^repl-sandbox "direct-solve-session" (lambda _ #t) (lambda _ #t) '()))

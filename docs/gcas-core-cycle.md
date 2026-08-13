@@ -5,9 +5,13 @@ It does not define a single recursive call or an LLM loop. It defines a minimal,
 controlled feedback process in which no processor is the source of truth for the
 entire system.
 
-## Reference Scenario
+## Executable Reference Scenario
 
-Question: *"Is claim X from publication Y true?"*
+Question: *"Does the Guile expression `(+ 20 22)` evaluate to `42`?"*
+
+This deterministic, reproducible claim is deliberately narrower than the future
+publication-evaluation benchmark in GCAS 0.2. It exercises every transition of
+the same cognitive process without requiring a network source or model service.
 
 | Stage | Input / processor | State change and event | Transition condition |
 |---|---|---|---|
@@ -19,7 +23,7 @@ Question: *"Is claim X from publication Y true?"*
 | 6. Action | planner + policy gate | `Action` CO; `ActionRequested` | only an explicitly permitted action reaches an executor |
 | 7. Observation | REPL / sandbox | `Result` or `Failure` CO; `ActionCompleted` or `ActionFailed` | the outcome references its Action and a reproducibility record |
 | 8. Evaluation | deliberative processor | `Evidence`, `Conflict`, derivation, or `Reflection` CO | a valid derivation is not automatically world truth |
-| 9. Belief update | control + memory | a new Claim version; `CO_Superseded` or `ConflictDetected` | contradictory claims are never silently removed |
+| 9. Belief update | control + memory | a new Claim version; `BeliefUpdated` or `ConflictDetected` | contradictory claims are never silently removed |
 | 10. Termination | cognitive control | `GoalCompleted` or `ProcessTerminated` | the goal criterion is met, or the outcome is `INCONCLUSIVE`, `FAILED`, or `INSUFFICIENT_INFORMATION` |
 
 ## Execution Invariants
@@ -33,7 +37,11 @@ Question: *"Is claim X from publication Y true?"*
 
 ## Current Implementation Scope
 
-`gaia cognitive-session` implements stages 5–7 in the minimal core:
+`gaia gcas-showcase` implements all ten stages for the executable reference
+scenario. `gaia cognitive-session` provides the reusable State, Workspace, Bus,
+and Control coordination beneath it. Server sessions now own this coordinator,
+and direct REPL requests are recorded as an explicit `Action` followed by
+`ActionCompleted` or `ActionFailed`:
 
 ```text
 session-submit! → CandidateSubmitted
@@ -41,5 +49,15 @@ session-advance! → selective admission → WorkspaceBroadcast
 session-record-result! / session-record-failure! → ActionCompleted / ActionFailed
 ```
 
-The next steps are to attach this core to a server session, route sandbox/REPL work
-behind `ActionRequested`, and then add memory, planning, and deliberative processors.
+Run the executable deterministic showcase with:
+
+```sh
+make gcas-showcase
+```
+
+It demonstrates the confirmed, conflicting-evidence, and failed-execution
+outcomes without an external model service. The automated showcase test verifies
+the full event trace for all three outcomes.
+
+The next steps are to route all legacy solver execution through the same action
+boundary, then add memory, planning, and deliberative processors.

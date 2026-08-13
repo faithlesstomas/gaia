@@ -42,7 +42,8 @@
          ;; GCAS 0.1: Cognitive Object Model and Cognitive Bus tests
          "test-com.scm"
          "test-cognitive-bus.scm"
-         "test-cognitive-session.scm")))
+         "test-cognitive-session.scm"
+         "test-gcas-showcase.scm")))
 
 (define failed-tests '())
 

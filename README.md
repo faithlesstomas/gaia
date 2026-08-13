@@ -162,6 +162,9 @@ make test-tool-use
 
 # Run REPL investigation compatibility check
 make test-rlm
+
+# Run the deterministic GCAS-Core reference-cycle showcase
+make gcas-showcase
 ```
 
 **4. Curate Data for Fine-tuning:**

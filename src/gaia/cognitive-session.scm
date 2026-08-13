@@ -14,6 +14,8 @@
             session-control
             session-submit!
             session-advance!
+            session-emit!
+            session-release-workspace-object!
             session-record-result!
             session-record-failure!))
 
@@ -38,6 +40,10 @@
   (state-record-event! (session-state session) event)
   (bus-publish (session-bus session) event))
 
+(define* (session-emit! session type payload #:key (origin 'KERNEL))
+  "Record and broadcast a semantic state-change event."
+  (emit! session (make-cognitive-event type payload #:origin origin)))
+
 (define* (session-submit! session co #:key (priority 0) (origin 'KERNEL))
   (state-store! (session-state session) co)
   (workspace-propose! (session-workspace session) co #:priority priority)
@@ -54,6 +60,11 @@
                  (control-record-transition! (session-control session))
                  (emit! session (make-cognitive-event 'WorkspaceBroadcast admitted #:origin 'WORKSPACE))
                  admitted))))))
+
+(define (session-release-workspace-object! session object-id)
+  "Remove a processed object from bounded active workspace without deleting it
+from Cognitive State."
+  (workspace-retract! (session-workspace session) object-id))
 
 (define (session-record-result! session action-id result-co)
   (unless (and (state-has-object? (session-state session) action-id)

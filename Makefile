@@ -8,7 +8,7 @@ export GAIA_MODEL
 export GAIA_BASE_MODEL
 export GAIA_ALLOW_SANDBOX_FALLBACK
 
-.PHONY: run repl check test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-actors test-server test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop clean-trajectories monitor client server
+.PHONY: run repl check test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-actors test-server test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop clean-trajectories monitor client server gcas-showcase
 
 GUIX_SHELL = guix shell -m guix.scm --
 GUIX_DEV_SHELL = guix shell -m guix-dev.scm --
@@ -24,6 +24,9 @@ repl:
 check:
 	@echo "Running GAIA test suite..."
 	GAIA_NO_COVERAGE=1 $(GUIX_SHELL) guile -L src tests/run-coverage.scm
+
+gcas-showcase:
+	GUILE_AUTO_COMPILE=0 guile -L src scripts/run-gcas-showcase.scm
 
 test-server:
 	@echo "Running GAIA server unit tests..."
