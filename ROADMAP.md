@@ -59,14 +59,16 @@ The legacy RLM loop is retained only as a compatibility and long-context investi
 
 ## GCAS-Core — Immediate Priority
 
-- [/] **Cognitive Object Model** — Introduce validated COs with provenance, epistemic status, verification status, temporal validity, and relations. The initial records exist; invariant enforcement and lifecycle events remain.
-- [/] **Session Cognitive State** — Each active server session owns a State/Workspace/Bus/Control coordinator. Its CO graph and chronological event log are restored durably; reproducibility observations are recorded for Action outcomes. Processor task state remains.
-- [/] **Bounded Global Workspace** — Candidate competition, bounded capacity, selective admission, post-admission broadcast, and a transparent baseline policy are implemented. Adaptive attention and long-lived active-context management remain.
-- [/] **Cognitive Control** — Transition budgets, observable progress, failure budgets, user interruption, the Action type gate, and a baseline relevance/risk/cost/uncertainty selection policy are implemented. Resource accounting and richer policy gates remain.
-- [/] **Vertical GCAS acceptance scenario** — Specified in [docs/gcas-core-cycle.md](docs/gcas-core-cycle.md); the default server path now reaches Action, Result, Evidence, a bounded verified observation, reflection, and explicit terminal outcome. Goal-specific verification and final-answer policy remain.
-- [/] **Execution / Investigation Processor** — Direct REPL and default `solve` both cross explicit Action → Result/Failure boundaries. The recursive RLM behavior is available only as an opt-in legacy Investigation Processor; each outcome receives a reproducibility record. Cryptographic environment manifests remain.
-- [/] **Generative and Deliberative processors** — The LLM is a hypothesis generator in `solve`; the initial deliberative processor converts execution observations to Evidence, then only an injected verifier can create Claim or Conflict. Planner contracts and richer verification remain.
-- [/] **Memory and context reconstruction** — Structured CO memory has local durable storage, goal-relevant retrieval, and reconstruction from goal/workspace/memory/constraints. The default `solve` prompt no longer sends transcript history. Semantic/procedural schemas and production persistence remain.
+- [x] **Cognitive Object Model** — Validated COs carry provenance, epistemic and verification statuses, temporal validity, confidence, and relations. Broader lifecycle policy is post-Core work.
+- [x] **Session Cognitive State** — Each active server session owns a durable State/Workspace/Bus/Control coordinator. Its CO graph and chronological event log restore across construction; Action outcomes have reproducibility observations.
+- [x] **Bounded Global Workspace** — Candidate competition, bounded capacity, selective admission, post-admission broadcast, and a transparent baseline policy are implemented. Adaptive attention remains post-Core work.
+- [x] **Cognitive Control** — Transition budgets, observable progress, failure budgets, user interruption, the Action type gate, and a baseline relevance/risk/cost/uncertainty selection policy are implemented. Resource accounting and richer policy gates remain.
+- [x] **Vertical GCAS acceptance scenario** — Specified in [docs/gcas-core-cycle.md](docs/gcas-core-cycle.md); the production `solve` path reaches Action, Result, Evidence, a bounded verified observation, reflection, and explicit terminal outcome. Goal-specific verification remains deliberately separate.
+- [x] **Execution / Investigation Processor** — Direct REPL and default `solve` both cross explicit Action → Result/Failure boundaries. The recursive RLM behavior is an opt-in legacy Investigation Processor; each outcome has a reproducibility record. Cryptographic environment manifests remain.
+- [x] **Generative and Deliberative processors** — The LLM is a hypothesis generator in `solve`; the deliberative processor converts execution observations to Evidence, then only an injected verifier can create Claim or Conflict. Richer planners and verifiers are post-Core work.
+- [x] **Memory and context reconstruction** — Structured CO memory has local durable storage, goal-relevant retrieval, and reconstruction from goal/workspace/memory/constraints. The default `solve` prompt does not send transcript history. Semantic/procedural schemas remain post-Core work.
+
+The detailed requirement-to-evidence mapping is maintained in [docs/gcas-core-conformance.md](docs/gcas-core-conformance.md).
 
 ### Legacy RLM status
 
