@@ -81,3 +81,9 @@ The default server `solve` path now routes model output through
 reach the sandbox. The former recursive LLM–REPL loop is retained behind the
 separate `investigate` command as an optional legacy Investigation Processor.
 The next steps are a deliberative processor and structured memory/retrieval.
+
+`gaia deliberative-processor` now provides the first deliberative contract:
+an execution observation first becomes `Evidence`, then an independently
+supplied verifier may create an accepted, verified `Claim`. A failed verifier
+creates `ConflictDetected` and never an accepted claim. It is intentionally
+separate from the LLM proposal path.

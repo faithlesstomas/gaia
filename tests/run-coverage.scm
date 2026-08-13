@@ -43,6 +43,7 @@
          "test-com.scm"
          "test-cognitive-bus.scm"
          "test-cognitive-session.scm"
+         "test-deliberative-processor.scm"
          "test-gcas-showcase.scm")))
 
 (define failed-tests '())
