@@ -167,6 +167,11 @@ make test-rlm
 make gcas-showcase
 ```
 
+In the interactive CLI, plain text starts the GCAS `solve` process. Use
+`/ask <query>` for one-shot chat, `/investigate <query>` for the legacy
+LLM–REPL investigation processor, `/eval <scheme>` for direct REPL execution,
+and `/cognitive-events` to inspect the session event trace.
+
 **4. Curate Data for Fine-tuning:**
 
 ```bash

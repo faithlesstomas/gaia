@@ -409,7 +409,10 @@
   /clear            - Clear current session history and environment
   /env              - Show variables defined in REPL
   /eval <scheme>    - Execute Scheme code directly in REPL
+  /solve <query>    - Run the GCAS cognitive process (default for normal input)
   /investigate <q>  - Use the legacy recursive LLM–REPL investigation processor
+  /ask <query>      - Ask the LLM without initiating a GCAS process
+  /cognitive-events - Show the current session's GCAS event trace
   /ask <query>      - Ask a one-off question to AI (no recursion)
   /model [name]     - Show or change the active LLM model
   /models           - List available models

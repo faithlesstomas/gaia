@@ -44,7 +44,7 @@ fn main() -> Result<()> {
     );
 
     println!("\n{BOLD}{GREEN}GAIA CLI {}{RESET}", env!("GAIA_VERSION"));
-    println!("Type {BOLD}/help{RESET} for commands or enter a task.\n");
+    println!("Type {BOLD}/help{RESET} for commands. Normal input runs the GCAS solve process.\n");
 
     let mut stream = connect_with_retry(SOCKET_PATH)?;
 
@@ -266,7 +266,7 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                         }
 
                         // === TERMINAL EVENTS ===
-                        "final" | "repl-result" | "error"
+                        "final" | "repl-result" | "error" | "cognitive-events"
                         | "session-list" | "history-list" | "env-list"
                         | "model-info" | "models-list" | "thinking-info" 
                         | "permission-request" => {
@@ -375,15 +375,56 @@ fn dispatch(
             }
             Ok(Action::Continue)
         }
-        _ => {
-            // Drain any stale events in the channel
+        "/solve" | "/investigate" | "/ask" | "/eval" => {
+            let query = input[cmd.len()..].trim();
+            if query.is_empty() {
+                return Err(anyhow::anyhow!("{} requires an argument", cmd));
+            }
+            let operation = match cmd {
+                "/solve" => "solve",
+                "/investigate" => "investigate",
+                "/ask" => "ask",
+                "/eval" => "repl",
+                _ => unreachable!(),
+            };
             while rx.try_recv().is_ok() {}
-
-            // Send everything else directly as raw string `(eval input)` to the server
+            send_sexp(
+                stream,
+                &Value::list(vec![Value::symbol(operation), Value::string(query.to_string())]),
+            )?;
+            wait_and_print(rx, stream)?;
+            Ok(Action::Continue)
+        }
+        "/cognitive-events" => {
+            while rx.try_recv().is_ok() {}
+            send_sexp(stream, &Value::list(vec![Value::symbol("get-cognitive-events")]))?;
+            wait_and_print(rx, stream)?;
+            Ok(Action::Continue)
+        }
+        _ if cmd.starts_with('/') => {
+            while rx.try_recv().is_ok() {}
+            // Compatibility commands such as /help and /model remain parsed
+            // by the server's shared slash-command parser.
             send_sexp(
                 stream,
                 &Value::list(vec![
                     Value::symbol("eval"),
+                    Value::string(input.to_string()),
+                ]),
+            )?;
+            wait_and_print(rx, stream)?;
+            Ok(Action::Continue)
+        }
+        _ => {
+            // Drain any stale events in the channel
+            while rx.try_recv().is_ok() {}
+
+            // Normal input starts a GCAS process. One-shot chat and legacy
+            // investigation are available through explicit commands.
+            send_sexp(
+                stream,
+                &Value::list(vec![
+                    Value::symbol("solve"),
                     Value::string(input.to_string()),
                 ]),
             )?;
@@ -512,6 +553,13 @@ fn wait_and_print(rx: &Receiver<ServerEvent>, stream: &mut UnixStream) -> Result
                                 if let Some(state) = c.car().as_str() {
                                     println!("{BOLD}Thinking Mode:{RESET} {}", state);
                                 }
+                            }
+                            break;
+                        }
+                        "cognitive-events" => {
+                            println!("{BOLD}GCAS Event Trace:{RESET}");
+                            if let Value::Cons(c) = cdr {
+                                print_list(c.car());
                             }
                             break;
                         }
