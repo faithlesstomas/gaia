@@ -1,6 +1,6 @@
 # GAIA Roadmap
 
-> *Last updated: 2026-07-09*
+> *Last updated: 2026-08-13*
 >
 > This document tracks the development plan for the GAIA (GNU AI Assistant) project.
 > For an introduction to the project, see [README.md](README.md).
@@ -9,9 +9,9 @@
 
 ## Current State Summary
 
-GAIA is a functional AI assistant with a working RLM (Recursive Language Model) loop, 
-persistent Guile REPL environment, safety validation, trajectory logging, and LiteLLM integration.
-The core agentic loop is stable and has been validated with Gemma 4 and other models.
+GAIA has a functional legacy RLM-style investigation loop, persistent Guile REPL environment, safety validation,
+trajectory logging, and LiteLLM integration. Its architectural direction is now the implementation of
+[GCAS](gcas.md): a persistent, event-driven cognitive system rather than an LLM-centred agent loop.
 
 **Architecture:** Rust Client - GAIA Server (Guile REPL) - LiteLLM Proxy - LLM backends (Ollama, Lemonade, external LLM API etc.)
 
@@ -39,10 +39,9 @@ Modules extend its capabilities into specific domains without modifying the core
 │ └────┬───┘ └────┬─────┘ └──────┬───────┘       │       │
 ├──────┴──────────┴──────────────┴───────────────┴───────┤
 │                    GAIA KERNEL                          │
-│  K0 Foundation ✅ → K1 Hardening → K2 Cognitive Memory │
-│                          → K3 Self-Training Loop        │
+│  GCAS-Core → Memory & Deliberation → Learning & Evolution│
 │                                                         │
-│  RLM Loop + REPL + Safety + AtomSpace + J-space +       │
+│  Cognitive State + Workspace + Control + REPL +         │
 │  DSL ($gscm$) + DPO/Elo Curation + Champion/Challenger  │
 ├─────────────────────────────────────────────────────────┤
 │                    Foundation                           │
@@ -52,17 +51,34 @@ Modules extend its capabilities into specific domains without modifying the core
 
 ---
 
-# ═══ GAIA KERNEL ═══
+# ═══ GCAS-CORE MIGRATION ═══
 
-The kernel is self-contained: after K0–K3 are complete, GAIA is a **working, self-improving neuro-symbolic AI system** capable of executing tasks, verifying results, curating training data, and evolving its own model — all locally.
+GCAS is GAIA's normative architectural source of truth. The goal is a **working, persistent neuro-symbolic cognitive system**
+that coordinates specialized processors through explicit state, workspace competition, control, memory, and auditable execution.
+The legacy RLM loop is retained only as a compatibility and long-context investigation capability.
+
+## GCAS-Core — Immediate Priority
+
+- [/] **Cognitive Object Model** — Introduce validated COs with provenance, epistemic status, verification status, temporal validity, and relations. The initial records exist; invariant enforcement and lifecycle events remain.
+- [ ] **Session Cognitive State** — Establish a persistent active graph of COs, goals, workspace entries, processor tasks, and event history for each session.
+- [ ] **Bounded Global Workspace** — Implement candidate competition, selective admission, bounded capacity, and post-admission broadcast. A bus alone is not a workspace.
+- [ ] **Cognitive Control** — Implement resource budgets, policy gates, progress/loop monitoring, interruption, and termination decisions independent of LLM confidence signals.
+- [/] **Vertical GCAS acceptance scenario** — Specified in [docs/gcas-core-cycle.md](docs/gcas-core-cycle.md); its state/workspace/control portion is now tested. Remaining work: server-session integration, retrieval, deliberation, and final answer policy.
+- [ ] **Execution / Investigation Processor** — Integrate the existing sandbox and persistent REPL through explicit Action, Result, Failure, and reproducibility records.
+- [ ] **Generative and Deliberative processors** — Keep the LLM as hypothesis generator; add explicit verification/reasoning processor contracts before treating outputs as beliefs.
+- [ ] **Memory and context reconstruction** — Replace transcript-driven prompt growth with goal-driven retrieval from structured episodic, semantic, and procedural memory.
+
+### Legacy RLM status
+
+The existing `rlm-loop` is a useful multi-step LLM–REPL feedback implementation, not the GCAS cognitive loop and not yet a full implementation of the RLM paper's recursive long-context decomposition. Freeze it as `legacy-repl-investigation-loop` behavior while GCAS-Core is introduced. Later, expose it as an optional Investigation Processor for large-data tasks.
 
 ---
 
-## K0 — Foundation ✅ (Completed)
+## Legacy foundation — retained capabilities
 
 Core infrastructure that is already built and working.
 
-- [x] **RLM Loop** — Multi-step agentic loop with code extraction, execution, and feedback
+- [x] **Legacy RLM investigation loop** — Multi-step LLM–REPL feedback with code extraction, execution, and feedback; retained behind the GCAS execution boundary.
 - [x] **Persistent REPL Environment** — Variables and functions survive across RLM steps within a task
 - [x] **Static Safety Validator** — AST-level recursive scan for banned primitives (`system*`, `delete-file`, etc.)
 - [x] **Module-based Sandbox** — Whitelisted imports for AI-generated code
@@ -84,7 +100,7 @@ Core infrastructure that is already built and working.
 
 ---
 
-## K1 — Hardening & Stabilization (Immediate Priority)
+## Hardening & stabilization
 
 Hardening the agentic loop to handle syntax constraints of smaller local models (e.g. 3B `gemma4:e2b`) and decoupling the client/server layout.
 
@@ -109,17 +125,17 @@ Hardening the agentic loop to handle syntax constraints of smaller local models 
 
 ---
 
-## K2 — Cognitive Working Memory (Local AtomSpace & STI/LTI)
+## GCAS memory, workspace & deliberation
 
 *Moved from former Phase 7 to address context rot and context window clogging.*
 
 - [/] **Atoms as Goblins Actors** — Leverage the `guile-goblins` library to create a lightweight, local AtomSpace *specifically for cognitive working memory (active relevance context, up to ~1000 nodes)*. Each semantic node and relation becomes an autonomous actor, leveraging Goblins' transactional vats (for automatic state rollback on execution errors) and asynchronous message passing (for spreading activation). *(Partially completed: Goblins is used for session REPLs, but not semantic mapping).* | *→ gaia-sci: Hyperon FFI, gaia-proof: Goal Caching*
-- [ ] **STI/LTI Memory Loop** — Implement Short-Term Importance (STI) and Long-Term Importance (LTI) weights for atoms. Decimate STI asynchronously (decay by $X\%$) after each RLM step. | *→ gaia-sci: Cognitive State Serialization*
+- [ ] **STI/LTI Memory** — Implement Short-Term Importance (STI) and Long-Term Importance (LTI) weights for memory candidates. Decimate STI asynchronously after cognitive process transitions. | *→ gaia-sci: Cognitive State Serialization*
 - [ ] **J-space to AtomSpace Mapping** — Integrate Jacobian Lens (J-lens) token projection weights directly with the Goblins-based AtomSpace. Use dynamic activation of J-space vectors during model forward passes to automatically adjust STI values of symbolic nodes in active memory. | *→ gaia-proof: J-space Guided Theorem Proving*
 - [ ] **J-lens Activation Injection** — Use the J-lens intervention protocol (steering/patching) to inject symbolic states and REPL errors directly into the LLM's continuous workspace layers, bypassing context window clutter and directing model focus natively. | *→ K3: CRT, gaia-proof: J-space Guided Theorem Proving*
-- [ ] **Context-Based Prompt Hydration** — Rebuild the server's prompt generator to only feed: *Constant system prompt* + *Top-N atoms with highest STI (active memory)* + *Last RLM step result*. Old RLM step text logs are pruned, resolving context rot.
+- [ ] **Context Reconstruction** — Rebuild prompt generation from: *constant system prompt* + *current goal* + *admitted workspace COs* + *selected structured memories* + *active constraints*. Transcripts remain episodic records, not prompt memory.
 - [ ] **G-Expressions ("Context Teleportation")** — Use GNU Guix's G-expressions (`#~`) to serialize variable contexts and modules when spawning sub-agents. | *→ gaia-os: Guix Containers, gaia-sci: Cognitive State Serialization*
-- [ ] **The Self-Modifying Agent** — Allow GAIA to refactor its own `rlm-loop` at runtime by treating the loop logic as a mutable S-expression. | *→ K3: Evolutive Variant Generation*
+- [ ] **Governed self-modification** — Route proposals to modify procedures, policies, models, or architecture through the GCAS proposal, sandbox, verification, approval, deployment, and rollback pipeline. | *→ Learning & evolution*
 - [ ] **AND/OR Tree State Orchestration** — Refactor session orchestration to track nested tasks in a tree format (delegations as AND nodes; alternative execution pathways as OR nodes), enabling backpropagation of goal success/failure and clean transactional rollbacks. | *→ gaia-proof: Global Goal Caching*
 
 ---

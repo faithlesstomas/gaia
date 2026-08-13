@@ -1,12 +1,13 @@
 # GNU AI Assistant (GAIA)
 
 
-### A Deterministic, Homoiconic Runtime for Neuro-Symbolic Artificial General Intelligence
+### A Reference Implementation of the General Cognitive Architecture Specification
 
 
-**GAIA** is a local-first AI engine and assistant (agent manager) for any task in a reproducible, safe environment with a REPL built in **GNU Guile**.
-It is designed specifically for researchers and engineers who require strict reproducibility, mathematical rigor,
-safe execution, and data privacy when integrating Large Language Models (LLMs) into their workflows.
+**GAIA** is a local-first reference implementation of the [General Cognitive Architecture Specification (GCAS)](gcas.md).
+It combines persistent cognitive state, explicit epistemic provenance, a bounded global workspace, heterogeneous processors,
+and a reproducible execution environment built in **GNU Guile**. It is designed for researchers and engineers who require
+strict reproducibility, mathematical rigor, safe execution, and data privacy when integrating Large Language Models (LLMs).
 
 Thanks to the Guile language, GAIA treats code as data (homoiconicity) to eliminate LLM hallucinations,
 enforce mathematical logic, and guarantee strict white-box auditability.
@@ -28,28 +29,48 @@ While most AI tools are written in Python, Gaia utilizes **GNU Guile** (Scheme/L
 * **The GNU Guix Connection:** Guile is the foundation of GNU Guix. GAIA aims to leverage this to allow the LLM to spin up temporary,
   bit-reproducible containers, run physical simulations (e.g., N-body, molecular dynamics) in secure manner.
 
-## Key ideas
+## Cognitive architecture
 
-GAIA implements the **Recursive Language Model (RLM)** paradigm of inference strategy, allowing an AI agent to solve complex,
-large-scale system tasks by programmatically investigating the environment rather than merely "reading" it.
+GCAS, not an individual LLM or agent loop, is GAIA's architectural source of truth. The system is a recurrent, event-driven
+process connecting specialized processors through explicit Cognitive Objects, Cognitive State, a selectively admitting Global
+Workspace, memory, Cognitive Control, and observable execution.
+
+```text
+Question / Environment → Cognitive Objects → Workspace competition
+       ↑                         ↓                    ↓
+ Memory / Evidence ← Cognitive State ← processor proposals
+                                      ↓
+                   Cognitive Control → approved Action → REPL / sandbox
+                                      ↓
+                              Result / Failure / Reflection
+```
+
+An LLM is a **Generative Cognition** processor: its outputs begin as hypotheses, not accepted knowledge. The Guile REPL and
+sandbox are **Execution / Investigation** processors: they expose authoritative environment observations and reproducible results.
+Planning, verification, memory, and control remain separate functions. See [gcas.md](gcas.md) for the normative specification.
+
+## RLM as a compatibility and investigation capability
+
+GAIA originated as an implementation of the **Recursive Language Model (RLM)** paradigm: using an LLM and a persistent REPL to
+investigate large inputs programmatically rather than merely reading them. That capability remains useful, especially for long-context
+investigation, but it is no longer GAIA's cognitive architecture or main control loop.
 
 
 The RLM idea comes from this paper: https://arxiv.org/abs/2512.24601
 
-### The Philosophy of RLM
+### The investigation capability
 
-Traditional AI assistants fail when faced with massive data (e.g., 1GB log files) due to context window limits.
-GAIA solves this by giving the LLM an access to **programmatic environment** a GUile REPL in which it can operate
-with this ideas in mind (and in system prompt as instructions):
+Traditional AI assistants fail when faced with massive data (e.g., 1GB log files) due to context window limits. GAIA retains a
+programmatic investigation capability through its Guile REPL:
 
 * **Don't Read, Investigate:** Instead of uploading files, GAIA generates Guile Scheme code to explore them locally.
-* **Recursive Decomposition:** Complex tasks are broken down into sub-tasks and handled by recursive agent calls.
+* **Scoped decomposition:** A Cognitive Control policy may delegate a bounded investigation to a sub-process when it improves progress.
 * **Functional Isolation:** Investigative steps run in sandboxed environments with AST-level safety validation.
 ## Architecture
 
 GAIA is designed with a **Kernel + Pluggable Modules** architecture, built on top of a **Client-Server model**:
 
-* **GAIA Kernel:** The core engine coordinating RLM execution, AST sandboxing, Goblins-based AtomSpace working memory, and self-training loops.
+* **GAIA Kernel:** The GCAS-Core engine coordinating Cognitive Objects, State, Workspace, Control, memory, processors, and auditable execution.
 * **Extension Modules:** Opt-in plugins extending the kernel to other domains (Wayland window managers, Lean 4 provers, local voice models, etc.) without mutating the system core.
 * **Client-Server Topology:** Native Rust CLI client connected to a headless Guile Scheme server over UNIX sockets using S-expressions.
 * **LiteLLM Gateway:** API proxy routing prompts to Ollama, Gemini, or other local/remote backends.
@@ -59,7 +80,8 @@ GAIA is designed with a **Kernel + Pluggable Modules** architecture, built on to
 ## Key Features
 
 * **Client-Server Architecture:** Native Rust CLI client connected to a headless Guile Scheme engine over UNIX sockets.
-* **RLM Toolkit:** Native Guile implementation of the Recursive Language Model paradigm with persistent REPL.
+* **GCAS cognitive kernel:** Event-driven coordination of generative, deliberative, memory, and execution processors.
+* **Investigation toolkit:** Persistent Guile REPL and sandbox for RLM-style exploration of large or external data.
 * **Safety Validation:** AST-level recursive scan of LLM-generated code for banned primitives before execution.
 * **Multi-Model Support:** Hot-swappable LLM backends via LiteLLM (Gemma, Ollama, Gemini, Anthropic).
 * **Thinking Mode:** Native reasoning support for models with `<|think|>` tags (Gemma 4).
@@ -138,7 +160,7 @@ make check
 # Run LLM Tool-Use Check
 make test-tool-use
 
-# Run RLM PoC (Sandbox verification)
+# Run REPL investigation compatibility check
 make test-rlm
 ```
 
@@ -149,7 +171,7 @@ make dataset
 
 ```
 
-## The Learning Loop
+## Learning and evolution
 
 GAIA doesn't just work; it grows. Every interaction is stored in `trajectories.jsonl`.
 
@@ -158,7 +180,7 @@ GAIA doesn't just work; it grows. Every interaction is stored in `trajectories.j
 * **Goal:** Fine-tune smaller, local models to match or exceed frontier model performance on Guix-specific tasks.
 * **Guide:** See [fine_tuning_guide.md](fine_tuning_guide.md) for instructions.
 
-## Benchmark Results (Phase 3)
+## Legacy RLM benchmark results
 
 We tested GAIA's RLM core using a "Needle in a Haystack" task (finding a key in a 10MB text file).
 
@@ -179,10 +201,9 @@ GAIA is part of the GNU ecosystem and is released under the **GPLv3+ License**. 
 ## Roadmap
 
 See **[ROADMAP.md](ROADMAP.md)** for the full development plan. The project is organized around:
-- **GAIA Kernel** (Core Engine: K0–K3) — Closed loop of RLM inference, sandbox safety, local cognitive memory (AtomSpace/Goblins), and J-space-aligned self-training (`make learn`).
+- **GCAS-Core migration** — Cognitive Objects, State, Workspace, Control, memory, and auditable execution, with the legacy RLM loop retained only as an investigation compatibility layer.
 - **Showcase Benchmarks** — GAIA-SysOps (system administration tasks) and GAIA-Math (programming/logical challenges) to validate the model's evolution.
 - **Extension Modules** — Decoupled domains: `gaia-accel` (tensor compiling), `gaia-io` (voice/vision), `gaia-desktop` (COSMIC/Emacs), `gaia-os` (transactional self-healing), `gaia-proof` (Lean 4/Z3), and `gaia-sci` (RAG/Hyperon FFI).
 
 ---
 *GAIA is under active development. If you are interested in supporting this digital commons project, please reach out.*
-

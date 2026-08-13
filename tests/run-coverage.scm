@@ -41,7 +41,8 @@
          "test-hitl-sync.scm"
          ;; GCAS 0.1: Cognitive Object Model and Cognitive Bus tests
          "test-com.scm"
-         "test-cognitive-bus.scm")))
+         "test-cognitive-bus.scm"
+         "test-cognitive-session.scm")))
 
 (define failed-tests '())
 

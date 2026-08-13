@@ -40,6 +40,14 @@
 (define VALID-VERIFICATION-STATUSES
   '(UNVERIFIED PARTIALLY_VERIFIED VERIFIED FORMALLY_VERIFIED))
 
+(define (valid-member? value allowed label)
+  (unless (memq value allowed)
+    (error (format #f "Invalid ~a: ~s" label value))))
+
+(define (valid-confidence? value)
+  (unless (and (number? value) (<= 0 value 1))
+    (error (format #f "Confidence must be a number in [0, 1]: ~s" value))))
+
 ;; Definition of Cognitive Object Record
 (define-record-type <cognitive-object>
   (%make-co id type content provenance epistemic-status verification-status confidence valid-from valid-to invalidated-by relations)
@@ -71,28 +79,39 @@
                                 (invalidated-by #f)
                                 (relations '()))
   "Constructor for Cognitive Objects enforcing GCAS epistemic classification rules."
+  (valid-member? type VALID-TYPES 'Cognitive-Object-type)
+  (valid-member? provenance VALID-PROVENANCES 'provenance)
+  (valid-confidence? confidence)
   (let* ((actual-id (or id (generate-co-id)))
          ;; Rule 1: LLM outputs automatically carry HYPOTHESIS & UNVERIFIED unless specified
          (actual-epistemic
           (or epistemic-status
               (case provenance
                 ((LLM) 'HYPOTHESIS)
-                ((USER SENSOR) 'BELIEF)
-                ((REPL EXECUTION) 'ACCEPTED)
-                ((FORMAL_PROOF SYMBOLIC_INFERENCE) 'ACCEPTED)
+                ((USER SENSOR REPL EXECUTION) 'UNKNOWN)
+                ((FORMAL_PROOF SYMBOLIC_INFERENCE) 'BELIEF)
                 (else 'UNKNOWN))))
          (actual-verification
           (or verification-status
               (case provenance
                 ((FORMAL_PROOF) 'FORMALLY_VERIFIED)
-                ((REPL EXECUTION) 'VERIFIED)
+                ((REPL EXECUTION) 'UNVERIFIED)
                 ((LLM USER SENSOR) 'UNVERIFIED)
                 (else 'UNVERIFIED)))))
+    (valid-member? actual-epistemic VALID-EPISTEMIC-STATUSES 'epistemic-status)
+    (valid-member? actual-verification VALID-VERIFICATION-STATUSES 'verification-status)
+    ;; An LLM proposal must cross an explicit verification/update boundary before
+    ;; it can become accepted knowledge.  Provenance remains LLM afterwards.
+    (when (and (eq? provenance 'LLM)
+               (or (not (eq? actual-epistemic 'HYPOTHESIS))
+                   (not (eq? actual-verification 'UNVERIFIED))))
+      (error "LLM output must initially be HYPOTHESIS and UNVERIFIED"))
     (%make-co actual-id type content provenance actual-epistemic actual-verification confidence valid-from valid-to invalidated-by relations)))
 
 (define (fact? co)
   "Predicate: Returns #t if Cognitive Object is an ACCEPTED Fact with VERIFIED or FORMALLY_VERIFIED status."
   (and (cognitive-object? co)
+       (eq? (co-type co) 'claim)
        (eq? (co-epistemic-status co) 'ACCEPTED)
        (memq (co-verification-status co) '(VERIFIED FORMALLY_VERIFIED))))
 
@@ -103,8 +122,11 @@
 
 (define (co-update-epistemic co new-epistemic new-verification . optional-args)
   "Immutably creates a new Cognitive Object with updated epistemic/verification status and optional new confidence & invalidated-by tag."
+  (valid-member? new-epistemic VALID-EPISTEMIC-STATUSES 'epistemic-status)
+  (valid-member? new-verification VALID-VERIFICATION-STATUSES 'verification-status)
   (let ((new-confidence (if (null? optional-args) (co-confidence co) (car optional-args)))
         (new-invalidated (if (or (null? optional-args) (null? (cdr optional-args))) (co-invalidated-by co) (cadr optional-args))))
+    (valid-confidence? new-confidence)
     (%make-co (co-id co)
               (co-type co)
               (co-content co)

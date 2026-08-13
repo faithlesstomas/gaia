@@ -19,11 +19,11 @@
       (and (hypothesis? co)
            (not (fact? co)))))
 
-  (test-assert "epistemic classification rule: REPL execution defaults to ACCEPTED and VERIFIED (Fact)"
+  (test-assert "execution result is observed output, not automatically a fact"
     (let ((co (make-cognitive-object 'result "(+ 1 1) -> 2" #:provenance 'REPL)))
-      (and (fact? co)
-           (eq? (co-epistemic-status co) 'ACCEPTED)
-           (eq? (co-verification-status co) 'VERIFIED)))))
+      (and (not (fact? co))
+           (eq? (co-epistemic-status co) 'UNKNOWN)
+           (eq? (co-verification-status co) 'UNVERIFIED)))))
 
 (test-group "cognitive-object-updates"
   (test-assert "co-update-epistemic creates updated copy"
@@ -38,7 +38,17 @@
     (let* ((co1 (make-cognitive-object 'goal "Goal 1"))
            (co2 (make-cognitive-object 'action "Action 1"))
            (linked (co-add-relation co2 'subgoal-of (co-id co1))))
-      (equal? (co-relations linked) `((subgoal-of . ,(co-id co1)))))))
+      (equal? (co-relations linked) `((subgoal-of . ,(co-id co1))))))
+
+  (test-assert "LLM cannot create accepted knowledge directly"
+    (catch #t
+      (lambda ()
+        (make-cognitive-object 'claim "Unsupported assertion"
+                               #:provenance 'LLM
+                               #:epistemic-status 'ACCEPTED
+                               #:verification-status 'VERIFIED)
+        #f)
+      (lambda _ #t))))
 
 (test-group "cognitive-object-serialization"
   (test-assert "co->alist and alist->co roundtrip"
