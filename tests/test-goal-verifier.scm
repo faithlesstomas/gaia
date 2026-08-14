@@ -35,4 +35,30 @@
       #f)
     (lambda _ #t)))
 
+(test-assert "the production selector supplies deterministic Fibonacci acceptance"
+  (let* ((fixture (make-fixture))
+         (result (list-ref fixture 2))
+         (accepted-result
+          (make-cognitive-object 'result "(0 1 1 2 3 5 8 13 21 34)"
+                                 #:provenance 'REPL))
+         (accepted-action
+          (make-cognitive-object
+           'action
+           "(define (fibonacci-sequence n) '(0 1 1 2 3 5 8 13 21 34))\n(fibonacci-sequence 10)"
+           #:provenance 'LLM))
+         (verifier (select-goal-verifier
+                    "Napisz funkcję liczącą wyrazy ciągu Fibonacciego"))
+         (verdict (verifier (list-ref fixture 0)
+                            accepted-action
+                            accepted-result
+                            (list-ref fixture 3)
+                            (list-ref fixture 4)
+                            (make-cognitive-state))))
+    (and (eq? (goal-verdict-status verdict) 'SATISFIED)
+         (string-contains (goal-verdict-claim-content verdict)
+                          "define (fibonacci-sequence")
+         (string-contains
+          (goal-completion-criteria "Fibonacci sequence")
+          "0 1 1 2 3 5 8 13 21 34"))))
+
 (test-end "gaia-goal-verifier")

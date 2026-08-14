@@ -124,6 +124,19 @@ during a broadcast set the flag for a subsequent round."
              "Revise the plan and propose a distinct Action when appropriate."
              "Treat model output as an unverified hypothesis.")))
 
+    (define (consolidate-goal-claim! claim)
+      (let* ((execution-claim
+              (state-find (session-state session) (relation-ref claim 'supported-by)))
+             (evidence (and execution-claim
+                            (state-find (session-state session)
+                                        (relation-ref execution-claim 'supported-by))))
+             (result (and evidence
+                          (state-find (session-state session)
+                                      (relation-ref evidence 'observes)))))
+        (memory-consolidate!
+         (session-memory session)
+         (filter cognitive-object? (list result evidence claim)))))
+
     (define (generate-hypothesis! prompt replanning?)
       (generate
        prompt
@@ -158,6 +171,8 @@ during a broadcast set the flag for a subsequent round."
                         (cognitive-object? event-goal)
                         (equal? (co-id event-goal) (co-id goal)))
                    (let* ((selected (memory-retrieve (session-memory session) task))
+                          (remembered-facts
+                           (memory-retrieve-facts (session-memory session) task))
                           (context (reconstruct-context
                                     goal '() selected
                                     #:constraints
@@ -170,8 +185,22 @@ during a broadcast set the flag for a subsequent round."
                             #:relations `((process . ,process-id*)
                                           (context-for . ,(co-id goal))))))
                      (session-emit! session 'MemoryRetrieved context-co #:origin 'MEMORY)
-                     (list (make-processor-proposal context-co
-                                                    #:priority 80 #:relevance 1)))
+                     (append
+                      (map (lambda (remembered)
+                             (make-processor-proposal
+                              (make-cognitive-object
+                               'claim (co-content remembered)
+                               #:provenance 'MEMORY
+                               #:epistemic-status 'ACCEPTED
+                               #:verification-status (co-verification-status remembered)
+                               #:relations `((process . ,process-id*)
+                                             (satisfies . ,(co-id goal))
+                                             (supported-by . ,(co-id remembered))
+                                             (verdict-rationale . "Retrieved accepted user memory.")))
+                              #:priority 100 #:relevance 1))
+                           remembered-facts)
+                      (list (make-processor-proposal context-co
+                                                     #:priority 80 #:relevance 1))))
                    '())))))
 
          (generative-processor
@@ -468,6 +497,7 @@ during a broadcast set the flag for a subsequent round."
                            (fact? claim)
                            (equal? (relation-ref claim 'satisfies) (co-id goal)))))
                (let ((claim (event-payload event)))
+                 (consolidate-goal-claim! claim)
                  (session-emit! session 'GoalVerified claim #:origin 'GOAL_VERIFIER)
                  (emit-answer!
                   'COMPLETED
@@ -519,8 +549,12 @@ during a broadcast set the flag for a subsequent round."
       (session-submit! session question #:priority 10 #:relevance 1 #:origin 'USER)
       (session-emit! session 'ObservationReceived question #:origin 'USER)
       (session-submit! session goal #:priority 100 #:relevance 1 #:origin 'USER)
+      (session-emit! session 'GoalCreated goal #:origin 'CONTROL)
+      ;; Store the current turn only after retrieval has selected prior memory,
+      ;; so the prompt is not flooded by a duplicate of its own Goal.
       (memory-store! (session-memory session) question)
       (memory-store! (session-memory session) goal)
-      (session-emit! session 'GoalCreated goal #:origin 'CONTROL)
+      (let ((user-claim (make-user-memory-claim task)))
+        (when user-claim (memory-store! (session-memory session) user-claim)))
       (request-round!)
       process)))

@@ -3,6 +3,7 @@
   #:use-module (srfi srfi-64)
   #:use-module (gaia com)
   #:use-module (gaia cognitive-bus)
+  #:use-module (gaia cognitive-memory)
   #:use-module (gaia cognitive-process)
   #:use-module (gaia cognitive-session)
   #:use-module (gaia cognitive-state)
@@ -166,6 +167,74 @@
              (every (lambda (required) (memq required types))
                     '(ActionCompleted GoalVerificationCompleted ConflictDetected
                       ReflectionRaised GoalVerified GoalCompleted AnswerRequested)))))))
+
+(test-assert "accepted user testimony answers a later Goal through structured memory"
+  (let ((session (make-cognitive-session #:workspace-capacity 3))
+        (generation-calls 0)
+        (second-finish #f))
+    (start-production-process!
+     session "Mam na imię Tomasz"
+     #:generate (lambda (prompt succeed fail)
+                  (set! generation-calls (+ generation-calls 1))
+                  (succeed "Zapamiętam tę informację."))
+     #:extract-action (lambda (response) #f)
+     #:execute (lambda args (error "memory assertion must not execute")))
+    (let ((process
+           (start-production-process!
+            session "Jak mam na imię?"
+            #:generate (lambda (prompt succeed fail)
+                         (set! generation-calls (+ generation-calls 1))
+                         (succeed "This callback should not be needed."))
+            #:extract-action (lambda (response) #f)
+            #:execute (lambda args (error "memory answer must not execute"))
+            #:on-finished
+            (lambda (outcome final-text hypothesis-text)
+              (set! second-finish (list outcome final-text))))))
+      (let ((types (map event-type (state-events (session-state session)))))
+        (and (eq? (process-outcome process) 'COMPLETED)
+             (eq? (car second-finish) 'COMPLETED)
+             (string-contains (cadr second-finish) "Mam na imię Tomasz")
+             (= generation-calls 1)
+             (memq 'GoalVerified types)
+             (memq 'GoalCompleted types))))))
+
+(test-assert "completed evidence graph and consolidated memory survive restart"
+  (let* ((state-path "/tmp/gaia-production-restart-state.scm")
+         (memory-path "/tmp/gaia-production-restart-memory.scm")
+         (_ (for-each (lambda (path)
+                        (when (file-exists? path) (delete-file path)))
+                      (list state-path memory-path)))
+         (session (make-cognitive-session #:state-path state-path
+                                          #:memory-path memory-path)))
+    (start-production-process!
+     session "Return the first ten Fibonacci terms."
+     #:completion-criteria
+     (goal-completion-criteria "Return the first ten Fibonacci terms.")
+     #:verify-goal
+     (select-goal-verifier "Return the first ten Fibonacci terms.")
+     #:generate
+     (lambda (prompt succeed fail)
+       (succeed "```repl\n(define (fibonacci-sequence n) '(0 1 1 2 3 5 8 13 21 34))\n(fibonacci-sequence 10)\n```"))
+     #:extract-action
+     (lambda (response)
+       "(define (fibonacci-sequence n) '(0 1 1 2 3 5 8 13 21 34))\n(fibonacci-sequence 10)")
+     #:execute (lambda (code succeed fail)
+                 (succeed "(0 1 1 2 3 5 8 13 21 34)")))
+    (let* ((restored (make-cognitive-session #:state-path state-path
+                                             #:memory-path memory-path))
+           (restored-state (session-state restored))
+           (event-types (map event-type (state-events restored-state)))
+           (facts (filter fact? (state-objects restored-state)))
+           (memories (memory-objects (session-memory restored))))
+      (for-each (lambda (path)
+                  (when (file-exists? path) (delete-file path)))
+                (list state-path memory-path))
+      (and (memq 'GoalVerificationCompleted event-types)
+           (memq 'GoalCompleted event-types)
+           (any (lambda (claim) (assoc-ref (co-relations claim) 'satisfies)) facts)
+           (any fact? memories)
+           (any (lambda (co) (eq? (co-type co) 'evidence)) memories)
+           (any (lambda (co) (eq? (co-type co) 'result)) memories)))))
 
 (test-assert "a Conflict is reflected and routed to Generative replanning"
   (let ((session (make-cognitive-session #:workspace-capacity 2))

@@ -3,6 +3,7 @@
              (gaia executor)
              (gaia tools)  ;; For direct testing
              (gaia config)
+             (srfi srfi-1)
              (srfi srfi-64)
              (ice-9 match)
              (ice-9 popen)
@@ -225,23 +226,48 @@
 
 (test-assert "direct: run-in-sandbox guix container simulation"
   (let* ((mod (resolve-module '(gaia tools) #:ensure #f))
-         (orig-supported? (@@ (gaia tools) guix-container-supported?)))
+         (config-mod (resolve-module '(gaia config) #:ensure #f))
+         (orig-supported (@@ (gaia tools) *guix-container-supported*))
+         (orig-checked (@@ (gaia tools) *guix-checked*))
+         (config-parameter (module-ref config-mod '*config*))
+         (orig-config (config-parameter)))
     ;; Force supported path
-    (module-set! mod 'guix-container-supported? (lambda () #t))
+    (module-set! mod '*guix-container-supported* #t)
+    (module-set! mod '*guix-checked* #t)
     (catch #t
       (lambda () (run-in-sandbox "echo 1"))
       (lambda _ #f))
     ;; Force unsupported path
-    (module-set! mod 'guix-container-supported? (lambda () #f))
+    (module-set! mod '*guix-container-supported* #f)
+    (config-parameter
+     (acons 'allow-sandbox-fallback #t
+            (alist-delete 'allow-sandbox-fallback orig-config)))
     (run-in-sandbox "echo 1")
-    ;; Force unsupported path and disable fallback
-    (set-config! 'allow-sandbox-fallback #f)
-    (test-error "throws error when fallback is disabled"
-                (run-in-sandbox "echo 1"))
-    (set-config! 'allow-sandbox-fallback #t)
-    ;; Restore
-    (module-set! mod 'guix-container-supported? orig-supported?)
+    ;; Restore the production capability probe.
+    (config-parameter orig-config)
+    (module-set! mod '*guix-container-supported* orig-supported)
+    (module-set! mod '*guix-checked* orig-checked)
     #t))
+
+;; Keep this as a top-level SRFI-64 error assertion. Nesting test-error inside
+;; test-assert makes the runner report the expected exception to the outer test.
+(let* ((mod (resolve-module '(gaia tools) #:ensure #f))
+       (config-mod (resolve-module '(gaia config) #:ensure #f))
+       (orig-supported (@@ (gaia tools) *guix-container-supported*))
+       (orig-checked (@@ (gaia tools) *guix-checked*))
+       (config-parameter (module-ref config-mod '*config*))
+       (orig-config (config-parameter)))
+  (module-set! mod '*guix-container-supported* #f)
+  (module-set! mod '*guix-checked* #t)
+  (config-parameter
+   (acons 'allow-sandbox-fallback #f
+          (alist-delete 'allow-sandbox-fallback orig-config)))
+  (test-error "run-in-sandbox fails closed when fallback is disabled"
+              'misc-error
+              (run-in-sandbox "echo 1"))
+  (config-parameter orig-config)
+  (module-set! mod '*guix-container-supported* orig-supported)
+  (module-set! mod '*guix-checked* orig-checked))
 
 (test-assert "direct: high-level tools"
   (begin

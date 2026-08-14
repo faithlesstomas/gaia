@@ -1,21 +1,22 @@
-# GCAS-Core Conformance Gap Audit
+# GCAS-Core Conformance Audit
 
 This document evaluates GAIA against the eight minimum requirements in
 [GCAS §11.2](../gcas.md#112-minimal-conformance-requirements-gcas-core). It is a
-gap audit, not a declaration of conformance.
+implementation audit and executable acceptance record.
 
-**Current conclusion:** GAIA implements a substantial GCAS substrate, including
-a per-Goal process lifecycle, production processors attached to the Cognitive
-Bus, explicit Workspace rounds, bounded feedback replanning, and an independent
-Goal-verification boundary. It is not yet operationally GCAS-Core conformant:
-client-visible process views, richer memory consolidation, and the full
-restart/both-client conformance gate remain.
+**Current conclusion:** GAIA satisfies the minimum GCAS-Core requirements on its
+production `solve` path. The conformance gate covers the recurrent processor
+graph, independent Goal verification, answer policy, structured cross-turn
+memory, restoration, budgets, interruption, and inspection from the Rust CLI
+and Emacs client. This is a minimum architecture claim, not a claim of general
+intelligence or broad task verification: the registry currently provides a
+deterministic Fibonacci verifier and fails closed for unsupported task classes.
 
 Status meanings:
 
 - **Implemented:** present in the production path with acceptance evidence.
-- **Partial:** supporting contracts exist, but production behavior does not yet
-  satisfy the complete requirement.
+- **Implemented at Core minimum:** the normative boundary is present and tested;
+  richer policy or capability remains planned.
 
 | GCAS-Core requirement | Status | Implemented substrate | Remaining conformance gap |
 |---|---|---|---|
@@ -23,10 +24,10 @@ Status meanings:
 | Hypotheses distinct from beliefs | Implemented | LLM output begins as `HYPOTHESIS`/`UNVERIFIED`; execution success does not establish the user's original claim. | Keep accepted execution observations explicitly scoped so `BeliefUpdated` cannot be mistaken for goal verification. |
 | Bounded Workspace with selective admission/broadcast | Implemented | Control records explicit Workspace rounds, selects one pending candidate by scheduling metadata, broadcasts it, and releases active focus while preserving the CO in State. | Improve scheduling policy with novelty, urgency, information gain, and goal-aware attention. |
 | At least Generative and Deliberative processors | Implemented | Memory Retrieval, Generative, Planner, Execution, Deliberative, Goal Verifier, Answer, and Control processors subscribe through the Cognitive Bus. The orchestrator supplies asynchronous LLM, sandbox, and client adapters. | Planner currently maps one Hypothesis to at most one Action; richer planning remains future work. |
-| Memory separate from prompt history | Implemented at minimum, functionally limited | Structured CO memory is persisted separately and selected context is reconstructed without appending chat history. | Memory currently stores mainly Question/Goal COs and uses lexical overlap. Add evidence/claim consolidation, typed memory functions, and retrieval capable of preserving facts such as user-provided identity. |
+| Memory separate from prompt history | Implemented at Core minimum | Structured CO memory is persisted separately; accepted user testimony and verified Result/Evidence/Claim chains are consolidated and selected context is reconstructed without appending chat history. | Add semantic retrieval, conflict/supersession policies, and more typed memory roles. |
 | Recurrent cognitive cycle with progress and loop monitoring | Implemented at bounded minimum | Every `solve` has isolated budgets and exactly-once termination. Failed actions and conflicts become Reflection COs, which trigger a bounded revised Hypothesis → Plan → linked subgoal → Action pass; Control monitors transition, failure, stall, and replan limits. A Goal Verifier decides completion from explicit evidence. | Add richer strategy switching and goal-aware progress measures. |
 | Separate execution with auditable Action/Result | Implemented | An admitted Action crosses an explicit sandbox boundary; Result/Failure links to it and receives a reproducibility observation. | Extend the policy gate beyond checking only the `action` type and add richer environment manifests after Core. |
-| Explicit uncertainty, time, and failure | Implemented | COs represent confidence and temporal validity; failure and inconclusive terminal states are durable. | Make goal-level uncertainty and termination rationale visible in client-facing process views. |
+| Explicit uncertainty, time, and failure | Implemented | COs represent confidence and temporal validity; failure and inconclusive terminal states are durable. `/cognitive-state` exposes process outcome, completion criteria, Control counters and termination reason, Workspace, State, and Memory. | Add richer calibrated goal-level uncertainty after Core. |
 
 ## Production behavior observed in the audit
 
@@ -59,8 +60,8 @@ commands and observations; it is not the Cognitive Bus itself.
 
 ## Conformance gate
 
-GAIA may claim GCAS-Core conformance only when the production path demonstrates
-all of the following in an automated vertical test:
+The `make gcas-conformance` gate demonstrates all of the following on the
+production path:
 
 1. a Goal has explicit completion criteria and a per-process budget;
 2. production processors subscribe and react through the Cognitive Bus;
@@ -80,3 +81,9 @@ The first acceptance scenario is a failure-first Fibonacci task: the first
 generated implementation must be rejected, the feedback must re-enter the
 cycle, a revised Action must pass deterministic tests, and only then may Control
 emit `GoalCompleted`.
+
+The gate also reloads the completed CO/event and Memory graph from disk, checks
+budget and interruption behavior including late callbacks, and runs protocol
+mapping tests for both supported clients. Future verifier classes and semantic
+memory improve the range of Goals GAIA can solve; they are not missing pieces of
+the minimum GCAS-Core control architecture.

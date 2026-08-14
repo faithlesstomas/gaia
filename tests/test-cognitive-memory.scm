@@ -30,4 +30,13 @@
          (string-contains context "Retrieved structured memory:")
          (string-contains context "Require verification."))))
 
+(test-assert "explicit user testimony is consolidated and retrieved across turns"
+  (let* ((memory (make-cognitive-memory))
+         (claim (make-user-memory-claim "Mam na imię Tomasz")))
+    (memory-store! memory claim)
+    (let ((facts (memory-retrieve-facts memory "Jak mam na imię?")))
+      (and (fact? claim)
+           (= (length facts) 1)
+           (string=? (co-content (car facts)) "Mam na imię Tomasz")))))
+
 (test-end "gaia-cognitive-memory")

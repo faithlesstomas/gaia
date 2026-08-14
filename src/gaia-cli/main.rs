@@ -20,6 +20,14 @@ enum Action {
     Exit,
 }
 
+fn cognitive_inspection_operation(command: &str) -> Option<&'static str> {
+    match command {
+        "/cognitive-events" => Some("get-cognitive-events"),
+        "/cognitive-state" | "/cognitive-objects" => Some("get-cognitive-state"),
+        _ => None,
+    }
+}
+
 /// Events forwarded from the listener thread to the main thread.
 /// Only "end-of-operation" events are forwarded. Informational events
 /// (status, thought, result, stream-log, info) are printed directly
@@ -266,7 +274,7 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                         }
 
                         // === TERMINAL EVENTS ===
-                        "final" | "repl-result" | "error" | "cognitive-events"
+                        "final" | "repl-result" | "error" | "cognitive-events" | "cognitive-state"
                         | "session-list" | "history-list" | "env-list"
                         | "model-info" | "models-list" | "thinking-info" 
                         | "permission-request" => {
@@ -395,9 +403,10 @@ fn dispatch(
             wait_and_print(rx, stream)?;
             Ok(Action::Continue)
         }
-        "/cognitive-events" => {
+        _ if cognitive_inspection_operation(cmd).is_some() => {
             while rx.try_recv().is_ok() {}
-            send_sexp(stream, &Value::list(vec![Value::symbol("get-cognitive-events")]))?;
+            let operation = cognitive_inspection_operation(cmd).expect("guarded operation");
+            send_sexp(stream, &Value::list(vec![Value::symbol(operation)]))?;
             wait_and_print(rx, stream)?;
             Ok(Action::Continue)
         }
@@ -431,6 +440,19 @@ fn dispatch(
             wait_and_print(rx, stream)?;
             Ok(Action::Continue)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cognitive_inspection_operation;
+
+    #[test]
+    fn maps_gcas_inspection_commands_to_protocol_operations() {
+        assert_eq!(cognitive_inspection_operation("/cognitive-events"), Some("get-cognitive-events"));
+        assert_eq!(cognitive_inspection_operation("/cognitive-state"), Some("get-cognitive-state"));
+        assert_eq!(cognitive_inspection_operation("/cognitive-objects"), Some("get-cognitive-state"));
+        assert_eq!(cognitive_inspection_operation("/help"), None);
     }
 }
 
@@ -558,6 +580,13 @@ fn wait_and_print(rx: &Receiver<ServerEvent>, stream: &mut UnixStream) -> Result
                         }
                         "cognitive-events" => {
                             println!("{BOLD}GCAS Event Trace:{RESET}");
+                            if let Value::Cons(c) = cdr {
+                                print_list(c.car());
+                            }
+                            break;
+                        }
+                        "cognitive-state" => {
+                            println!("{BOLD}GCAS Cognitive State:{RESET}");
                             if let Value::Cons(c) = cdr {
                                 print_list(c.car());
                             }

@@ -12,8 +12,13 @@
   #:use-module (gaia utils)
   #:use-module (gaia com)
   #:use-module (gaia cognitive-session)
+  #:use-module (gaia cognitive-process)
+  #:use-module (gaia cognitive-control)
+  #:use-module (gaia cognitive-memory)
   #:use-module (gaia cognitive-state)
   #:use-module (gaia cognitive-bus)
+  #:use-module (gaia workspace)
+  #:use-module (gaia goal-verifier)
   #:use-module (gaia production-processors)
   #:export (^session-orchestrator))
 
@@ -47,6 +52,41 @@
            (type . ,(event-type event))
            (origin . ,(event-origin event))))
        (state-events (session-state cognitive-session))))
+
+(define (cognitive-object-summary co)
+  `((id . ,(co-id co))
+    (type . ,(co-type co))
+    (content . ,(co-content co))
+    (provenance . ,(co-provenance co))
+    (epistemic-status . ,(co-epistemic-status co))
+    (verification-status . ,(co-verification-status co))
+    (relations . ,(co-relations co))))
+
+(define (cognitive-status-summary cognitive-session)
+  (let* ((process (session-current-process cognitive-session))
+         (control (and process (process-control process)))
+         (workspace (session-workspace cognitive-session)))
+    `((process . ,(and process
+                       `((id . ,(process-id process))
+                         (active . ,(process-active? process))
+                         (outcome . ,(process-outcome process))
+                         (completion-criteria . ,(process-completion-criteria process)))))
+      (goal . ,(and process (cognitive-object-summary (process-goal process))))
+      (control . ,(and control
+                       `((transitions . ,(control-transition-count control))
+                         (max-transitions . ,(control-max-transitions control))
+                         (progress . ,(control-progress-count control))
+                         (failures . ,(control-failure-count control))
+                         (termination-reason . ,(control-termination-reason control)))))
+      (workspace . ((capacity . ,(workspace-capacity workspace))
+                    (pending . ,(map cognitive-object-summary
+                                     (workspace-candidates workspace)))
+                    (active . ,(map cognitive-object-summary
+                                    (workspace-active workspace)))))
+      (objects . ,(map cognitive-object-summary
+                       (state-objects (session-state cognitive-session))))
+      (memory . ,(map cognitive-object-summary
+                      (memory-objects (session-memory cognitive-session)))))))
 
 ;; Session Orchestrator Actor
 (define-actor (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model thinking #:optional (workspace-dir #f) (cognitive-session (make-cognitive-session #:memory-path (string-append "sessions/" session-id ".gcas-memory.scm") #:state-path (string-append "sessions/" session-id ".gcas-state.scm"))))
@@ -181,6 +221,8 @@
                   #:catch (lambda (err)
                             (fail 'runtime (format #f "~a" err))))))
           #:extract-action extract-code
+          #:completion-criteria (goal-completion-criteria task)
+          #:verify-goal (select-goal-verifier task)
           #:on-client-event event-sink
           #:on-finished
           (lambda (outcome final-text hypothesis-text)
@@ -188,7 +230,7 @@
                    (append history
                            (list `(("role" . "user") ("content" . ,task))
                                  `(("role" . "assistant")
-                                   ("content" . ,hypothesis-text))))))
+                                   ("content" . ,final-text))))))
               (save-session session-id updated-history)
               (with-output-to-file ".last_session" (lambda () (display session-id)))
               (send-event client-socket `(final ,(if (eq? outcome 'INSUFFICIENT_INFORMATION)
@@ -267,6 +309,10 @@
       (('get-cognitive-events)
        (send-event client-socket
                    `(cognitive-events ,(cognitive-event-summary cognitive-session))))
+
+      (('get-cognitive-state)
+       (send-event client-socket
+                   `(cognitive-state ,(cognitive-status-summary cognitive-session))))
 
       (('clear)
        (gaia-log (format #f "[SERVER] Clearing session ~a environment and history." session-id))
@@ -390,6 +436,7 @@
   /investigate <q>  - Use the legacy recursive LLM–REPL investigation processor
   /ask <query>      - Ask the LLM without initiating a GCAS process
   /cognitive-events - Show the current session's GCAS event trace
+  /cognitive-state  - Show Goal, Control, Workspace, CO, and Memory state
   /ask <query>      - Ask a one-off question to AI (no recursion)
   /model [name]     - Show or change the active LLM model
   /models           - List available models

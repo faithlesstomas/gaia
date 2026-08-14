@@ -9,7 +9,10 @@
             cognitive-memory?
             memory-objects
             memory-store!
+            memory-consolidate!
             memory-retrieve
+            memory-retrieve-facts
+            make-user-memory-claim
             reconstruct-context))
 
 ;; Episodic/semantic COs are stored independently from chat transcripts.  The
@@ -58,6 +61,16 @@
   (persist! memory)
   co)
 
+(define (memory-consolidate! memory objects)
+  "Persist a verified evidence chain as structured memory, newest object first."
+  (for-each (lambda (co)
+              (when (and (cognitive-object? co)
+                         (or (fact? co)
+                             (memq (co-type co) '(evidence result))))
+                (memory-store! memory co)))
+            objects)
+  objects)
+
 (define (tokenize text)
   (filter (lambda (token) (> (string-length token) 1))
           (string-tokenize (string-downcase (format #f "~a" text)))))
@@ -65,12 +78,42 @@
 (define (overlap-score query candidate)
   (length (lset-intersection string=? (tokenize query) (tokenize (co-content candidate)))))
 
+(define (user-assertion? text)
+  (let ((normalized (string-downcase text)))
+    (any (lambda (marker) (string-contains normalized marker))
+         '("my name is" "mam na imię" "nazywam się" "i prefer" "preferuję"
+           "my favourite" "my favorite" "moim ulubionym" "lubię"))))
+
+(define (make-user-memory-claim text)
+  "Represent an explicit user assertion as verified user testimony.
+
+VERIFIED here means that GAIA can verify the user supplied the statement; it
+does not promote the statement to an independently established world fact."
+  (and (string? text)
+       (user-assertion? text)
+       (make-cognitive-object
+        'claim text
+        #:provenance 'USER
+        #:epistemic-status 'ACCEPTED
+        #:verification-status 'VERIFIED
+        #:relations '((memory-role . USER_TESTIMONY)))))
+
 (define* (memory-retrieve memory goal #:key (limit 5))
   "Return goal-relevant COs, ranked by lexical overlap, then recency/insertion
 order. Empty-overlap memories are excluded to prevent transcript-like flooding."
   (let ((scored (filter (lambda (pair) (> (cdr pair) 0))
                         (map (lambda (co) (cons co (overlap-score goal co)))
                              (memory-objects memory)))))
+    (map car
+         (take (sort scored (lambda (left right) (> (cdr left) (cdr right))))
+               (min limit (length scored))))))
+
+(define* (memory-retrieve-facts memory goal #:key (limit 3) (minimum-overlap 2))
+  "Return accepted facts sufficiently related to GOAL for memory-only answering."
+  (let ((scored
+         (filter (lambda (pair) (>= (cdr pair) minimum-overlap))
+                 (map (lambda (co) (cons co (overlap-score goal co)))
+                      (filter fact? (memory-objects memory))))))
     (map car
          (take (sort scored (lambda (left right) (> (cdr left) (cdr right))))
                (min limit (length scored))))))

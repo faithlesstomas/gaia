@@ -8,7 +8,7 @@ export GAIA_MODEL
 export GAIA_BASE_MODEL
 export GAIA_ALLOW_SANDBOX_FALLBACK
 
-.PHONY: run repl check test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-actors test-server test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop clean-trajectories monitor client server gcas-showcase
+.PHONY: run repl check test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-actors test-server test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop clean-trajectories monitor client server gcas-showcase gcas-conformance test-clients
 
 GUIX_SHELL = guix shell -m guix.scm --
 GUIX_DEV_SHELL = guix shell -m guix-dev.scm --
@@ -27,6 +27,19 @@ check:
 
 gcas-showcase:
 	GUILE_AUTO_COMPILE=0 guile -L src scripts/run-gcas-showcase.scm
+
+test-clients:
+	cargo test --manifest-path src/gaia-cli/Cargo.toml
+	emacs --batch -Q -L src/gaia-desktop/emacs -l tests/test-emacs-client.el
+
+gcas-conformance:
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-goal-verifier.scm
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-cognitive-memory.scm
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-cognitive-session.scm
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-production-processors.scm
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-server.scm
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-actors.scm
+	$(MAKE) test-clients
 
 test-server:
 	@echo "Running GAIA server unit tests..."

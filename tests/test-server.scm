@@ -35,6 +35,8 @@
   (test-equal "solve" '(solve "verify this claim") (parse-slash-command "/solve verify this claim"))
   (test-equal "investigate" '(investigate "inspect this repository") (parse-slash-command "/investigate inspect this repository"))
   (test-equal "cognitive-events" '(get-cognitive-events) (parse-slash-command "/cognitive-events"))
+  (test-equal "cognitive-state" '(get-cognitive-state) (parse-slash-command "/cognitive-state"))
+  (test-equal "cognitive-objects alias" '(get-cognitive-state) (parse-slash-command "/cognitive-objects"))
   (test-equal "eval" '(repl "(+ 1 1)") (parse-slash-command "/eval (+ 1 1)"))
   (test-equal "eval-empty" #f (parse-slash-command "/eval"))
   (test-equal "session" '(session "test-session") (parse-slash-command "/session test-session"))

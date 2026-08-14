@@ -5,11 +5,12 @@ It does not define a single recursive call or an LLM loop. It defines a minimal,
 controlled feedback process in which no processor is the source of truth for the
 entire system.
 
-**Status:** this is the target operational contract. The deterministic showcase
-implements a scripted reference trace. Production `solve` now implements its
-bounded recurrent path and independent Goal-verification boundary; default
-natural-language goals still terminate as `INCONCLUSIVE` when no task-specific
-verifier is supplied. Passing the showcase alone is not GCAS-Core conformance.
+**Status:** the production path satisfies this minimal operational contract.
+The conformance gate exercises the same `solve` path used by the server and
+clients, including failure-first replanning, restoration, Control termination,
+and client inspection. The deterministic showcase remains a narrower scripted
+contract demonstration. Unsupported task classes still terminate safely as
+`INCONCLUSIVE` when no task-specific verifier is registered.
 
 ## Executable Reference Scenario
 
@@ -132,7 +133,9 @@ separate from the LLM proposal path.
 relevant to the current goal, and reconstructs an LLM context from the current
 goal, admitted workspace, selected memory, and active constraints. Server
 `solve` sends this reconstruction with empty chat history; the transcript stays
-an episodic audit record rather than becoming prompt memory.
+an episodic audit record rather than becoming prompt memory. Accepted user
+testimony and verified Result/Evidence/Claim chains are consolidated and can be
+retrieved across turns; their provenance remains explicit.
 
 ## Production Acceptance Criteria
 
@@ -149,3 +152,13 @@ The production cycle is complete only when:
    than exposing raw LLM output as the system answer;
 7. the failure-first Fibonacci vertical test and restoration/interruption tests
    pass through the same production path used by CLI and Emacs.
+
+Run the production conformance gate with:
+
+```sh
+make gcas-conformance
+```
+
+The reference capability deliberately proves repair, not breadth: the first
+Fibonacci result is rejected, its Conflict becomes replanning feedback, and only
+the corrected result can produce `GoalCompleted`.

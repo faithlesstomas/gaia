@@ -569,7 +569,8 @@
                          (string-contains output "notebook-done")
                          (string-contains output "ActionCompleted"))))))
 
-            ;; 6. The default solve command is assembled from Bus processors.
+            ;; 6. The default solve command is assembled from Bus processors
+            ;; and uses the task-specific verifier selected by production.
             (let* ((sandbox (spawn ^repl-sandbox "direct-solve-session" (lambda _ #t) (lambda _ #t) '()))
                    (llm-calls 0)
                    (mock-llm
@@ -579,21 +580,28 @@
                         [(chat session-id prompt model system-prompt think history stream-callback #:optional (role "user"))
                          (set! llm-calls (+ llm-calls 1))
                          (let-values (((promo resolver) (spawn-promise-and-resolver)))
-                           (<-np resolver 'fulfill
-                                 `(("payload" . (("content" . ,(if (= llm-calls 1)
-                                                                   "Run code:\n```repl\n(define solve-var 999)\n```"
-                                                                   "FINAL(999) CONFIDENCE(100)"))
+                          (<-np resolver 'fulfill
+                                `(("payload" . (("content" . ,(if (= llm-calls 1)
+                                                                   "First attempt:\n```repl\n(display '(0 1 2 3 5 8 13 21 34 55))\n```"
+                                                                   "Revised implementation:\n```repl\n(define (fibonacci-sequence n)\n  (let loop ((remaining n) (a 0) (b 1) (result '()))\n    (if (= remaining 0)\n        (reverse result)\n        (loop (- remaining 1) b (+ a b) (cons a result)))))\n(display (fibonacci-sequence 10))\n```"))
                                                  ("reasoning" . "Reasoning...")))))
                            promo)]))))
                    (agent (spawn ^agent-actor "direct-solve-session" sandbox mock-llm (lambda _ #t) (lambda _ #t)))
                    (mock-socket (open-output-string))
                    (mock-channel #f)
                    (orch (spawn ^session-orchestrator "direct-solve-session" mock-socket mock-channel (lambda (expr) #t) sandbox agent mock-llm '() "gemma4:e2b" #t)))
-              (test-assert "direct-orchestrator: solve is driven by production Bus processors"
+              (test-assert "direct-orchestrator: failure-first Fibonacci solve completes through production GCAS"
                 (begin
-                  (<- orch 'handle-message '(solve "run this solve"))
+                  ;; The session identifier is intentionally stable so test
+                  ;; reruns exercise the same persistence location. Establish
+                  ;; an explicit fresh boundary before asserting this process.
+                  (<- orch 'handle-message '(clear))
+                  (run-turns-synchronously)
+                  (<- orch 'handle-message '(solve "Write a function returning the first ten Fibonacci terms."))
                   (run-turns-synchronously)
                   (<- orch 'handle-message '(get-cognitive-events))
+                  (run-turns-synchronously)
+                  (<- orch 'handle-message '(get-cognitive-state))
                   (run-turns-synchronously)
                   (let ((output (get-output-string mock-socket)))
                     (and (string-contains output "code")
@@ -608,12 +616,21 @@
                          (string-contains output "ActionCompleted")
                          (string-contains output "EvidenceFound")
                          (string-contains output "BeliefUpdated")
+                         (string-contains output "GoalVerificationCompleted")
+                         (string-contains output "ConflictDetected")
                          (string-contains output "ReflectionRaised")
                          (string-contains output "WorkspaceRoundCompleted")
                          (string-contains output "AnswerRequested")
-                         (string-contains output "ProcessTerminated")
-                         (string-contains output "INCONCLUSIVE")
-                         (= llm-calls 1))))))
+                         (string-contains output "GoalVerified")
+                         (string-contains output "GoalCompleted")
+                         (string-contains output "COMPLETED")
+                         (string-contains output "Verified Scheme implementation")
+                         (string-contains output "define (fibonacci-sequence")
+                         (string-contains output "cognitive-state")
+                         (string-contains output "completion-criteria")
+                         (string-contains output "workspace")
+                         (string-contains output "memory")
+                         (= llm-calls 2))))))
 
             ;; 7. The retained RLM loop is intentionally opt-in as an
             ;; investigation processor rather than the solve control loop.

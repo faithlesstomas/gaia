@@ -13,9 +13,10 @@ GAIA has a functional legacy RLM-style investigation loop, persistent Guile REPL
 trajectory logging, and LiteLLM integration. It also has a substantial GCAS substrate: Cognitive Objects, durable
 state and events, a bounded Workspace implementation, Control primitives, structured memory, and auditable
 Action/Result execution. Production `solve` is assembled from Bus-attached processors with a per-Goal lifecycle, explicit
-Workspace rounds, bounded replanning after failed actions or conflicts, and an independent Goal-verification boundary. The default
-verifier is intentionally inconclusive for arbitrary natural-language goals, and client-facing process observability and conformance
-acceptance remain, so GAIA does not yet claim GCAS-Core conformance.
+Workspace rounds, bounded replanning after failed actions or conflicts, and an independent Goal-verification boundary. The minimal
+GCAS-Core conformance gate now covers failure-first replanning, persistence, budgets, interruption, and both supported clients.
+This establishes the architecture, not broad task competence: the production verifier registry currently contains a deterministic
+Fibonacci contract, while unknown natural-language task classes fail closed as `INCONCLUSIVE`.
 
 **Architecture:** Rust Client - GAIA Server (Guile REPL) - LiteLLM Proxy - LLM backends (Ollama, Lemonade, external LLM API etc.)
 
@@ -69,10 +70,11 @@ The legacy RLM loop is retained only as a compatibility and long-context investi
 - [x] **Cognitive Process and Control lifecycle** — Each `solve` owns an explicit Goal process, completion criteria, isolated Control budgets, exactly-once terminal state, interruption cleanup, and rejection of late callbacks.
 - [x] **Production processor assembly** — Memory Retrieval, Generative, Planner, Execution, Deliberative, Answer, and Control processors are attached to the Cognitive Bus. The server orchestrator now supplies only LLM/sandbox/client adapters and session history persistence for `solve`.
 - [x] **Execution boundary** — Default `solve` and direct REPL cross explicit Action → Result/Failure boundaries with auditable links and reproduction observations. Richer capability policy remains post-Core hardening.
-- [/] **Memory and context reconstruction** — Durable structured memory and transcript-free context reconstruction exist. Evidence/Claim consolidation, typed memory roles, and useful cross-turn retrieval remain.
+- [x] **Memory and context reconstruction** — Durable structured memory is separate from transcripts. Verified Result/Evidence/Claim chains and explicit user testimony are consolidated, goal-relevant facts are retrieved across turns, and prompts are reconstructed from typed GCAS sources. Semantic retrieval and richer memory roles remain post-Core work.
 - [x] **Recurrent cognitive cycle** — Production `solve` represents `Plan` COs and routes failed actions and conflicts through `Reflection` into bounded Generative replanning. Execution claims are then submitted to a separate Goal verifier.
 - [x] **Goal-specific verification and Answer Processor** — An injected verifier returns an explicit verdict. Only an accepted, verified Claim that satisfies the active Goal may emit `GoalCompleted`; the default policy is `INCONCLUSIVE` without task-specific verification.
 - [x] **Operational vertical acceptance test** — A deterministic failure-first Fibonacci test rejects an initial bad Action, feeds the conflict through replanning, accepts a revised Action through an independent oracle, and terminates with exactly one `GoalCompleted`.
+- [x] **Client observability and conformance gate** — CLI and Emacs expose the event trace and Cognitive State view. Automated tests cover accepted-answer policy, restoration, Control budgets, interruption/late callbacks, failure-first repair, and both clients.
 
 The detailed gap analysis and conformance gate are maintained in [docs/gcas-core-conformance.md](docs/gcas-core-conformance.md).
 
@@ -89,13 +91,18 @@ The detailed gap analysis and conformance gate are maintained in [docs/gcas-core
    Result, Failure, Conflict, and Reflection back into planning or generation.
 5. **[Completed] Goal verification** — Deterministic verifier contracts ensure that
    execution success alone never satisfies a Goal.
-6. **Answer policy and client observability** — Complete client-facing process,
+6. **[Completed] Answer policy and client observability** — Complete client-facing process,
    Goal, Workspace, CO, and terminal-rationale views; retain the policy that raw
    LLM output is never presented as the system answer.
-7. **Memory consolidation** — Store verified evidence and claims, preserve
-   conflicts and supersession, and retrieve structured facts across turns.
-8. **Conformance acceptance** — Pass the failure-first vertical test plus restart,
+7. **[Completed at Core minimum] Memory consolidation** — Store verified evidence and claims,
+   preserve their provenance graph, persist explicit user testimony, and retrieve structured facts across turns.
+8. **[Completed] Conformance acceptance** — Pass the failure-first vertical test plus restart,
    budget, interruption, and both-client protocol tests before claiming GCAS-Core.
+
+The next implementation phase expands the verifier registry and planner beyond
+the reference Fibonacci capability, adds semantic/conflict-aware memory, and
+strengthens capability policy. These improve competence and robustness without
+changing the completed GCAS-Core architectural boundary.
 
 ### Legacy RLM status
 
@@ -122,7 +129,7 @@ Core infrastructure that is already built and working.
 - [x] **Parenthesis Analyzer & Auto-healing** — Mismatched parens auto-repair and escape sequence healing in `sandbox.scm`
 - [x] **Last-block Extraction** — Prefers last code block in LLM response
 - [x] **Auto LiteLLM Server** — `./bin/gaia-server` starts LiteLLM if it is not running; the deprecated `make run` target intentionally exits with guidance.
-- [/] **Chat History (Conversation Continuity)** — Session transcripts persist and `/clear` is supported. Transitional `solve` deliberately sends empty chat history, failed actions are not consistently saved to the transcript, and structured memory does not yet recover equivalent conversational facts.
+- [x] **Conversation continuity boundary** — Session transcripts remain an audit/UI record and `/clear` establishes a fresh boundary. `solve` reconstructs context from structured memory instead of replaying the transcript; explicit user testimony and verified evidence chains persist across turns. General conversational summarization remains post-Core memory work.
 - [x] **Native CLI Client (Rust)** — Build a fast, native terminal client using the "scrollback" REPL model with `rustyline` | *→ gaia-desktop*
 - [x] **S-expression Protocol over UNIX Sockets** — S-expression communication socket layer parsed in Rust via `lexpr`
 - [x] **Human-in-the-Loop (HITL) Sandbox** — Interactive permission system in the Rust client to intercept risky AST-detected operations

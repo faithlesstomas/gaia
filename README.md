@@ -8,9 +8,10 @@
 The current codebase provides persistent cognitive state, explicit epistemic provenance, a bounded Workspace substrate,
 processor contracts, and an auditable execution environment built in **GNU Guile**. Production `solve` is now assembled from
 processors reacting through the Cognitive Bus. Production `solve` uses explicit Workspace competition rounds and bounded
-feedback-driven replanning after failed actions or conflicts. A Goal may complete only through an injected independent verifier and
-a verified Claim; the default verifier remains deliberately inconclusive for arbitrary natural-language tasks. GAIA therefore does
-not yet claim full operational GCAS-Core conformance.
+feedback-driven replanning after failed actions or conflicts. A Goal may complete only through an independent verifier and a verified
+Claim. The minimum GCAS-Core conformance gate covers failure-first repair, persistence, budgets, interruption, and both supported
+clients. This is architectural conformance, not general task competence: Fibonacci is the first registered production verifier,
+while unsupported task classes deliberately terminate as `INCONCLUSIVE`.
 
 Thanks to the Guile language, GAIA treats code as data (homoiconicity), enabling structural validation,
 sandboxed evaluation, and white-box auditability. These mechanisms constrain generated code; they do not eliminate LLM errors.
@@ -47,12 +48,13 @@ Question / Environment → Cognitive Objects → Workspace competition
                               Result / Failure / Reflection
 ```
 
-In the current transitional `solve` path, LLM output begins as a hypothesis and sandbox execution crosses an explicit
+In the current GCAS-Core `solve` path, LLM output begins as a hypothesis and sandbox execution crosses an explicit
 Action/Result boundary. State and event traces are durable, and Memory, Generative, Planner, Execution, Deliberative, Answer,
-Goal Verifier, Answer, and Control processors react through the Cognitive Bus. Control runs explicit Workspace rounds and
+Goal Verifier, and Control processors react through the Cognitive Bus. Control runs explicit Workspace rounds and
 failure/conflict feedback can produce a revised hypothesis, Plan, and Action under bounded budgets. Successful execution remains
-`INCONCLUSIVE` unless a task-specific independent verifier accepts the evidence. See
-[the conformance gap audit](docs/gcas-core-conformance.md) for the exact status and [gcas.md](gcas.md) for the normative specification.
+`INCONCLUSIVE` unless a task-specific independent verifier accepts the evidence. Verified evidence chains and explicit user
+testimony are stored separately from chat transcripts and can be retrieved across turns. See
+[the conformance audit](docs/gcas-core-conformance.md) for the exact scope and [gcas.md](gcas.md) for the normative specification.
 
 ## RLM as a compatibility and investigation capability
 
@@ -75,7 +77,7 @@ programmatic investigation capability through its Guile REPL:
 
 GAIA is designed with a **Kernel + Pluggable Modules** architecture, built on top of a **Client-Server model**:
 
-* **GAIA Kernel:** The developing GCAS-Core engine containing Cognitive Objects, State, Workspace, Control, memory, processor contracts, and auditable execution.
+* **GAIA Kernel:** The GCAS-Core engine containing Cognitive Objects, State, Workspace, Control, memory, processor contracts, and auditable execution.
 * **Extension Modules:** Opt-in plugins extending the kernel to other domains (Wayland window managers, Lean 4 provers, local voice models, etc.) without mutating the system core.
 * **Client-Server Topology:** Native Rust CLI client connected to a headless Guile Scheme server over UNIX sockets using S-expressions.
 * **LiteLLM Gateway:** API proxy routing prompts to Ollama, Gemini, or other local/remote backends.
@@ -170,14 +172,17 @@ make test-rlm
 
 # Run the deterministic GCAS-Core contract showcase (not a production conformance test)
 make gcas-showcase
+
+# Run the production GCAS-Core conformance gate, including CLI and Emacs protocol tests
+make gcas-conformance
 ```
 
-In the interactive CLI, plain text starts the transitional GCAS `solve` path. It
-records COs and events and gates sandbox execution, but does not yet run a recurrent
-multi-processor cycle. Use
+In the interactive CLI, plain text starts the recurrent GCAS-Core `solve` path. Use
 `/ask <query>` for one-shot chat, `/investigate <query>` for the legacy
 LLM–REPL investigation processor, `/eval <scheme>` for direct REPL execution,
-and `/cognitive-events` to inspect the session event trace.
+`/cognitive-events` to inspect the session event trace, and `/cognitive-state`
+(alias `/cognitive-objects`) to inspect the current Goal, Control budgets,
+Workspace, Cognitive Objects, and structured Memory.
 
 **4. Curate Data for Fine-tuning:**
 
