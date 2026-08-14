@@ -3,6 +3,13 @@ stages:
   - coverage
   - build
 
+# Guile's regexp/string indices must use the same UTF-8 character semantics.
+# The container otherwise defaults to the byte-oriented C locale, which makes
+# prompt slicing fail on characters such as em dashes and ≥.
+variables:
+  LANG: "C.UTF-8"
+  LC_ALL: "C.UTF-8"
+
 .guix_setup: &guix_setup
   before_script:
     # Restore /etc/services manually to resolve HTTP/HTTPS port names in Guix
