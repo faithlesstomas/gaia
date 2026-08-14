@@ -3,6 +3,7 @@
 (use-modules (system vm coverage)
              (system vm vm)
              (ice-9 match)
+             (ice-9 popen)
              (ice-9 rdelim)
              (srfi srfi-1))
 
@@ -51,6 +52,9 @@
 
 (define failed-tests '())
 
+(define test-timeout
+  (or (getenv "GAIA_TEST_TIMEOUT") "120"))
+
 (define (run-test-file file)
   (display (format #f "\n========================================\n"))
   (display (format #f "Running: ~a\n" file))
@@ -64,6 +68,26 @@
           (begin
             (set! failed-tests (cons (cons file status) failed-tests))
             (display (format #f "\n[FAILURE] ~a failed with exit status ~a.\n" file status)))))))
+
+(define (run-test-file-isolated file)
+  "Run FILE in a fresh Guile process so threads, fibers and module mocks from
+one suite cannot leak into the next one.  `timeout' also prevents a broken
+suite from occupying a CI runner indefinitely."
+  (display (format #f "\n========================================\n"))
+  (display (format #f "Running (isolated, timeout ~as): ~a\n" test-timeout file))
+  (display (format #f "========================================\n"))
+  (force-output)
+  (let* ((status (system* "timeout" "--signal=TERM" "--kill-after=10s"
+                          test-timeout
+                          "guile" "--no-auto-compile" "-L" "src" file))
+         (exit-status (status:exit-val status)))
+    (if (and exit-status (zero? exit-status))
+        (display (format #f "\n[SUCCESS] ~a finished successfully.\n" file))
+        (begin
+          (set! failed-tests
+                (cons (cons file (or exit-status "terminated")) failed-tests))
+          (display (format #f "\n[FAILURE] ~a failed or timed out (status ~a).\n"
+                           file (or exit-status "terminated")))))))
 
 (define (filter-lcov input-path output-path)
   "Filters an LCOV file to only retain records matching gaia/ modules, excluding tests and overrides."
@@ -158,8 +182,8 @@
                           failed-tests)
                 (real-exit 1))))))
     (begin
-      (display "[COVERAGE] Running test suite without VM instrumentation (warm-up)...\n")
-      (for-each run-test-file test-files)
+      (display "[TEST] Running suites in isolated processes...\n")
+      (for-each run-test-file-isolated test-files)
       (display "\n========================================\n")
       (if (null? failed-tests)
           (begin

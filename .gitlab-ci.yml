@@ -19,10 +19,13 @@ stages:
 test:
   stage: test
   image: registry.gitlab.com/debdistutils/guix/container:latest
+  timeout: 15 minutes
+  interruptible: true
   <<: *guix_setup
   script:
-    # Run the integration test suite and dump build logs on failure for debugging
-    - guix shell -m guix.scm make -- make check || (echo "=== GUIX BUILD LOGS ===" && find /var/log/guix/drvs/ -name "*.gz" -exec zcat {} + && exit 1)
+    # Each suite runs in a fresh process with its own timeout (see run-coverage.scm).
+    # Test logs are uploaded as artifacts, so avoid dumping every Guix build log.
+    - GAIA_TEST_TIMEOUT=120 guix shell -m guix.scm make -- make check
   artifacts:
     name: "test-logs-$CI_COMMIT_REF_SLUG"
     paths:
@@ -32,6 +35,8 @@ test:
 coverage:
   stage: coverage
   image: registry.gitlab.com/debdistutils/guix/container:latest
+  timeout: 30 minutes
+  interruptible: true
   <<: *guix_setup
   script:
     # Run coverage report (lcov is included in guix.scm manifest)
@@ -50,6 +55,8 @@ coverage:
 build:
   stage: build
   image: rust:latest
+  timeout: 15 minutes
+  interruptible: true
   script:
     # Build the Rust CLI binary in release mode using official Rust container
     - cargo build --manifest-path src/gaia-cli/Cargo.toml --release
