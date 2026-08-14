@@ -1,6 +1,6 @@
 # GAIA Roadmap
 
-> *Last updated: 2026-08-13*
+> *Last updated: 2026-08-14*
 >
 > This document tracks the development plan for the GAIA (GNU AI Assistant) project.
 > For an introduction to the project, see [README.md](README.md).
@@ -10,8 +10,10 @@
 ## Current State Summary
 
 GAIA has a functional legacy RLM-style investigation loop, persistent Guile REPL environment, safety validation,
-trajectory logging, and LiteLLM integration. Its architectural direction is now the implementation of
-[GCAS](gcas.md): a persistent, event-driven cognitive system rather than an LLM-centred agent loop.
+trajectory logging, and LiteLLM integration. It also has a substantial GCAS substrate: Cognitive Objects, durable
+state and events, a bounded Workspace implementation, Control primitives, structured memory, and auditable
+Action/Result execution. The production `solve` path is still a centrally orchestrated single-pass pipeline, so
+GAIA does not yet claim GCAS-Core conformance.
 
 **Architecture:** Rust Client - GAIA Server (Guile REPL) - LiteLLM Proxy - LLM backends (Ollama, Lemonade, external LLM API etc.)
 
@@ -20,7 +22,7 @@ trajectory logging, and LiteLLM integration. Its architectural direction is now 
 ## System Architecture: Kernel + Modules
 
 GAIA is organized as a **self-contained kernel** with **pluggable extension modules**.
-The kernel delivers a complete, self-improving neuro-symbolic AI loop.
+The kernel is being migrated toward a complete, self-improving neuro-symbolic AI loop.
 Modules extend its capabilities into specific domains without modifying the core.
 
 ```
@@ -39,7 +41,7 @@ Modules extend its capabilities into specific domains without modifying the core
 │ └────┬───┘ └────┬─────┘ └──────┬───────┘       │       │
 ├──────┴──────────┴──────────────┴───────────────┴───────┤
 │                    GAIA KERNEL                          │
-│  GCAS-Core → Memory & Deliberation → Learning & Evolution│
+│  GCAS-Core migration → Memory → Learning & Evolution    │
 │                                                         │
 │  Cognitive State + Workspace + Control + REPL +         │
 │  DSL ($gscm$) + DPO/Elo Curation + Champion/Challenger  │
@@ -59,16 +61,38 @@ The legacy RLM loop is retained only as a compatibility and long-context investi
 
 ## GCAS-Core — Immediate Priority
 
-- [x] **Cognitive Object Model** — Validated COs carry provenance, epistemic and verification statuses, temporal validity, confidence, and relations. Broader lifecycle policy is post-Core work.
-- [x] **Session Cognitive State** — Each active server session owns a durable State/Workspace/Bus/Control coordinator. Its CO graph and chronological event log restore across construction; Action outcomes have reproducibility observations.
-- [x] **Bounded Global Workspace** — Candidate competition, bounded capacity, selective admission, post-admission broadcast, and a transparent baseline policy are implemented. Adaptive attention remains post-Core work.
-- [x] **Cognitive Control** — Transition budgets, observable progress, failure budgets, user interruption, the Action type gate, and a baseline relevance/risk/cost/uncertainty selection policy are implemented. Resource accounting and richer policy gates remain.
-- [x] **Vertical GCAS acceptance scenario** — Specified in [docs/gcas-core-cycle.md](docs/gcas-core-cycle.md); the production `solve` path reaches Action, Result, Evidence, a bounded verified observation, reflection, and explicit terminal outcome. Goal-specific verification remains deliberately separate.
-- [x] **Execution / Investigation Processor** — Direct REPL and default `solve` both cross explicit Action → Result/Failure boundaries. The recursive RLM behavior is an opt-in legacy Investigation Processor; each outcome has a reproducibility record. Cryptographic environment manifests remain.
-- [x] **Generative and Deliberative processors** — The LLM is a hypothesis generator in `solve`; the deliberative processor converts execution observations to Evidence, then only an injected verifier can create Claim or Conflict. Richer planners and verifiers are post-Core work.
-- [x] **Memory and context reconstruction** — Structured CO memory has local durable storage, goal-relevant retrieval, and reconstruction from goal/workspace/memory/constraints. The default `solve` prompt does not send transcript history. Semantic/procedural schemas remain post-Core work.
+- [x] **Cognitive Object Model** — Validated COs carry provenance, epistemic and verification statuses, temporal validity, confidence, and relations.
+- [x] **Session Cognitive State** — Each server session owns durable CO state and an event log. Action outcomes receive linked reproducibility observations.
+- [/] **Bounded Global Workspace** — Capacity, proposal metadata, scoring, admission, and broadcast exist. Production `solve` immediately advances one submitted CO at a time, so meaningful multi-candidate competition remains.
+- [/] **Cognitive Control** — Transition, progress, stall, failure, and interruption monitoring exist. Budgets must move from the long-lived session to an explicit per-Goal cognitive process, with terminal state preventing late callbacks.
+- [/] **Production processor assembly** — Processor and bus subscription contracts exist, but production `solve` invokes the LLM, executor, and deliberation directly. Planner and metacognition are currently labels rather than attached processors.
+- [x] **Execution boundary** — Default `solve` and direct REPL cross explicit Action → Result/Failure boundaries with auditable links and reproduction observations. Richer capability policy remains post-Core hardening.
+- [/] **Memory and context reconstruction** — Durable structured memory and transcript-free context reconstruction exist. Evidence/Claim consolidation, typed memory roles, and useful cross-turn retrieval remain.
+- [/] **Recurrent cognitive cycle** — The deterministic showcase exercises the target event vocabulary, but production `solve` is linear and cannot replan after Result, Failure, Conflict, or Reflection.
+- [ ] **Goal-specific verification and Answer Processor** — Define completion criteria per Goal; produce user-visible answers only from accepted Claims and terminal goal state.
+- [ ] **Operational vertical acceptance test** — A failure-first Fibonacci scenario must reject an initial bad Action, feed evidence back through the bus, select a revised proposal, verify deterministic criteria, and terminate with `GoalCompleted`.
 
-The detailed requirement-to-evidence mapping is maintained in [docs/gcas-core-conformance.md](docs/gcas-core-conformance.md).
+The detailed gap analysis and conformance gate are maintained in [docs/gcas-core-conformance.md](docs/gcas-core-conformance.md).
+
+### Operational completion sequence
+
+1. **Cognitive Process lifecycle** — Introduce a process object containing Goal,
+   completion criteria, per-process budgets, progress state, and one terminal outcome.
+2. **Event-driven processor assembly** — Attach Planner, Memory Retrieval,
+   Generative, Execution, Deliberative, and Answer processors to the session Bus.
+   Reduce the session orchestrator to lifecycle and client transport duties.
+3. **Workspace scheduling rounds** — Collect proposals before admission, perform
+   real competition, broadcast the winner, and release or supersede processed COs.
+4. **Planning and feedback recurrence** — Represent Plan/Subgoal COs and route
+   Result, Failure, Conflict, and Reflection back into planning or generation.
+5. **Goal verification** — Add deterministic verifier contracts and ensure that
+   execution success alone never satisfies a Goal.
+6. **Answer policy and client observability** — Stop presenting raw LLM output as
+   the system answer; expose current process, Goal, Workspace, COs, and terminal rationale.
+7. **Memory consolidation** — Store verified evidence and claims, preserve
+   conflicts and supersession, and retrieve structured facts across turns.
+8. **Conformance acceptance** — Pass the failure-first vertical test plus restart,
+   budget, interruption, and both-client protocol tests before claiming GCAS-Core.
 
 ### Legacy RLM status
 
@@ -94,8 +118,8 @@ Core infrastructure that is already built and working.
 - [x] **System Tools** — File ops, grep, sed, awk, journalctl wrappers with flexible arguments in `tools.scm` | *→ gaia-os*
 - [x] **Parenthesis Analyzer & Auto-healing** — Mismatched parens auto-repair and escape sequence healing in `sandbox.scm`
 - [x] **Last-block Extraction** — Prefers last code block in LLM response
-- [x] **Auto LiteLLM Server** — `make run` auto-starts LiteLLM if not running
-- [x] **Chat History (Conversation Continuity)** — Sliding window of `(user, query) → (assistant, FINAL_answer)` context across sessions, with `/clear` support
+- [x] **Auto LiteLLM Server** — `./bin/gaia-server` starts LiteLLM if it is not running; the deprecated `make run` target intentionally exits with guidance.
+- [/] **Chat History (Conversation Continuity)** — Session transcripts persist and `/clear` is supported. Transitional `solve` deliberately sends empty chat history, failed actions are not consistently saved to the transcript, and structured memory does not yet recover equivalent conversational facts.
 - [x] **Native CLI Client (Rust)** — Build a fast, native terminal client using the "scrollback" REPL model with `rustyline` | *→ gaia-desktop*
 - [x] **S-expression Protocol over UNIX Sockets** — S-expression communication socket layer parsed in Rust via `lexpr`
 - [x] **Human-in-the-Loop (HITL) Sandbox** — Interactive permission system in the Rust client to intercept risky AST-detected operations
@@ -135,7 +159,7 @@ Hardening the agentic loop to handle syntax constraints of smaller local models 
 - [ ] **STI/LTI Memory** — Implement Short-Term Importance (STI) and Long-Term Importance (LTI) weights for memory candidates. Decimate STI asynchronously after cognitive process transitions. | *→ gaia-sci: Cognitive State Serialization*
 - [ ] **J-space to AtomSpace Mapping** — Integrate Jacobian Lens (J-lens) token projection weights directly with the Goblins-based AtomSpace. Use dynamic activation of J-space vectors during model forward passes to automatically adjust STI values of symbolic nodes in active memory. | *→ gaia-proof: J-space Guided Theorem Proving*
 - [ ] **J-lens Activation Injection** — Use the J-lens intervention protocol (steering/patching) to inject symbolic states and REPL errors directly into the LLM's continuous workspace layers, bypassing context window clutter and directing model focus natively. | *→ K3: CRT, gaia-proof: J-space Guided Theorem Proving*
-- [ ] **Context Reconstruction** — Rebuild prompt generation from: *constant system prompt* + *current goal* + *admitted workspace COs* + *selected structured memories* + *active constraints*. Transcripts remain episodic records, not prompt memory.
+- [/] **Context Reconstruction** — Transitional `solve` builds a prompt from the current goal, admitted Workspace COs, lexically selected structured memories, and active constraints without appending the transcript. Production integration, richer retrieval, and evidence/claim consolidation remain.
 - [ ] **G-Expressions ("Context Teleportation")** — Use GNU Guix's G-expressions (`#~`) to serialize variable contexts and modules when spawning sub-agents. | *→ gaia-os: Guix Containers, gaia-sci: Cognitive State Serialization*
 - [ ] **Governed self-modification** — Route proposals to modify procedures, policies, models, or architecture through the GCAS proposal, sandbox, verification, approval, deployment, and rollback pipeline. | *→ Learning & evolution*
 - [ ] **AND/OR Tree State Orchestration** — Refactor session orchestration to track nested tasks in a tree format (delegations as AND nodes; alternative execution pathways as OR nodes), enabling backpropagation of goal success/failure and clean transactional rollbacks. | *→ gaia-proof: Global Goal Caching*

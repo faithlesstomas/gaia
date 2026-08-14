@@ -5,6 +5,11 @@ It does not define a single recursive call or an LLM loop. It defines a minimal,
 controlled feedback process in which no processor is the source of truth for the
 entire system.
 
+**Status:** this is the target operational contract. The deterministic showcase
+implements a scripted reference trace, while the production `solve` path only
+implements a linear subset. Passing the showcase alone is not GCAS-Core
+conformance; the production path must satisfy the acceptance criteria below.
+
 ## Executable Reference Scenario
 
 Question: *"Does the Guile expression `(+ 20 22)` evaluate to `42`?"*
@@ -35,11 +40,11 @@ the same cognitive process without requiring a network source or model service.
 5. Every `Result` or `Failure` references the Action that caused it.
 6. Control terminates a process from its budget, progress, and goal criterion—not only an LLM's declared confidence.
 
-Control tracks transitions, observable progress, consecutive non-progressing
-transitions, execution failures, and explicit user interruption. Its baseline
-termination reasons are `BUDGET_EXHAUSTED`, `NO_PROGRESS`,
-`FAILURE_BUDGET_EXHAUSTED`, and `USER_INTERRUPTED`; all are durable terminal
-events rather than implicit loop exits.
+Control primitives track transitions, observable progress, consecutive
+non-progressing transitions, execution failures, and explicit user interruption.
+They define `BUDGET_EXHAUSTED`, `NO_PROGRESS`, `FAILURE_BUDGET_EXHAUSTED`, and
+`USER_INTERRUPTED`. Production still needs a fresh Control/process lifecycle per
+Goal and enforcement of exactly one durable terminal outcome.
 
 ## Workspace and Processor Contract
 
@@ -60,11 +65,12 @@ goal-, budget-, and safety-aware scheduling.
 
 ## Current Implementation Scope
 
-`gaia gcas-showcase` implements all ten stages for the executable reference
-scenario. `gaia cognitive-session` provides the reusable State, Workspace, Bus,
-and Control coordination beneath it. Server sessions now own this coordinator,
-and direct REPL requests are recorded as an explicit `Action` followed by
-`ActionCompleted` or `ActionFailed`:
+`gaia gcas-showcase` scripts all ten stages for the executable reference
+scenario. It verifies the CO/event contracts but does not prove that production
+processors are reactively coordinated. `gaia cognitive-session` provides the
+reusable State, Workspace, Bus, and Control substrate. Server sessions own this
+substrate, and direct REPL requests are recorded as an explicit `Action` followed
+by `ActionCompleted` or `ActionFailed`:
 
 ```text
 session-submit! → CandidateSubmitted
@@ -90,14 +96,20 @@ outcomes without an external model service. The automated showcase test verifies
 the full event trace for all three outcomes.
 
 The default server `solve` path routes model output through
-`HypothesisProposed` and an explicitly admitted `ActionRequested` before it can
-reach the sandbox. A successful action becomes `Result`, `Evidence`, a verified
-claim about the observed execution, and `ReflectionRaised`. Unless an
-independent verifier establishes that this observation resolves the user's
-original goal, the terminal outcome is `INCONCLUSIVE`; an LLM hypothesis is
-never returned as accepted knowledge. The former recursive LLM–REPL loop is
-retained behind the separate `investigate` command as an optional legacy
-Investigation Processor.
+`HypothesisProposed` and an admitted `ActionRequested` before it reaches the
+sandbox. A successful action becomes `Result`, `Evidence`, a verified claim
+about the observed execution, and `ReflectionRaised`. The terminal outcome is
+currently hard-coded as `INCONCLUSIVE` for successful execution because no
+goal-specific verifier exists.
+
+This path is still centrally sequenced by `session-orchestrator`: it invokes one
+LLM response, extracts at most one Action, calls execution and deliberation
+directly, and terminates. Candidates are normally submitted and admitted one at
+a time; production processors are not attached to the Bus; Result/Failure does
+not re-enter planning. The event trace is therefore primarily an audit record
+and execution gate at this stage, not yet the driver of a recurrent cognitive
+cycle. The legacy recursive LLM–REPL loop remains behind `investigate` and is not
+the GCAS cycle.
 
 `gaia deliberative-processor` now provides the first deliberative contract:
 an execution observation first becomes `Evidence`, then an independently
@@ -110,3 +122,19 @@ relevant to the current goal, and reconstructs an LLM context from the current
 goal, admitted workspace, selected memory, and active constraints. Server
 `solve` sends this reconstruction with empty chat history; the transcript stays
 an episodic audit record rather than becoming prompt memory.
+
+## Production Acceptance Criteria
+
+The production cycle is complete only when:
+
+1. each `solve` creates a Goal with explicit completion criteria and its own
+   process budget;
+2. Planner, Memory Retrieval, Generative, Execution, Deliberative, and Answer
+   processors subscribe through the Cognitive Bus;
+3. Workspace admission selects among concurrently pending proposals;
+4. Result, Failure, Conflict, and Reflection may cause another cycle iteration;
+5. a goal-specific verifier, not REPL success, authorizes `GoalCompleted`;
+6. the Answer Processor renders accepted knowledge and terminal rationale rather
+   than exposing raw LLM output as the system answer;
+7. the failure-first Fibonacci vertical test and restoration/interruption tests
+   pass through the same production path used by CLI and Emacs.

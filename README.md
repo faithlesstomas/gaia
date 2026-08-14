@@ -1,20 +1,20 @@
 # GNU AI Assistant (GAIA)
 
 
-### A Reference Implementation of the General Cognitive Architecture Specification
+### A Work-in-Progress Reference Implementation of the General Cognitive Architecture Specification
 
 
-**GAIA** is a local-first reference implementation of the [General Cognitive Architecture Specification (GCAS)](gcas.md).
-It combines persistent cognitive state, explicit epistemic provenance, a bounded global workspace, heterogeneous processors,
-and a reproducible execution environment built in **GNU Guile**. It is designed for researchers and engineers who require
-strict reproducibility, mathematical rigor, safe execution, and data privacy when integrating Large Language Models (LLMs).
+**GAIA** is a local-first project implementing the [General Cognitive Architecture Specification (GCAS)](gcas.md).
+The current codebase provides persistent cognitive state, explicit epistemic provenance, a bounded Workspace substrate,
+processor contracts, and an auditable execution environment built in **GNU Guile**. Production `solve` is still being migrated
+from a centrally orchestrated single-pass LLM pipeline to a recurrent, event-driven GCAS-Core process; the project does not yet
+claim operational GCAS-Core conformance.
 
-Thanks to the Guile language, GAIA treats code as data (homoiconicity) to eliminate LLM hallucinations,
-enforce mathematical logic, and guarantee strict white-box auditability.
+Thanks to the Guile language, GAIA treats code as data (homoiconicity), enabling structural validation,
+sandboxed evaluation, and white-box auditability. These mechanisms constrain generated code; they do not eliminate LLM errors.
 
-As a neuro-symbolic AI engine, GAIA bridges the gap between probabilistic Large Language Models (LLMs)
-and rigorous, deterministic symbolic reasoning. It achieves this by mapping continuous LLM workspace 
-activations (J-space) directly to discrete symbolic actors (Goblins AtomSpace) and provers (Lean 4).
+GAIA aims to bridge probabilistic Large Language Models (LLMs) and deterministic symbolic reasoning.
+J-space integration, a Goblins-based AtomSpace, and Lean 4 integration are roadmap directions, not current production capabilities.
 
 
 ## Core Architecture & Why GNU Guile?
@@ -31,9 +31,9 @@ While most AI tools are written in Python, Gaia utilizes **GNU Guile** (Scheme/L
 
 ## Cognitive architecture
 
-GCAS, not an individual LLM or agent loop, is GAIA's architectural source of truth. The system is a recurrent, event-driven
-process connecting specialized processors through explicit Cognitive Objects, Cognitive State, a selectively admitting Global
-Workspace, memory, Cognitive Control, and observable execution.
+GCAS, not an individual LLM or agent loop, is GAIA's architectural source of truth. The target system is a recurrent,
+event-driven process connecting specialized processors through explicit Cognitive Objects, Cognitive State, a selectively
+admitting Global Workspace, memory, Cognitive Control, and observable execution.
 
 ```text
 Question / Environment → Cognitive Objects → Workspace competition
@@ -45,9 +45,10 @@ Question / Environment → Cognitive Objects → Workspace competition
                               Result / Failure / Reflection
 ```
 
-An LLM is a **Generative Cognition** processor: its outputs begin as hypotheses, not accepted knowledge. The Guile REPL and
-sandbox are **Execution / Investigation** processors: they expose authoritative environment observations and reproducible results.
-Planning, verification, memory, and control remain separate functions. See [gcas.md](gcas.md) for the normative specification.
+In the current transitional `solve` path, LLM output begins as a hypothesis and sandbox execution crosses an explicit
+Action/Result boundary. State and event traces are durable, but production processors are still invoked directly by the session
+orchestrator, Workspace competition is normally degenerate, and there is no feedback-driven replanning cycle. See
+[the conformance gap audit](docs/gcas-core-conformance.md) for the exact status and [gcas.md](gcas.md) for the normative specification.
 
 ## RLM as a compatibility and investigation capability
 
@@ -70,7 +71,7 @@ programmatic investigation capability through its Guile REPL:
 
 GAIA is designed with a **Kernel + Pluggable Modules** architecture, built on top of a **Client-Server model**:
 
-* **GAIA Kernel:** The GCAS-Core engine coordinating Cognitive Objects, State, Workspace, Control, memory, processors, and auditable execution.
+* **GAIA Kernel:** The developing GCAS-Core engine containing Cognitive Objects, State, Workspace, Control, memory, processor contracts, and auditable execution.
 * **Extension Modules:** Opt-in plugins extending the kernel to other domains (Wayland window managers, Lean 4 provers, local voice models, etc.) without mutating the system core.
 * **Client-Server Topology:** Native Rust CLI client connected to a headless Guile Scheme server over UNIX sockets using S-expressions.
 * **LiteLLM Gateway:** API proxy routing prompts to Ollama, Gemini, or other local/remote backends.
@@ -80,14 +81,14 @@ GAIA is designed with a **Kernel + Pluggable Modules** architecture, built on to
 ## Key Features
 
 * **Client-Server Architecture:** Native Rust CLI client connected to a headless Guile Scheme engine over UNIX sockets.
-* **GCAS cognitive kernel:** Event-driven coordination of generative, deliberative, memory, and execution processors.
+* **GCAS substrate:** Durable CO/event state, bounded Workspace APIs, Control primitives, structured memory, and auditable execution; recurrent production coordination is in progress.
 * **Investigation toolkit:** Persistent Guile REPL and sandbox for RLM-style exploration of large or external data.
 * **Safety Validation:** AST-level recursive scan of LLM-generated code for banned primitives before execution.
 * **Multi-Model Support:** Hot-swappable LLM backends via LiteLLM (Gemma, Ollama, Gemini, Anthropic).
 * **Thinking Mode:** Native reasoning support for models with `<|think|>` tags (Gemma 4).
-* **Self-Improvement Loop:** Trajectory logging → dataset curation → fine-tuning pipeline.
+* **Self-Improvement Infrastructure:** Trajectory logging and dataset curation foundations; governed closed-loop deployment remains roadmap work.
 * **Live Monitoring:** Real-time trajectory viewer for debugging agent reasoning.
-* **Neuro-Symbolic J-space Alignment:** Proactive safety monitoring and working-memory synchronization mapping LLM internal activations (J-space) to symbolic Goblins actors and Lean 4 provers.
+* **Neuro-Symbolic Roadmap:** Planned J-space, symbolic actor, and formal prover integrations.
 
 ## Getting Started
 
@@ -163,11 +164,13 @@ make test-tool-use
 # Run REPL investigation compatibility check
 make test-rlm
 
-# Run the deterministic GCAS-Core reference-cycle showcase
+# Run the deterministic GCAS-Core contract showcase (not a production conformance test)
 make gcas-showcase
 ```
 
-In the interactive CLI, plain text starts the GCAS `solve` process. Use
+In the interactive CLI, plain text starts the transitional GCAS `solve` path. It
+records COs and events and gates sandbox execution, but does not yet run a recurrent
+multi-processor cycle. Use
 `/ask <query>` for one-shot chat, `/investigate <query>` for the legacy
 LLM–REPL investigation processor, `/eval <scheme>` for direct REPL execution,
 and `/cognitive-events` to inspect the session event trace.
@@ -209,7 +212,7 @@ GAIA is part of the GNU ecosystem and is released under the **GPLv3+ License**. 
 ## Roadmap
 
 See **[ROADMAP.md](ROADMAP.md)** for the full development plan. The project is organized around:
-- **GCAS-Core migration** — Cognitive Objects, State, Workspace, Control, memory, and auditable execution, with the legacy RLM loop retained only as an investigation compatibility layer.
+- **GCAS-Core migration** — Convert the implemented Cognitive Object, State, Workspace, Control, memory, and execution substrate into a recurrent event-driven production process; retain the legacy RLM loop only as an investigation compatibility layer.
 - **Showcase Benchmarks** — GAIA-SysOps (system administration tasks) and GAIA-Math (programming/logical challenges) to validate the model's evolution.
 - **Extension Modules** — Decoupled domains: `gaia-accel` (tensor compiling), `gaia-io` (voice/vision), `gaia-desktop` (COSMIC/Emacs), `gaia-os` (transactional self-healing), `gaia-proof` (Lean 4/Z3), and `gaia-sci` (RAG/Hyperon FFI).
 
