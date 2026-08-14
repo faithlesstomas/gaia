@@ -112,3 +112,10 @@ versioned task corpus and compare prompt/projection variants on:
 
 Prompt changes should be promoted only when they improve the corpus without
 weakening deterministic completion and verification invariants.
+
+`make gcas-eval` is the model-free invariant baseline. It exercises 22 scripted
+generation/execution/verifier trajectories through the production processor and
+must remain green for any prompt or projection change. It does not measure how
+often a real model chooses the scripted good Action; a second, live-model matrix
+will reuse these task classes to compare prompt and adapter variants against the
+configured local model. See [gcas-evaluation.md](gcas-evaluation.md).

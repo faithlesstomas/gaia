@@ -89,6 +89,11 @@ mapping tests for both supported clients. Future verifier classes and semantic
 memory improve the range of Goals GAIA can solve; they are not missing pieces of
 the minimum GCAS-Core control architecture.
 
+The gate includes the 22-case deterministic competence corpus exposed separately
+as `make gcas-eval`. See [gcas-evaluation.md](gcas-evaluation.md) for its fixture
+contract, reported metrics, and the distinction between orchestration correctness
+and live-model task competence.
+
 The terminal protocol regression additionally drives three distinct failed
 Actions through the production processors and server adapter. It requires one
 `ProcessTerminated(FAILURE_BUDGET_EXHAUSTED)`, one `on-finished` notification,

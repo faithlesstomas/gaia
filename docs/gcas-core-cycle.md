@@ -165,6 +165,11 @@ Run the production conformance gate with:
 make gcas-conformance
 ```
 
+For a faster, model-free check of recurrent outcomes, repair paths, budgets,
+interrupts, and terminal-delivery invariants, run `make gcas-eval`. Its scope
+and metrics are documented in
+[gcas-evaluation.md](gcas-evaluation.md).
+
 The reference capability deliberately proves repair, not breadth: the first
 Fibonacci result is rejected, its Conflict becomes replanning feedback, and only
 the corrected result can produce `GoalCompleted`.

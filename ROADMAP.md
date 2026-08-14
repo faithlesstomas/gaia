@@ -119,14 +119,16 @@ architectural conformance alone is not evidence of task competence.
 
 - [x] **Terminal delivery invariant (P0)** — Every active production process reaches one durable terminal event and invokes `on-finished` exactly once. Failure-budget, transition-budget, no-progress, and user-interrupt outcomes all reach the client. An interrupt with no active process does not create an orphan `ProcessTerminated` event.
 - [x] **Three-failure regression (P0)** — Deterministic processor and server-adapter tests execute three distinct failing Actions, assert `FAILURE_BUDGET_EXHAUSTED`, one `ProcessTerminated`, one completion callback, and a terminal `(final ...)` protocol message.
-- [ ] **Small deterministic evaluation corpus (P0)** — Add 20–30 fixtures covering first-pass success, syntax repair, runtime repair, incorrect output, repeated Action, missing Action, verifier rejection, unavailable verifier, every Control budget, interruption, and late callbacks. Track hangs, false completion, repair success, attempts, latency, and model calls.
+- [x] **Small deterministic evaluation corpus (P0)** — `make gcas-eval` runs 22 model-free fixtures through the production processor: first-pass success, syntax/runtime/verifier repair, incorrect and repeated Actions, missing Actions, unavailable verifiers, all Control budgets, interruption, and late callbacks. It gates exact outcomes, model/execution attempts, one terminal event/callback, hangs, false completion, repair success, and reports latency. The initial baseline is 22/22, zero hangs, zero false completions, and 4/4 successful repair paths.
 - [/] **Phase-aware cognitive prompt projection (P1)** — Production `solve` now uses a compact GCAS-only Action contract without legacy `FINAL/CONFIDENCE`, while `/investigate` retains the RLM prompt. Initial and repair calls keep chat history empty and project typed Goal/Workspace/Memory/Reflection state; repair constraints require one complete distinct Action and syntax simplification. Remaining work: structured phase/error fields, remaining-budget projection, and capability schemas evaluated against the task corpus.
 - [ ] **Structured repair policy (P1)** — Preflight Scheme syntax before state mutation, classify the failing form, require a complete and distinct replacement Action, detect non-progress, and prefer short known-valid templates or high-level tools for small local models.
 - [ ] **Capability/verifier registry (P1)** — Grow from the Fibonacci oracle to reusable exact-value, predicate/property, unit-test, and artifact verifiers. Unknown task classes continue to fail closed. LLM judgments may propose evidence but cannot independently confer `VERIFIED`.
 - [ ] **Readiness gate (P1)** — Claim general assistant usefulness only after the evaluation corpus has zero hangs and false completions, bounded interruption latency, and an explicitly reported success rate for every advertised capability.
 
 The prompting design is documented in
-[docs/gcas-prompt-projection.md](docs/gcas-prompt-projection.md). NCSI/J-space
+[docs/gcas-prompt-projection.md](docs/gcas-prompt-projection.md), and the corpus
+scope and extension rules in [docs/gcas-evaluation.md](docs/gcas-evaluation.md).
+NCSI/J-space
 remains a planned neural adapter and research direction, not a blocker for this
 milestone: textual prompt projection is the currently available
 cognitive-to-neural control channel and should first be made correct and
