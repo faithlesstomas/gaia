@@ -42,16 +42,18 @@
            (eq? (event-type (last (state-events (session-state session)))) 'ActionCompleted)))) )
 
 (test-group "bounded-progress"
-  (test-equal "control stops admissions after configured transition budget"
-    'BUDGET_EXHAUSTED
+  (test-assert "control without an active process stops admissions without an orphan terminal event"
     (let* ((session (make-cognitive-session #:max-transitions 1))
            (first (make-cognitive-object 'goal "First" #:provenance 'USER))
            (second (make-cognitive-object 'goal "Second" #:provenance 'USER)))
       (session-submit! session first #:origin 'USER)
       (session-submit! session second #:origin 'USER)
       (session-advance! session)
-      (session-advance! session)
-      (event-payload (last (state-events (session-state session)))))))
+      (and (not (session-advance! session))
+           (eq? (control-termination-reason (session-control session))
+                'BUDGET_EXHAUSTED)
+           (not (memq 'ProcessTerminated
+                      (map event-type (state-events (session-state session)))))))))
 
 (test-group "per-goal-process-lifecycle"
   (test-assert "each Goal receives an isolated Control budget"

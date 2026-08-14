@@ -573,12 +573,16 @@
             ;; and uses the task-specific verifier selected by production.
             (let* ((sandbox (spawn ^repl-sandbox "direct-solve-session" (lambda _ #t) (lambda _ #t) '()))
                    (llm-calls 0)
+                   (solve-system-prompts '())
+                   (solve-histories '())
                    (mock-llm
                     (spawn
                      (lambda (bcom)
                        (methods
                         [(chat session-id prompt model system-prompt think history stream-callback #:optional (role "user"))
                          (set! llm-calls (+ llm-calls 1))
+                         (set! solve-system-prompts (cons system-prompt solve-system-prompts))
+                         (set! solve-histories (cons history solve-histories))
                          (let-values (((promo resolver) (spawn-promise-and-resolver)))
                           (<-np resolver 'fulfill
                                 `(("payload" . (("content" . ,(if (= llm-calls 1)
@@ -630,7 +634,54 @@
                          (string-contains output "completion-criteria")
                          (string-contains output "workspace")
                          (string-contains output "memory")
+                         (equal? solve-histories '(() ()))
+                         (= (length solve-system-prompts) 2)
+                         (string-contains (car solve-system-prompts) "# ACTION CONTRACT")
+                         (not (string-contains (car solve-system-prompts) "# COMPLETION SIGNALS"))
                          (= llm-calls 2))))))
+
+            ;; A Control budget outcome is as terminal for the client as a
+            ;; verified answer.  Regress the real server adapter boundary: the
+            ;; third distinct REPL failure must produce (final ...), otherwise
+            ;; the Rust CLI remains blocked waiting for a terminal message.
+            (let* ((sandbox (spawn ^repl-sandbox "direct-failure-budget-session" (lambda _ #t) (lambda _ #t) '()))
+                   (llm-calls 0)
+                   (attempts
+                    '("Attempt one:\n```repl\n(if #t 1 2 3)\n```"
+                      "Attempt two:\n```repl\n(let ((x 1) (if #t x 0)) x)\n```"
+                      "Attempt three:\n```repl\n(if #t (begin 1) 2 3)\n```"))
+                   (mock-llm
+                    (spawn
+                     (lambda (bcom)
+                       (methods
+                        [(chat session-id prompt model system-prompt think history stream-callback #:optional (role "user"))
+                         (let ((response (list-ref attempts llm-calls)))
+                           (set! llm-calls (+ llm-calls 1))
+                           (let-values (((promo resolver) (spawn-promise-and-resolver)))
+                             (<-np resolver 'fulfill
+                                   `(("payload" . (("content" . ,response)
+                                                    ("reasoning" . "Reasoning...")))))
+                             promo))]))))
+                   (agent (spawn ^agent-actor "direct-failure-budget-session" sandbox mock-llm (lambda _ #t) (lambda _ #t)))
+                   (mock-socket (open-output-string))
+                   (orch (spawn ^session-orchestrator "direct-failure-budget-session" mock-socket #f (lambda (expr) #t) sandbox agent mock-llm '() "gemma4:e2b" #t)))
+              (test-assert "direct-orchestrator: three REPL failures return a terminal final event"
+                (begin
+                  (<- orch 'handle-message '(clear))
+                  (run-turns-synchronously)
+                  (<- orch 'handle-message '(solve "Produce a result despite three syntax failures."))
+                  (run-turns-synchronously)
+                  (<- orch 'handle-message '(get-cognitive-events))
+                  (run-turns-synchronously)
+                  (<- orch 'handle-message '(get-cognitive-state))
+                  (run-turns-synchronously)
+                  (let ((output (get-output-string mock-socket)))
+                    (and (= llm-calls 3)
+                         (string-contains output "repl-error")
+                         (string-contains output "FAILURE_BUDGET_EXHAUSTED")
+                         (string-contains output "ProcessTerminated")
+                         (string-contains output "(final")
+                         (string-contains output "failed-action budget"))))))
 
             ;; 7. The retained RLM loop is intentionally opt-in as an
             ;; investigation processor rather than the solve control loop.

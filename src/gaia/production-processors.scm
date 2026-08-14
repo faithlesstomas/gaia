@@ -85,7 +85,31 @@ from Goblins actors and a particular LLM/runtime."
          ;; preserves a true proposal batch and releases the current focus before
          ;; the next round, avoiding nested admissions and capacity leaks.
          (round-running-cell (list #f))
-         (round-requested-cell (list #f)))
+         (round-requested-cell (list #f))
+         ;; Client completion is part of the process lifecycle, not an optional
+         ;; side effect of the Answer Processor.  Control may terminate a
+         ;; process before AnswerRequested is emitted, so guard the callback in
+         ;; one shared place and invoke it exactly once from either path.
+         (client-finished-cell (list #f)))
+
+    (define (control-terminal-text outcome)
+      (case outcome
+        ((FAILURE_BUDGET_EXHAUSTED)
+         "FAILED: the cognitive process exhausted its failed-action budget.")
+        ((BUDGET_EXHAUSTED)
+         "INCONCLUSIVE: the cognitive process exhausted its transition budget.")
+        ((NO_PROGRESS)
+         "INCONCLUSIVE: the cognitive process stopped after making no progress.")
+        ((USER_INTERRUPTED)
+         "USER_INTERRUPTED: the cognitive process was interrupted by the user.")
+        (else
+         (string-append "FAILED: the cognitive process terminated with outcome "
+                        (format #f "~a" outcome) "."))))
+
+    (define (notify-finished! outcome final-text hypothesis-text)
+      (unless (car client-finished-cell)
+        (set-car! client-finished-cell #t)
+        (on-finished outcome final-text hypothesis-text)))
 
     (define* (emit-answer! outcome final-text hypothesis-text #:key (verified-claim #f))
       (when (active-process? session process)
@@ -128,7 +152,9 @@ during a broadcast set the flag for a subsequent round."
        #:constraints
        (list completion-criteria
              "Previous execution feedback is evidence, not an answer."
-             "Revise the plan and propose a distinct Action when appropriate."
+             "Return one complete, distinct replacement Action; do not repeat or extend the rejected Action."
+             "For a syntax failure, simplify the program and correct the exact rejected Guile form before changing the algorithm."
+             "The last expression must return the value required by the completion criterion."
              "Treat model output as an unverified hypothesis.")))
 
     (define (consolidate-goal-claim! claim)
@@ -539,9 +565,9 @@ during a broadcast set the flag for a subsequent round."
                      (detach!)
                      (if (eq? outcome 'COMPLETED)
                          (when (session-complete-goal! session verified-claim)
-                           (on-finished outcome final-text hypothesis-text))
+                           (notify-finished! outcome final-text hypothesis-text))
                          (when (session-finish-process! session outcome)
-                           (on-finished outcome final-text hypothesis-text))))))
+                           (notify-finished! outcome final-text hypothesis-text))))))
                '())
               (else '())))))
 
@@ -558,7 +584,16 @@ during a broadcast set the flag for a subsequent round."
                  "FAILED: cognitive processor error: "
                  (format #f "~s" (event-payload event)))
                 ""))
-              ((eq? (session-current-process session) process) (detach!)))
+              ((and (memq (event-type event) '(GoalCompleted ProcessTerminated))
+                    (eq? (session-current-process session) process))
+               (let ((outcome (process-outcome process)))
+                 (detach!)
+                 ;; Normal AnswerRequested completion detaches this processor
+                 ;; before the durable terminal event.  Reaching this branch
+                 ;; therefore means Control ended the process directly.
+                 (notify-finished! outcome
+                                   (control-terminal-text outcome)
+                                   (car hypothesis-text-cell)))))
              '()))))
 
       (let ((processors (list memory-processor generative-processor planner-processor

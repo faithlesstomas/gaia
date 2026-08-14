@@ -48,6 +48,9 @@ They define `BUDGET_EXHAUSTED`, `NO_PROGRESS`, `FAILURE_BUDGET_EXHAUSTED`, and
 `USER_INTERRUPTED`. Production creates a fresh Control/process lifecycle per
 Goal, enforces exactly one durable terminal outcome, and bounds feedback-driven
 replanning with transition, failure, stalled-transition, and replan budgets.
+The same terminal boundary invokes the client completion callback exactly once;
+Control-driven budget outcomes are rendered as terminal `final` responses just
+like Answer-Processor outcomes.
 
 ## Workspace and Processor Contract
 
@@ -151,7 +154,10 @@ The production cycle is complete only when:
 6. the Answer Processor renders accepted knowledge and terminal rationale rather
    than exposing raw LLM output as the system answer;
 7. the failure-first Fibonacci vertical test and restoration/interruption tests
-   pass through the same production path used by CLI and Emacs.
+   pass through the same production path used by CLI and Emacs;
+8. three failed Actions produce one `FAILURE_BUDGET_EXHAUSTED` terminal event,
+   one completion callback, and a terminal protocol response instead of leaving
+   a client waiting.
 
 Run the production conformance gate with:
 

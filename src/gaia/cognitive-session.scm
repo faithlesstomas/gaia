@@ -180,8 +180,13 @@ satisfies it.  This is the sole production path to GoalCompleted."
 (define (session-advance! session)
   (let ((reason (control-termination-reason (session-control session))))
     (if reason
-        (or (session-finish-process! session reason)
-            (emit! session (make-cognitive-event 'ProcessTerminated reason #:origin 'CONTROL)))
+        ;; A terminal event belongs to a concrete active process.  Re-entering
+        ;; Control after that process has finished must not manufacture a
+        ;; duplicate, process-less ProcessTerminated event.
+        (let ((process (session-current-process session)))
+          (and process
+               (process-active? process)
+               (session-finish-process! session reason)))
         (let ((admitted (workspace-admit-next!
                          (session-workspace session)
                          #:selector (lambda (candidates)
@@ -239,9 +244,9 @@ State and Memory. No proposal from a completed process may compete in the next."
     (if (and (session-current-process session)
              (process-active? (session-current-process session)))
         (session-finish-process! session reason)
-        (begin
-          (emit! session (make-cognitive-event 'ProcessTerminated reason #:origin 'CONTROL))
-          (session-clear-workspace! session)))
+        ;; There is no process lifecycle to terminate.  Keep the interrupt in
+        ;; Control, but do not append an orphan terminal event to session state.
+        (session-clear-workspace! session))
     reason))
 
 (define (make-reproducibility-record session action-id result-co outcome environment)

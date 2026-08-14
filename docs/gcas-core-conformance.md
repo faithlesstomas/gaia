@@ -88,3 +88,25 @@ budget and interruption behavior including late callbacks, and runs protocol
 mapping tests for both supported clients. Future verifier classes and semantic
 memory improve the range of Goals GAIA can solve; they are not missing pieces of
 the minimum GCAS-Core control architecture.
+
+The terminal protocol regression additionally drives three distinct failed
+Actions through the production processors and server adapter. It requires one
+`ProcessTerminated(FAILURE_BUDGET_EXHAUSTED)`, one `on-finished` notification,
+and one terminal `(final ...)` message. Control re-entry and an interrupt after
+termination may not append duplicate or process-less terminal events. This
+turns “exactly once” into an end-to-end client contract rather than only an
+internal process-state property.
+
+## Model context boundary
+
+Production `solve` invokes the Generative Processor with an empty chat-history
+argument. The user message is represented as Goal/Question COs, and the model's
+transient input is reconstructed from typed Cognitive State. Initial generation
+receives the Goal, admitted Workspace projection, selected Memory, and active
+constraints; replanning receives the relevant Reflection and execution error.
+The system prompt is a compact GCAS-specific Action contract; the legacy RLM
+`FINAL/CONFIDENCE` prompt remains isolated behind `investigate`. Initial and
+repair projections are already distinct, while richer structured phase/error,
+budget, and capability projections remain a reliability milestone rather than
+a missing GCAS-Core requirement. See
+[gcas-prompt-projection.md](gcas-prompt-projection.md).

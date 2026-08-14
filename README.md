@@ -12,6 +12,9 @@ feedback-driven replanning after failed actions or conflicts. A Goal may complet
 Claim. The minimum GCAS-Core conformance gate covers failure-first repair, persistence, budgets, interruption, and both supported
 clients. This is architectural conformance, not general task competence: Fibonacci is the first registered production verifier,
 while unsupported task classes deliberately terminate as `INCONCLUSIVE`.
+Control-driven budget exhaustion now also reaches the client as a terminal response, including the three-failed-Action case that
+previously left the CLI waiting. The current product milestone is a reliable, measurable vertical slice rather than immediate
+implementation of every GCAS extension.
 
 Thanks to the Guile language, GAIA treats code as data (homoiconicity), enabling structural validation,
 sandboxed evaluation, and white-box auditability. These mechanisms constrain generated code; they do not eliminate LLM errors.
@@ -54,7 +57,16 @@ Goal Verifier, and Control processors react through the Cognitive Bus. Control r
 failure/conflict feedback can produce a revised hypothesis, Plan, and Action under bounded budgets. Successful execution remains
 `INCONCLUSIVE` unless a task-specific independent verifier accepts the evidence. Verified evidence chains and explicit user
 testimony are stored separately from chat transcripts and can be retrieved across turns. See
-[the conformance audit](docs/gcas-core-conformance.md) for the exact scope and [gcas.md](gcas.md) for the normative specification.
+[the conformance audit](docs/gcas-core-conformance.md) for the exact scope,
+[the prompt projection design](docs/gcas-prompt-projection.md) for what the model
+currently receives, and [gcas.md](gcas.md) for the normative specification.
+
+Production `solve` does **not** replay chat history to the model. It currently
+sends a compact GCAS-specific Action contract plus a transient projection reconstructed
+from the current Goal, admitted Workspace objects, selected structured Memory,
+constraints, and—during repair—the latest Reflection. This avoids transcript
+growth and removes the legacy `FINAL/CONFIDENCE` protocol from production
+generation. Further phase-specific projection changes remain evaluation-driven.
 
 ## RLM as a compatibility and investigation capability
 
@@ -95,6 +107,13 @@ GAIA is designed with a **Kernel + Pluggable Modules** architecture, built on to
 * **Self-Improvement Infrastructure:** Trajectory logging and dataset curation foundations; governed closed-loop deployment remains roadmap work.
 * **Live Monitoring:** Real-time trajectory viewer for debugging agent reasoning.
 * **Neuro-Symbolic Roadmap:** Planned J-space, symbolic actor, and formal prover integrations.
+
+The default `gemma4:e2b` backend is a relatively small, tool-oriented model. Its
+Guile syntax failures are a known competence limitation that predates the GCAS
+migration. GAIA therefore distinguishes a correct control architecture from a
+capable model: NCSI/J-space may later improve neural steering, while near-term
+reliability work uses structured feedback, phase-aware prompt projections,
+syntax preflight, high-level tools, and executable verifiers.
 
 ## Getting Started
 

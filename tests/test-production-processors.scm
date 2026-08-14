@@ -306,6 +306,44 @@
            (= (length terminals) 1)
            (eq? (event-payload (car terminals)) 'INSUFFICIENT_INFORMATION)))))
 
+(test-assert "three failed Actions terminate once and notify the client"
+  (let ((session (make-cognitive-session #:workspace-capacity 2))
+        (generation-calls 0)
+        (execution-calls 0)
+        (finishes '()))
+    (let ((process
+           (start-production-process!
+            session "Exhaust the failed-action budget"
+            #:max-failures 3
+            #:max-replans 3
+            #:generate
+            (lambda (prompt succeed fail)
+              (set! generation-calls (+ generation-calls 1))
+              (succeed (format #f "attempt-~a" generation-calls)))
+            #:extract-action
+            (lambda (response) (string-append "(" response ")"))
+            #:execute
+            (lambda (code succeed fail)
+              (set! execution-calls (+ execution-calls 1))
+              (fail 'syntax (string-append "invalid action " code)))
+            #:on-finished
+            (lambda (outcome final-text hypothesis-text)
+              (set! finishes (cons (list outcome final-text) finishes))))))
+      (let* ((events (state-events (session-state session)))
+             (terminals
+              (filter (lambda (event)
+                        (memq (event-type event) '(GoalCompleted ProcessTerminated)))
+                      events)))
+        (and (not (process-active? process))
+             (eq? (process-outcome process) 'FAILURE_BUDGET_EXHAUSTED)
+             (= generation-calls 3)
+             (= execution-calls 3)
+             (= (length terminals) 1)
+             (eq? (event-payload (car terminals)) 'FAILURE_BUDGET_EXHAUSTED)
+             (= (length finishes) 1)
+             (eq? (caar finishes) 'FAILURE_BUDGET_EXHAUSTED)
+             (string-contains (cadar finishes) "failed-action budget"))))))
+
 (test-assert "interruption terminates once and ignores a late Generative callback"
   (let ((session (make-cognitive-session #:workspace-capacity 8))
         (late-success #f)
@@ -323,7 +361,7 @@
                                 (memq (event-type event)
                                       '(GoalCompleted ProcessTerminated)))
                               events)))
-      (and (= finishes 0)
+      (and (= finishes 1)
            (= (length terminals) 1)
            (eq? (event-payload (car terminals)) 'USER_INTERRUPTED)
            (not (memq 'HypothesisProposed (map event-type events)))))))

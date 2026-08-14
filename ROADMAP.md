@@ -17,6 +17,9 @@ Workspace rounds, bounded replanning after failed actions or conflicts, and an i
 GCAS-Core conformance gate now covers failure-first replanning, persistence, budgets, interruption, and both supported clients.
 This establishes the architecture, not broad task competence: the production verifier registry currently contains a deterministic
 Fibonacci contract, while unknown natural-language task classes fail closed as `INCONCLUSIVE`.
+The immediate product milestone is now a **reliable vertical slice**: every `solve` must terminate at the client boundary,
+repair behavior must be measurable, and a small set of task classes must have executable acceptance contracts before the
+architecture is expanded further.
 
 **Architecture:** Rust Client - GAIA Server (Guile REPL) - LiteLLM Proxy - LLM backends (Ollama, Lemonade, external LLM API etc.)
 
@@ -74,7 +77,7 @@ The legacy RLM loop is retained only as a compatibility and long-context investi
 - [x] **Recurrent cognitive cycle** — Production `solve` represents `Plan` COs and routes failed actions and conflicts through `Reflection` into bounded Generative replanning. Execution claims are then submitted to a separate Goal verifier.
 - [x] **Goal-specific verification and Answer Processor** — An injected verifier returns an explicit verdict. Only an accepted, verified Claim that satisfies the active Goal may emit `GoalCompleted`; the default policy is `INCONCLUSIVE` without task-specific verification.
 - [x] **Operational vertical acceptance test** — A deterministic failure-first Fibonacci test rejects an initial bad Action, feeds the conflict through replanning, accepts a revised Action through an independent oracle, and terminates with exactly one `GoalCompleted`.
-- [x] **Client observability and conformance gate** — CLI and Emacs expose the event trace and Cognitive State view. Automated tests cover accepted-answer policy, restoration, Control budgets, interruption/late callbacks, failure-first repair, and both clients.
+- [x] **Client observability and conformance gate** — CLI and Emacs expose the event trace and Cognitive State view. Automated tests cover accepted-answer policy, restoration, Control budgets, interruption/late callbacks, failure-first repair, and both clients. Control-driven termination now invokes the client completion callback exactly once; three failed REPL Actions regress through the server adapter to a terminal `(final ...)` response instead of leaving the CLI waiting.
 
 The detailed gap analysis and conformance gate are maintained in [docs/gcas-core-conformance.md](docs/gcas-core-conformance.md).
 
@@ -103,6 +106,31 @@ The next implementation phase expands the verifier registry and planner beyond
 the reference Fibonacci capability, adds semantic/conflict-aware memory, and
 strengthens capability policy. These improve competence and robustness without
 changing the completed GCAS-Core architectural boundary.
+
+## Reliable vertical slice — current product priority
+
+Full GCAS expansion is not a prerequisite for a useful GAIA. The next milestone
+is a narrow but dependable `solve` path whose behavior can be measured with the
+small local model currently used by default (`gemma4:e2b`). That model is tuned
+primarily for tool use rather than sustained Guile REPL programming, and similar
+Scheme-generation failures were already present in the legacy RLM loop. GCAS
+must therefore expose model limitations honestly and compensate with structure;
+architectural conformance alone is not evidence of task competence.
+
+- [x] **Terminal delivery invariant (P0)** — Every active production process reaches one durable terminal event and invokes `on-finished` exactly once. Failure-budget, transition-budget, no-progress, and user-interrupt outcomes all reach the client. An interrupt with no active process does not create an orphan `ProcessTerminated` event.
+- [x] **Three-failure regression (P0)** — Deterministic processor and server-adapter tests execute three distinct failing Actions, assert `FAILURE_BUDGET_EXHAUSTED`, one `ProcessTerminated`, one completion callback, and a terminal `(final ...)` protocol message.
+- [ ] **Small deterministic evaluation corpus (P0)** — Add 20–30 fixtures covering first-pass success, syntax repair, runtime repair, incorrect output, repeated Action, missing Action, verifier rejection, unavailable verifier, every Control budget, interruption, and late callbacks. Track hangs, false completion, repair success, attempts, latency, and model calls.
+- [/] **Phase-aware cognitive prompt projection (P1)** — Production `solve` now uses a compact GCAS-only Action contract without legacy `FINAL/CONFIDENCE`, while `/investigate` retains the RLM prompt. Initial and repair calls keep chat history empty and project typed Goal/Workspace/Memory/Reflection state; repair constraints require one complete distinct Action and syntax simplification. Remaining work: structured phase/error fields, remaining-budget projection, and capability schemas evaluated against the task corpus.
+- [ ] **Structured repair policy (P1)** — Preflight Scheme syntax before state mutation, classify the failing form, require a complete and distinct replacement Action, detect non-progress, and prefer short known-valid templates or high-level tools for small local models.
+- [ ] **Capability/verifier registry (P1)** — Grow from the Fibonacci oracle to reusable exact-value, predicate/property, unit-test, and artifact verifiers. Unknown task classes continue to fail closed. LLM judgments may propose evidence but cannot independently confer `VERIFIED`.
+- [ ] **Readiness gate (P1)** — Claim general assistant usefulness only after the evaluation corpus has zero hangs and false completions, bounded interruption latency, and an explicitly reported success rate for every advertised capability.
+
+The prompting design is documented in
+[docs/gcas-prompt-projection.md](docs/gcas-prompt-projection.md). NCSI/J-space
+remains a planned neural adapter and research direction, not a blocker for this
+milestone: textual prompt projection is the currently available
+cognitive-to-neural control channel and should first be made correct and
+measurable.
 
 ### Legacy RLM status
 

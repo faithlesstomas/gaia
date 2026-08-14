@@ -373,7 +373,23 @@
             (not (string-contains prompt "# COMPLETION SIGNALS"))))
         (test-assert "get-solver-system-prompt contains completion signals section"
           (let ((prompt (get-solver-system-prompt)))
-            (string-contains prompt "# COMPLETION SIGNALS")))))
+            (string-contains prompt "# COMPLETION SIGNALS")))
+        (test-assert "get-gcas-system-prompt is a compact Action contract without legacy completion signals"
+          (let ((prompt (get-gcas-system-prompt)))
+            (and (string-contains prompt "# ACTION CONTRACT")
+                 (string-contains prompt "exactly one complete fenced")
+                 (string-contains prompt "independent verifier")
+                 (not (string-contains prompt "# COMPLETION SIGNALS"))
+                 (not (string-contains prompt "FINAL(answer)"))
+                 (not (string-contains prompt "HYBRID RECURSION MODEL")))))
+        (test-assert "get-gcas-system-prompt exposes Wisp only when enabled"
+          (begin
+            (set-config! 'wisp-mode #f)
+            (let ((scheme-prompt (get-gcas-system-prompt)))
+              (set-config! 'wisp-mode #t)
+              (let ((wisp-prompt (get-gcas-system-prompt)))
+                (and (not (string-contains scheme-prompt "# OPTIONAL WISP OUTPUT"))
+                     (string-contains wisp-prompt "# OPTIONAL WISP OUTPUT"))))))))
     (lambda ()
       (set-config! 'system-prompt original-system-prompt)
       (set-config! 'wisp-mode original-wisp-mode))))

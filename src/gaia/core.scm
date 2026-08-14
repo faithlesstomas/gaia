@@ -11,7 +11,7 @@
   #:use-module (srfi srfi-13)
   #:use-module (srfi srfi-43)
   #:use-module (gaia config)
-  #:export (start-gaia SYSTEM_PROMPT get-system-prompt get-solver-system-prompt extract-code extract-final-signal extract-confidence
+  #:export (start-gaia SYSTEM_PROMPT GCAS_SYSTEM_PROMPT get-system-prompt get-solver-system-prompt get-gcas-system-prompt extract-code extract-final-signal extract-confidence
             extract-delegation markdown->ansi MAX-RECURSION-DEPTH CONFIDENCE-THRESHOLD
             C-RESET C-BOLD C-RED C-GREEN C-YELLOW C-BLUE C-CYAN C-GREY
             start-gaia rlm-loop *interrupted* check-interrupt! gaia-log clean-assistant-content
@@ -232,6 +232,31 @@ FINAL(8)
 CONFIDENCE(100)
 ")
 
+;; Production GCAS uses a deliberately smaller contract than the legacy RLM
+;; loop. Goal, Workspace, Memory, feedback, and budgets are projected from typed
+;; Cognitive State in the user/context message; they do not belong in a static
+;; system prompt or a replayed transcript.
+(define GCAS_SYSTEM_PROMPT
+  "# ROLE
+You are the Generative Processor in GAIA's GCAS cognitive process. Propose one small executable GNU Guile Scheme Action that advances the supplied Goal. Your output is an UNVERIFIED hypothesis; GAIA executes and verifies it independently.
+
+# ACTION CONTRACT
+1. Respond with a brief rationale followed by exactly one complete fenced ```repl block. Only that block is executed.
+2. Put the complete replacement Action in the block. Do not emit fragments, alternatives, pseudo-code, `FINAL`, `FINAL_VAR`, or `CONFIDENCE`.
+3. Make the last expression return the value that should be verified. Prefer returning a value over only printing it.
+4. Keep the Action short and flat. Prefer preloaded high-level procedures over handwritten infrastructure.
+5. On repair, use the exact execution/verifier feedback in the cognitive context and produce a distinct complete Action. Do not repeat a rejected Action.
+
+# GUILE CORRECTNESS
+- `if` has exactly three operands: test, consequent, alternative. Use `begin` for multiple expressions in a branch.
+- Every `let`, `let*`, or named-`let` binding is a pair `(name expression)`.
+- `set!` has exactly two operands: an existing variable and one expression.
+- Do not invent forms or combine procedure parameters inside a binding.
+- Preloaded SRFI-1/SRFI-13, regex, match, file, Git, log, sandbox, Python, and `guile-syntax-check` tools are available. Import only a module you actually need.
+
+# EXECUTION BOUNDARY
+The REPL is stateful across successful Actions. A syntax or runtime failure rolls back the entire Action. GAIA—not you—decides Goal completion from execution evidence and an independent verifier.")
+
 (define (get-system-prompt)
   (let* ((base (if (get-config 'wisp-mode)
                    SYSTEM_PROMPT
@@ -286,6 +311,19 @@ CONFIDENCE(100)
                        "- `FINAL_VAR(variable_name)` — For answers stored in a variable from code execution.\n\n"
                        "After each step, rate your confidence:\n"
                        "- `CONFIDENCE(score)` — 0-100%. If >= 95%, the system stops automatically.\n\n"))))
+
+(define (get-gcas-system-prompt)
+  "Return the compact production GCAS Action contract.
+
+An explicit GAIA_SYSTEM_PROMPT/config override still wins. Wisp instructions
+are appended only when Wisp mode is enabled, keeping the default Scheme prompt
+small for local models."
+  (or (get-config 'system-prompt)
+      (string-append
+       GCAS_SYSTEM_PROMPT
+       (if (get-config 'wisp-mode)
+           "\n\n# OPTIONAL WISP OUTPUT\nYou may use one fenced ```wisp block instead of ```repl. Use two-space indentation and SRFI-119 syntax; never emit both formats."
+           ""))))
 
 (define (string-contains-last str pattern)
   (let loop ((start 0)

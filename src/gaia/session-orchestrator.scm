@@ -239,7 +239,7 @@
             ;; The Generative Processor receives reconstructed cognitive context,
             ;; never the transcript. The actor is only an asynchronous adapter.
             (let ((chat-promise (<- llm-client 'chat session-id context model
-                                     (get-solver-system-prompt) thinking '() event-sink)))
+                                     (get-gcas-system-prompt) thinking '() event-sink)))
               (on chat-promise
                   (lambda (response)
                     (let ((payload (assoc-ref response "payload"))
