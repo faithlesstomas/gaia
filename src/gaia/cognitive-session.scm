@@ -17,6 +17,7 @@
             session-current-process
             session-start-process!
             session-finish-process!
+            session-complete-goal!
             session-memory
             session-state-path
             session-persist!
@@ -92,6 +93,8 @@ process, but retains every previous Goal and terminal event for audit."
 
 (define (session-finish-process! session outcome)
   "Finish the active process exactly once and emit its durable terminal event."
+  (when (eq? outcome 'COMPLETED)
+    (error "Goal completion requires session-complete-goal! with verified evidence"))
   (let ((process (session-current-process session)))
     (and process
          (process-finish! process outcome)
@@ -103,6 +106,25 @@ process, but retains every previous Goal and terminal event for audit."
                    #:origin 'CONTROL))
            (session-clear-workspace! session)
            outcome))))
+
+(define (session-complete-goal! session verified-claim)
+  "Complete the active Goal only from an accepted, verified Claim that explicitly
+satisfies it.  This is the sole production path to GoalCompleted."
+  (let ((process (session-current-process session)))
+    (unless (and process (process-active? process)
+                 (fact? verified-claim)
+                 (equal? (assoc-ref (co-relations verified-claim) 'satisfies)
+                         (co-id (process-goal process))))
+      (error "Goal completion requires a verified Claim satisfying the active Goal"
+             verified-claim))
+    (and (process-finish! process 'COMPLETED)
+         (begin
+           (state-store! (session-state session) verified-claim)
+           (emit! session
+                  (make-cognitive-event 'GoalCompleted (process-goal process)
+                                        #:origin 'GOAL_VERIFIER))
+           (session-clear-workspace! session)
+           'COMPLETED))))
 
 (define (session-persist! session)
   (let ((path (session-state-path session)))

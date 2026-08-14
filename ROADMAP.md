@@ -13,8 +13,9 @@ GAIA has a functional legacy RLM-style investigation loop, persistent Guile REPL
 trajectory logging, and LiteLLM integration. It also has a substantial GCAS substrate: Cognitive Objects, durable
 state and events, a bounded Workspace implementation, Control primitives, structured memory, and auditable
 Action/Result execution. Production `solve` is assembled from Bus-attached processors with a per-Goal lifecycle, explicit
-Workspace rounds, and bounded replanning after failed actions or conflicts. Goal-specific verification and answer policy remain,
-so GAIA does not yet claim GCAS-Core conformance.
+Workspace rounds, bounded replanning after failed actions or conflicts, and an independent Goal-verification boundary. The default
+verifier is intentionally inconclusive for arbitrary natural-language goals, and client-facing process observability and conformance
+acceptance remain, so GAIA does not yet claim GCAS-Core conformance.
 
 **Architecture:** Rust Client - GAIA Server (Guile REPL) - LiteLLM Proxy - LLM backends (Ollama, Lemonade, external LLM API etc.)
 
@@ -69,9 +70,9 @@ The legacy RLM loop is retained only as a compatibility and long-context investi
 - [x] **Production processor assembly** — Memory Retrieval, Generative, Planner, Execution, Deliberative, Answer, and Control processors are attached to the Cognitive Bus. The server orchestrator now supplies only LLM/sandbox/client adapters and session history persistence for `solve`.
 - [x] **Execution boundary** — Default `solve` and direct REPL cross explicit Action → Result/Failure boundaries with auditable links and reproduction observations. Richer capability policy remains post-Core hardening.
 - [/] **Memory and context reconstruction** — Durable structured memory and transcript-free context reconstruction exist. Evidence/Claim consolidation, typed memory roles, and useful cross-turn retrieval remain.
-- [x] **Recurrent cognitive cycle** — Production `solve` represents `Plan` COs and routes failed actions and conflicts through `Reflection` into bounded Generative replanning. Successful Results return through deliberation and planning to an honest `INCONCLUSIVE` outcome until goal verification exists.
-- [ ] **Goal-specific verification and Answer Processor** — Define completion criteria per Goal; produce user-visible answers only from accepted Claims and terminal goal state.
-- [ ] **Operational vertical acceptance test** — A failure-first Fibonacci scenario must reject an initial bad Action, feed evidence back through the bus, select a revised proposal, verify deterministic criteria, and terminate with `GoalCompleted`.
+- [x] **Recurrent cognitive cycle** — Production `solve` represents `Plan` COs and routes failed actions and conflicts through `Reflection` into bounded Generative replanning. Execution claims are then submitted to a separate Goal verifier.
+- [x] **Goal-specific verification and Answer Processor** — An injected verifier returns an explicit verdict. Only an accepted, verified Claim that satisfies the active Goal may emit `GoalCompleted`; the default policy is `INCONCLUSIVE` without task-specific verification.
+- [x] **Operational vertical acceptance test** — A deterministic failure-first Fibonacci test rejects an initial bad Action, feeds the conflict through replanning, accepts a revised Action through an independent oracle, and terminates with exactly one `GoalCompleted`.
 
 The detailed gap analysis and conformance gate are maintained in [docs/gcas-core-conformance.md](docs/gcas-core-conformance.md).
 
@@ -86,10 +87,11 @@ The detailed gap analysis and conformance gate are maintained in [docs/gcas-core
    real competition, broadcast the winner, and release or supersede processed COs.
 4. **[Completed] Planning and feedback recurrence** — Represent `Plan` COs and linked subgoals as `Goal` COs, then route
    Result, Failure, Conflict, and Reflection back into planning or generation.
-5. **Goal verification** — Add deterministic verifier contracts and ensure that
+5. **[Completed] Goal verification** — Deterministic verifier contracts ensure that
    execution success alone never satisfies a Goal.
-6. **Answer policy and client observability** — Stop presenting raw LLM output as
-   the system answer; expose current process, Goal, Workspace, COs, and terminal rationale.
+6. **Answer policy and client observability** — Complete client-facing process,
+   Goal, Workspace, CO, and terminal-rationale views; retain the policy that raw
+   LLM output is never presented as the system answer.
 7. **Memory consolidation** — Store verified evidence and claims, preserve
    conflicts and supersession, and retrieve structured facts across turns.
 8. **Conformance acceptance** — Pass the failure-first vertical test plus restart,

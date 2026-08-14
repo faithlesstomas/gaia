@@ -83,6 +83,21 @@
              (= (length terminals) 1)
              (eq? (event-payload (car terminals)) 'FAILED))))))
 
+  (test-assert "GoalCompleted requires a verified Claim that satisfies the active Goal"
+    (let* ((session (make-cognitive-session))
+           (goal (make-cognitive-object 'goal "Complete only with proof" #:provenance 'USER))
+           (process (session-start-process! session goal "Verified acceptance"))
+           (claim (make-cognitive-object
+                   'claim "The acceptance criterion was independently met."
+                   #:provenance 'SYMBOLIC_INFERENCE
+                   #:epistemic-status 'ACCEPTED
+                   #:verification-status 'VERIFIED
+                   #:relations `((satisfies . ,(co-id goal))))))
+      (and (eq? (session-complete-goal! session claim) 'COMPLETED)
+           (eq? (process-outcome process) 'COMPLETED)
+           (eq? (event-type (last (state-events (session-state session))))
+                'GoalCompleted))))
+
 (test-group "workspace-policy-and-processors"
   (test-assert "a Workspace round selects one competing candidate and releases its focus"
     (let* ((session (make-cognitive-session #:workspace-capacity 1))

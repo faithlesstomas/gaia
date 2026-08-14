@@ -6,6 +6,7 @@
   #:use-module (gaia cognitive-process)
   #:use-module (gaia cognitive-session)
   #:use-module (gaia cognitive-state)
+  #:use-module (gaia goal-verifier)
   #:use-module (gaia production-processors))
 
 (test-begin "gaia-production-processors")
@@ -105,6 +106,66 @@
                     '(ActionFailed ReflectionRaised HypothesisProposed PlanProposed
                       ActionCompleted EvidenceFound BeliefUpdated
                       WorkspaceRoundStarted WorkspaceRoundCompleted)))))))
+
+(test-assert "a deterministic Fibonacci Goal completes only after failure-first independent verification"
+  (let ((session (make-cognitive-session #:workspace-capacity 2))
+        (generated '())
+        (executed '())
+        (finished #f))
+    (let ((process
+           (start-production-process!
+            session "Return the first eight Fibonacci terms."
+            #:max-replans 2
+            #:generate
+            (lambda (prompt succeed fail)
+              (let ((attempt (+ 1 (length generated))))
+                (set! generated (append generated (list prompt)))
+                (succeed (if (= attempt 1) "bad Fibonacci" "correct Fibonacci"))))
+            #:extract-action
+            (lambda (response)
+              (if (string=? response "bad Fibonacci")
+                  "(fib-first-eight-bad)"
+                  "(fib-first-eight-correct)"))
+            #:execute
+            (lambda (code succeed fail)
+              (set! executed (append executed (list code)))
+              (succeed (if (string=? code "(fib-first-eight-bad)")
+                           "0 1 2 3 5 8 13 21"
+                           "0 1 1 2 3 5 8 13")))
+            #:verify-goal
+            (lambda (goal action result evidence execution-claim state)
+              (if (string=? (co-content result) "0 1 1 2 3 5 8 13")
+                  (make-goal-verdict
+                   'SATISFIED
+                   "The deterministic Fibonacci oracle accepted all eight terms."
+                   "The first eight Fibonacci terms are 0, 1, 1, 2, 3, 5, 8, 13.")
+                  (make-goal-verdict
+                   'REJECTED
+                   "The deterministic Fibonacci oracle rejected the execution output.")))
+            #:on-finished
+            (lambda (outcome final-text hypothesis-text)
+              (set! finished (list outcome final-text))))))
+      (let* ((events (state-events (session-state session)))
+             (types (map event-type events))
+             (completed-events
+              (filter (lambda (event) (eq? (event-type event) 'GoalCompleted)) events))
+             (verified-claims
+              (filter (lambda (claim)
+                        (and (fact? claim)
+                             (equal? (assoc-ref (co-relations claim) 'satisfies)
+                                     (co-id (process-goal process)))))
+                      (state-objects (session-state session)))))
+        (and (not (process-active? process))
+             (eq? (process-outcome process) 'COMPLETED)
+             (eq? (car finished) 'COMPLETED)
+             (equal? executed '("(fib-first-eight-bad)" "(fib-first-eight-correct)"))
+             (= (length generated) 2)
+             (= (length completed-events) 1)
+             (not (memq 'ProcessTerminated types))
+             (= (length verified-claims) 1)
+             (every (lambda (required) (memq required types))
+                    '(ActionCompleted GoalVerificationCompleted ConflictDetected
+                      ReflectionRaised GoalVerified GoalCompleted AnswerRequested)))))))
 
 (test-assert "a Conflict is reflected and routed to Generative replanning"
   (let ((session (make-cognitive-session #:workspace-capacity 2))

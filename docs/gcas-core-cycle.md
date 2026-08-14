@@ -6,9 +6,10 @@ controlled feedback process in which no processor is the source of truth for the
 entire system.
 
 **Status:** this is the target operational contract. The deterministic showcase
-implements a scripted reference trace, while the production `solve` path only
-implements a linear subset. Passing the showcase alone is not GCAS-Core
-conformance; the production path must satisfy the acceptance criteria below.
+implements a scripted reference trace. Production `solve` now implements its
+bounded recurrent path and independent Goal-verification boundary; default
+natural-language goals still terminate as `INCONCLUSIVE` when no task-specific
+verifier is supplied. Passing the showcase alone is not GCAS-Core conformance.
 
 ## Executable Reference Scenario
 
@@ -98,10 +99,10 @@ the full event trace for all three outcomes.
 
 The default server `solve` path routes model output through
 `HypothesisProposed` and an admitted `ActionRequested` before it reaches the
-sandbox. A successful action becomes `Result`, `Evidence`, a verified claim
-about the observed execution, and `ReflectionRaised`. The terminal outcome is
-currently hard-coded as `INCONCLUSIVE` for successful execution because no
-goal-specific verifier exists.
+sandbox. A successful action becomes `Result`, `Evidence`, and a verified claim
+about the observed execution. The independent Goal Verifier receives that claim
+and may create a Claim satisfying the Goal. Without a task-specific verifier,
+the safe default verdict is `INCONCLUSIVE`.
 
 This path is assembled from Memory Retrieval, Generative, Planner, Execution,
 Deliberative, Answer, and Control processors attached to the Cognitive Bus. Each
@@ -115,8 +116,9 @@ Planner turns each Hypothesis into a `Plan`, a linked subgoal represented as a
 `ActionFailed` or `ConflictDetected` creates a `Reflection` candidate; when it
 is selected, Generative reconstructs context containing that feedback and
 proposes a revised Hypothesis, Plan, and Action. A successful Result similarly
-returns through Evidence, Claim, and Reflection to Planner, which currently
-ends as `INCONCLUSIVE` because point 5 has not yet supplied a goal verifier.
+returns through Evidence and a bounded execution Claim to the Goal Verifier.
+Rejected evidence becomes `ConflictDetected` and re-enters planning; an
+inconclusive verdict ends without presenting model output as the answer.
 The legacy recursive LLM–REPL loop remains behind `investigate` and is not the
 GCAS cycle.
 

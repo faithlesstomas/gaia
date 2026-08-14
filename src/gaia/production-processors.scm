@@ -8,6 +8,7 @@
   #:use-module (gaia cognitive-processor)
   #:use-module (gaia cognitive-session)
   #:use-module (gaia cognitive-state)
+  #:use-module (gaia goal-verifier)
   #:export (start-production-process!))
 
 (define (relation-ref co key)
@@ -22,11 +23,13 @@
   (let ((current (session-current-process session)))
     (and current (eq? current process) (process-active? process))))
 
-(define (answer-request process outcome final-text hypothesis-text)
+(define* (answer-request process outcome final-text hypothesis-text
+                         #:key (verified-claim #f))
   `((process-id . ,(process-id process))
     (outcome . ,outcome)
     (final-text . ,final-text)
-    (hypothesis-text . ,hypothesis-text)))
+    (hypothesis-text . ,hypothesis-text)
+    (verified-claim . ,(and verified-claim (co-id verified-claim)))))
 
 (define* (start-production-process!
           session task
@@ -40,7 +43,8 @@
           (max-transitions 32)
           (max-stalled-transitions 8)
           (max-failures 3)
-          (max-replans 3))
+          (max-replans 3)
+          (verify-goal default-goal-verifier))
   "Start one bounded, recurrent production cognitive process.
 
 GENERATE accepts PROMPT, SUCCESS and FAILURE callbacks. EXECUTE accepts ACTION
@@ -50,7 +54,7 @@ from Goblins actors and a particular LLM/runtime."
   (unless (and (cognitive-session? session) (string? task)
                (procedure? generate) (procedure? execute)
                (procedure? extract-action) (procedure? on-client-event)
-               (procedure? on-finished)
+               (procedure? on-finished) (procedure? verify-goal)
                (integer? max-replans) (>= max-replans 0))
     (error "Invalid production process adapters or replan budget" session task))
   (let* ((goal (make-cognitive-object
@@ -76,14 +80,15 @@ from Goblins actors and a particular LLM/runtime."
          (round-running-cell (list #f))
          (round-requested-cell (list #f)))
 
-    (define (emit-answer! outcome final-text hypothesis-text)
+    (define* (emit-answer! outcome final-text hypothesis-text #:key (verified-claim #f))
       (when (active-process? session process)
         (session-emit! session 'AnswerRequested
                        (answer-request
                         process outcome final-text
                         (if (> (string-length hypothesis-text) 0)
                             hypothesis-text
-                            (car hypothesis-text-cell)))
+                            (car hypothesis-text-cell))
+                        #:verified-claim verified-claim)
                        #:origin 'CONTROL)))
 
     (define (detach!)
@@ -221,10 +226,8 @@ during a broadcast set the flag for a subsequent round."
                        (begin
                          (emit-answer!
                           'INSUFFICIENT_INFORMATION
-                          (string-append
-                           "INSUFFICIENT_INFORMATION: the model produced an unverified hypothesis.\n"
-                           (co-content co))
-                          (co-content co))
+                          "INSUFFICIENT_INFORMATION: no executable, independently verifiable plan was proposed."
+                          "")
                          '()))))
                 ((and (active-process? session process)
                       (belongs-to-process? co process)
@@ -261,15 +264,12 @@ during a broadcast set the flag for a subsequent round."
                       (belongs-to-process? co process)
                       (eq? (co-type co) 'reflection)
                       (not (relation-ref co 'replan)))
-                 ;; Result reached deliberation and returned here through a
-                 ;; Reflection.  Point 5 adds the verifier that may replace
-                 ;; this honest, bounded INCONCLUSIVE outcome with completion.
                  (emit-answer!
                   'INCONCLUSIVE
                   (string-append
-                   "INCONCLUSIVE: verified execution observation recorded.\n"
+                   "INCONCLUSIVE: the Goal verifier could not establish completion.\n"
                    (co-content co)
-                   "\nThe original Goal is not accepted without a goal-specific verifier.")
+                   "\nNo unverified model output is presented as the answer.")
                   "")
                  '())
                 (else '()))))))
@@ -366,33 +366,136 @@ during a broadcast set the flag for a subsequent round."
                       (belongs-to-process? payload process)
                       (eq? (co-type payload) 'claim))
                  (session-emit! session 'BeliefUpdated payload #:origin 'DELIBERATIVE)
-                 (let ((reflection
-                        (make-cognitive-object
-                         'reflection
-                         (co-content payload)
-                         #:provenance 'SYMBOLIC_INFERENCE
-                         #:relations `((process . ,process-id*)
-                                       (replan . #f)
-                                       (feedback-for . ,(co-id goal))
-                                       (based-on . ,(co-id payload))))))
-                   (session-emit! session 'ReflectionRaised reflection #:origin 'DELIBERATIVE)
-                   (list (make-processor-proposal reflection #:priority 100 #:relevance 1))))
+                 '())
+                ((and (eq? (event-type event) 'WorkspaceBroadcast)
+                      (active-process? session process)
+                      (belongs-to-process? payload process)
+                      (eq? (co-type payload) 'conflict))
+                 ;; The conflict is already durable because it reached the
+                 ;; Workspace.  Emit its semantic event, then let this same
+                 ;; processor turn the event into a feedback Reflection.
+                 (session-emit! session 'ConflictDetected payload #:origin 'GOAL_VERIFIER)
+                 '())
                 (else '()))))))
+
+         (goal-verifier-processor
+          (make-cognitive-processor
+           'GOAL_VERIFIER '(BeliefUpdated)
+           (lambda (event)
+             (let ((claim (event-payload event)))
+               (if (and (active-process? session process)
+                        (belongs-to-process? claim process)
+                        (eq? (co-type claim) 'claim)
+                        (relation-ref claim 'serves)
+                        (not (relation-ref claim 'satisfies)))
+                   (let* ((evidence (state-find (session-state session)
+                                                (relation-ref claim 'supported-by)))
+                          (result (and evidence
+                                       (state-find (session-state session)
+                                                   (relation-ref evidence 'observes))))
+                          (action (and evidence
+                                       (state-find (session-state session)
+                                                   (relation-ref evidence 'produced-by)))))
+                     (if (and evidence result action)
+                         (let ((verdict (call-goal-verifier
+                                         verify-goal goal action result evidence claim
+                                         (session-state session))))
+                           (session-emit!
+                            session 'GoalVerificationCompleted
+                            `((process-id . ,process-id*)
+                              (goal . ,(co-id goal))
+                              (claim . ,(co-id claim))
+                              (status . ,(goal-verdict-status verdict))
+                              (rationale . ,(goal-verdict-rationale verdict)))
+                            #:origin 'GOAL_VERIFIER)
+                           (case (goal-verdict-status verdict)
+                             ((SATISFIED)
+                              (list
+                               (make-processor-proposal
+                                (make-cognitive-object
+                                 'claim (goal-verdict-claim-content verdict)
+                                 #:provenance 'SYMBOLIC_INFERENCE
+                                 #:epistemic-status 'ACCEPTED
+                                 #:verification-status 'VERIFIED
+                                 #:relations `((process . ,process-id*)
+                                               (satisfies . ,(co-id goal))
+                                               (supported-by . ,(co-id claim))
+                                               (verdict-rationale . ,(goal-verdict-rationale verdict))))
+                                #:priority 100 #:relevance 1)))
+                             ((REJECTED)
+                              (list
+                               (make-processor-proposal
+                                (make-cognitive-object
+                                 'conflict
+                                 (string-append "Goal verifier rejected execution evidence: "
+                                                (goal-verdict-rationale verdict))
+                                 #:provenance 'SYMBOLIC_INFERENCE
+                                 #:relations `((process . ,process-id*)
+                                               (contradicts . ,(co-id claim))
+                                               (goal . ,(co-id goal))
+                                               (evidence . ,(co-id evidence))))
+                                #:priority 100 #:relevance 1)))
+                             ((INCONCLUSIVE)
+                              (let ((reflection
+                                     (make-cognitive-object
+                                      'reflection
+                                      (goal-verdict-rationale verdict)
+                                      #:provenance 'SYMBOLIC_INFERENCE
+                                      #:relations `((process . ,process-id*)
+                                                    (replan . #f)
+                                                    (feedback-for . ,(co-id goal))
+                                                    (based-on . ,(co-id claim))))))
+                                (session-emit! session 'ReflectionRaised reflection
+                                               #:origin 'GOAL_VERIFIER)
+                                (list (make-processor-proposal
+                                       reflection #:priority 100 #:relevance 1))))))
+                         (begin
+                           (emit-answer! 'FAILED
+                                         "FAILED: Goal verifier received an incomplete execution evidence chain."
+                                         "")
+                           '())))
+                   '())))))
 
          (answer-processor
           (make-cognitive-processor
-           'ANSWER '(AnswerRequested)
+           'ANSWER '(WorkspaceBroadcast AnswerRequested)
            (lambda (event)
-             (let ((request (event-payload event)))
-               (when (and (active-process? session process)
-                          (equal? (assoc-ref request 'process-id) process-id*))
-                 (let ((outcome (assoc-ref request 'outcome))
-                       (final-text (assoc-ref request 'final-text))
-                       (hypothesis-text (assoc-ref request 'hypothesis-text)))
-                   (detach!)
-                   (when (session-finish-process! session outcome)
-                     (on-finished outcome final-text hypothesis-text))))
-             '()))))
+             (cond
+              ((and (eq? (event-type event) 'WorkspaceBroadcast)
+                    (active-process? session process)
+                    (let ((claim (event-payload event)))
+                      (and (belongs-to-process? claim process)
+                           (fact? claim)
+                           (equal? (relation-ref claim 'satisfies) (co-id goal)))))
+               (let ((claim (event-payload event)))
+                 (session-emit! session 'GoalVerified claim #:origin 'GOAL_VERIFIER)
+                 (emit-answer!
+                  'COMPLETED
+                  (string-append "COMPLETED: " (co-content claim)
+                                 "\nVerification: "
+                                 (or (relation-ref claim 'verdict-rationale)
+                                     "independent Goal verifier accepted the evidence."))
+                  ""
+                  #:verified-claim claim))
+               '())
+              ((eq? (event-type event) 'AnswerRequested)
+               (let ((request (event-payload event)))
+                 (when (and (active-process? session process)
+                            (equal? (assoc-ref request 'process-id) process-id*))
+                   (let ((outcome (assoc-ref request 'outcome))
+                         (final-text (assoc-ref request 'final-text))
+                         (hypothesis-text (assoc-ref request 'hypothesis-text))
+                         (verified-claim (and (assoc-ref request 'verified-claim)
+                                              (state-find (session-state session)
+                                                          (assoc-ref request 'verified-claim)))))
+                     (detach!)
+                     (if (eq? outcome 'COMPLETED)
+                         (when (session-complete-goal! session verified-claim)
+                           (on-finished outcome final-text hypothesis-text))
+                         (when (session-finish-process! session outcome)
+                           (on-finished outcome final-text hypothesis-text))))))
+               '())
+              (else '())))))
 
          (lifecycle-processor
           (make-cognitive-processor
@@ -402,7 +505,7 @@ during a broadcast set the flag for a subsequent round."
              '()))))
 
       (let ((processors (list memory-processor generative-processor planner-processor
-                              execution-processor deliberative-processor answer-processor
+                              execution-processor deliberative-processor goal-verifier-processor answer-processor
                               lifecycle-processor)))
         (set-car! generative-processor-cell generative-processor)
         (set-car! subscriptions-cell

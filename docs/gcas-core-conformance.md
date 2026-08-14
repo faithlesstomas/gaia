@@ -6,9 +6,10 @@ gap audit, not a declaration of conformance.
 
 **Current conclusion:** GAIA implements a substantial GCAS substrate, including
 a per-Goal process lifecycle, production processors attached to the Cognitive
-Bus, explicit Workspace rounds, and bounded feedback replanning. It is not yet
-operationally GCAS-Core conformant because goal-specific verification and the
-corresponding Answer policy are not implemented.
+Bus, explicit Workspace rounds, bounded feedback replanning, and an independent
+Goal-verification boundary. It is not yet operationally GCAS-Core conformant:
+client-visible process views, richer memory consolidation, and the full
+restart/both-client conformance gate remain.
 
 Status meanings:
 
@@ -21,9 +22,9 @@ Status meanings:
 | Explicit COs, 3-axis metadata, provenance | Implemented | `gaia com` defines immutable COs with epistemic status, verification status, confidence, temporal validity, provenance, and relations. | Expand lifecycle validation as the ontology grows; this is not a current Core blocker. |
 | Hypotheses distinct from beliefs | Implemented | LLM output begins as `HYPOTHESIS`/`UNVERIFIED`; execution success does not establish the user's original claim. | Keep accepted execution observations explicitly scoped so `BeliefUpdated` cannot be mistaken for goal verification. |
 | Bounded Workspace with selective admission/broadcast | Implemented | Control records explicit Workspace rounds, selects one pending candidate by scheduling metadata, broadcasts it, and releases active focus while preserving the CO in State. | Improve scheduling policy with novelty, urgency, information gain, and goal-aware attention. |
-| At least Generative and Deliberative processors | Implemented | Memory Retrieval, Generative, Planner, Execution, Deliberative, Answer, and Control processors subscribe through the Cognitive Bus. The orchestrator supplies asynchronous LLM, sandbox, and client adapters. | Planner currently maps one Hypothesis to at most one Action; richer planning belongs to the recurrent-cycle gap. |
+| At least Generative and Deliberative processors | Implemented | Memory Retrieval, Generative, Planner, Execution, Deliberative, Goal Verifier, Answer, and Control processors subscribe through the Cognitive Bus. The orchestrator supplies asynchronous LLM, sandbox, and client adapters. | Planner currently maps one Hypothesis to at most one Action; richer planning remains future work. |
 | Memory separate from prompt history | Implemented at minimum, functionally limited | Structured CO memory is persisted separately and selected context is reconstructed without appending chat history. | Memory currently stores mainly Question/Goal COs and uses lexical overlap. Add evidence/claim consolidation, typed memory functions, and retrieval capable of preserving facts such as user-provided identity. |
-| Recurrent cognitive cycle with progress and loop monitoring | Implemented at bounded minimum | Every `solve` has isolated budgets and exactly-once termination. Failed actions and conflicts become Reflection COs, which trigger a bounded revised Hypothesis → Plan → linked subgoal → Action pass; Control monitors transition, failure, stall, and replan limits. | Add richer strategy switching and goal-aware progress measures. |
+| Recurrent cognitive cycle with progress and loop monitoring | Implemented at bounded minimum | Every `solve` has isolated budgets and exactly-once termination. Failed actions and conflicts become Reflection COs, which trigger a bounded revised Hypothesis → Plan → linked subgoal → Action pass; Control monitors transition, failure, stall, and replan limits. A Goal Verifier decides completion from explicit evidence. | Add richer strategy switching and goal-aware progress measures. |
 | Separate execution with auditable Action/Result | Implemented | An admitted Action crosses an explicit sandbox boundary; Result/Failure links to it and receives a reproducibility observation. | Extend the policy gate beyond checking only the `action` type and add richer environment manifests after Core. |
 | Explicit uncertainty, time, and failure | Implemented | COs represent confidence and temporal validity; failure and inconclusive terminal states are durable. | Make goal-level uncertainty and termination rationale visible in client-facing process views. |
 
@@ -39,14 +40,15 @@ The current `solve` path:
 6. lets Execution and Deliberative processors produce Result/Failure, Evidence,
    and a bounded execution Claim;
 7. routes ActionFailed and ConflictDetected through Reflection into bounded replanning;
-8. lets the Answer Processor terminate as `INSUFFICIENT_INFORMATION`, `FAILED`,
-   or `INCONCLUSIVE`.
+8. lets the independent Goal Verifier accept, reject, or leave the execution
+   claim inconclusive; only an accepted verified Claim satisfying the Goal can
+   reach the Answer Processor and emit `GoalCompleted`.
 
 The event trace drives a multi-processor recurrent production process, rather
 than merely recording direct orchestrator calls. A successful sandbox call still
-produces only a verified claim about execution, not proof that the Goal is met;
-Planner therefore returns an explicit `INCONCLUSIVE` outcome pending an
-independent goal verifier.
+produces only a verified claim about execution, not proof that the Goal is met.
+An injected independent verifier must accept the evidence before the Answer
+Processor may complete the Goal; the default verifier remains `INCONCLUSIVE`.
 
 ## Architectural boundary
 

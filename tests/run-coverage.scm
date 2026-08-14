@@ -43,6 +43,7 @@
          "test-com.scm"
          "test-cognitive-bus.scm"
          "test-cognitive-session.scm"
+         "test-goal-verifier.scm"
          "test-production-processors.scm"
          "test-cognitive-memory.scm"
          "test-deliberative-processor.scm"
