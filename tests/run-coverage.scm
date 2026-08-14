@@ -79,7 +79,12 @@ suite from occupying a CI runner indefinitely."
   (force-output)
   (let* ((status (system* "timeout" "--signal=TERM" "--kill-after=10s"
                           test-timeout
-                          "guile" "--no-auto-compile" "-L" "src" file))
+                          ;; Compile source on first use and share Guile's
+                          ;; cache between isolated suites.  Disabling
+                          ;; compilation makes Goblins fail in the restricted
+                          ;; GitLab container, while forcing a rebuild for
+                          ;; every suite makes CI unnecessarily slow.
+                          "guile" "--auto-compile" "-L" "src" file))
          (exit-status (status:exit-val status)))
     (if (and exit-status (zero? exit-status))
         (display (format #f "\n[SUCCESS] ~a finished successfully.\n" file))
