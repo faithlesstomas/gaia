@@ -75,15 +75,18 @@ processor proposals.  A subscription is an event type symbol or predicate."
                    #:uncertainty (proposal-uncertainty proposal)
                    #:origin (processor-id processor)))
 
-(define (attach-processor! session processor)
+(define* (attach-processor! session processor #:key (after-submit #f))
   "Subscribe PROCESSOR to SESSION's bus.  Handler exceptions are isolated by
 the bus; valid returned proposals become candidates, never direct broadcasts."
   (unless (and (cognitive-session? session) (cognitive-processor? processor))
     (error "attach-processor! requires a session and processor" session processor))
+  (unless (or (not after-submit) (procedure? after-submit))
+    (error "after-submit must be a procedure or #f" after-submit))
   (map (lambda (subscription)
          (bus-subscribe
           (session-bus session) subscription
           (lambda (event)
             (for-each (lambda (proposal) (submit-processor-proposal! session processor proposal))
-                      ((processor-handler processor) event)))))
+                      ((processor-handler processor) event))
+            (when after-submit (after-submit)))))
        (processor-subscriptions processor)))

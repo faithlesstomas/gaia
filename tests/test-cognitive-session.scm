@@ -84,6 +84,24 @@
              (eq? (event-payload (car terminals)) 'FAILED))))))
 
 (test-group "workspace-policy-and-processors"
+  (test-assert "a Workspace round selects one competing candidate and releases its focus"
+    (let* ((session (make-cognitive-session #:workspace-capacity 1))
+           (low (make-cognitive-object 'hypothesis "Low priority" #:provenance 'LLM))
+           (high (make-cognitive-object 'plan "High priority" #:provenance 'LLM))
+           (medium (make-cognitive-object 'observation "Medium priority" #:provenance 'MEMORY)))
+      (session-submit! session low #:priority 10 #:relevance 1 #:origin 'GENERATIVE)
+      (session-submit! session high #:priority 50 #:relevance 1 #:origin 'PLANNER)
+      (session-submit! session medium #:priority 20 #:relevance 1 #:origin 'MEMORY)
+      (let* ((winner (session-run-workspace-round! session))
+             (events (state-events (session-state session)))
+             (started (find (lambda (event) (eq? (event-type event) 'WorkspaceRoundStarted)) events))
+             (completed (find (lambda (event) (eq? (event-type event) 'WorkspaceRoundCompleted)) events)))
+        (and (equal? (co-id winner) (co-id high))
+             (= (assoc-ref (event-payload started) 'candidate-count) 3)
+             (equal? (assoc-ref (event-payload completed) 'winner) (co-id high))
+             (null? (workspace-active (session-workspace session)))
+             (= (length (workspace-candidates (session-workspace session))) 2)))))
+
   (test-assert "control selects the safer, more relevant candidate and enforces workspace capacity"
     (let* ((session (make-cognitive-session #:workspace-capacity 1))
            (risky (make-cognitive-object 'action "Network-wide destructive scan" #:provenance 'LLM))

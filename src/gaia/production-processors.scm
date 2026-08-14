@@ -2,12 +2,12 @@
   #:use-module (srfi srfi-1)
   #:use-module (gaia com)
   #:use-module (gaia cognitive-bus)
+  #:use-module (gaia cognitive-control)
   #:use-module (gaia cognitive-memory)
   #:use-module (gaia cognitive-process)
   #:use-module (gaia cognitive-processor)
   #:use-module (gaia cognitive-session)
   #:use-module (gaia cognitive-state)
-  #:use-module (gaia workspace)
   #:export (start-production-process!))
 
 (define (relation-ref co key)
@@ -20,9 +20,7 @@
 
 (define (active-process? session process)
   (let ((current (session-current-process session)))
-    (and current
-         (eq? current process)
-         (process-active? process))))
+    (and current (eq? current process) (process-active? process))))
 
 (define (answer-request process outcome final-text hypothesis-text)
   `((process-id . ,(process-id process))
@@ -41,17 +39,20 @@
           (completion-criteria "Produce independently verified evidence that satisfies the user Goal.")
           (max-transitions 32)
           (max-stalled-transitions 8)
-          (max-failures 3))
-  "Start one production cognitive process and attach its processors to the Bus.
+          (max-failures 3)
+          (max-replans 3))
+  "Start one bounded, recurrent production cognitive process.
 
 GENERATE accepts PROMPT, SUCCESS and FAILURE callbacks. EXECUTE accepts ACTION
-text, SUCCESS and FAILURE callbacks. This adapter boundary keeps the cognitive
-process independent from Goblins actors and from a particular LLM/runtime."
+text, SUCCESS and FAILURE callbacks.  Processors only communicate through the
+Cognitive Bus and Workspace rounds; the adapters keep this process independent
+from Goblins actors and a particular LLM/runtime."
   (unless (and (cognitive-session? session) (string? task)
                (procedure? generate) (procedure? execute)
                (procedure? extract-action) (procedure? on-client-event)
-               (procedure? on-finished))
-    (error "Invalid production process adapters" session task))
+               (procedure? on-finished)
+               (integer? max-replans) (>= max-replans 0))
+    (error "Invalid production process adapters or replan budget" session task))
   (let* ((goal (make-cognitive-object
                 'goal task #:provenance 'USER
                 #:relations `((completion-criteria . ,completion-criteria))))
@@ -66,7 +67,14 @@ process independent from Goblins actors and from a particular LLM/runtime."
                     #:relations `((process . ,process-id*)
                                   (resolved-by . ,(co-id goal)))))
          (subscriptions-cell (list '()))
-         (hypothesis-text-cell (list "")))
+         (hypothesis-text-cell (list ""))
+         (replan-count-cell (list 0))
+         (generative-processor-cell (list #f))
+         ;; A request made while a broadcast is being handled is deferred.  This
+         ;; preserves a true proposal batch and releases the current focus before
+         ;; the next round, avoiding nested admissions and capacity leaks.
+         (round-running-cell (list #f))
+         (round-requested-cell (list #f)))
 
     (define (emit-answer! outcome final-text hypothesis-text)
       (when (active-process? session process)
@@ -84,16 +92,59 @@ process independent from Goblins actors and from a particular LLM/runtime."
                 (car subscriptions-cell))
       (set-car! subscriptions-cell '()))
 
-    (letrec
-        ((scheduler
-          (make-cognitive-processor
-           'CONTROL '(CandidateSubmitted)
-           (lambda (event)
-             (when (active-process? session process)
-               (session-advance! session))
-             '())))
+    (define (request-round!)
+      "Mark a completed proposal batch ready, then drain pending rounds.
+One call admits one winner from every then-pending batch; callbacks produced
+during a broadcast set the flag for a subsequent round."
+      (when (active-process? session process)
+        (set-car! round-requested-cell #t)
+        (unless (car round-running-cell)
+          (set-car! round-running-cell #t)
+          (let loop ()
+            (when (and (active-process? session process)
+                       (car round-requested-cell))
+              (set-car! round-requested-cell #f)
+              (session-run-workspace-round! session)
+              (when (car round-requested-cell) (loop)))
+          (set-car! round-running-cell #f)))))
 
-         (memory-processor
+    (define (replan-context feedback)
+      (reconstruct-context
+       goal
+       (list feedback)
+       (memory-retrieve (session-memory session) task)
+       #:constraints
+       (list completion-criteria
+             "Previous execution feedback is evidence, not an answer."
+             "Revise the plan and propose a distinct Action when appropriate."
+             "Treat model output as an unverified hypothesis.")))
+
+    (define (generate-hypothesis! prompt replanning?)
+      (generate
+       prompt
+       (lambda (response-text)
+         (when (active-process? session process)
+           ;; A response generated from explicit execution feedback is an
+           ;; observable change of strategy, not another stalled transition.
+           (when replanning?
+             (control-record-progress! (session-control session)))
+           (set-car! hypothesis-text-cell response-text)
+           (submit-processor-proposal!
+            session (car generative-processor-cell)
+            (make-processor-proposal
+             (make-cognitive-object
+              'hypothesis response-text #:provenance 'LLM
+              #:relations `((process . ,process-id*)
+                            (addresses . ,(co-id goal))))
+             #:priority 70 #:relevance 1 #:uncertainty 1))
+           (request-round!)))
+       (lambda (error-text)
+         (emit-answer! 'FAILED
+                       (string-append "GCAS generative processor failed: " error-text)
+                       ""))))
+
+    (letrec
+        ((memory-processor
           (make-cognitive-processor
            'MEMORY '(GoalCreated)
            (lambda (event)
@@ -103,9 +154,7 @@ process independent from Goblins actors and from a particular LLM/runtime."
                         (equal? (co-id event-goal) (co-id goal)))
                    (let* ((selected (memory-retrieve (session-memory session) task))
                           (context (reconstruct-context
-                                    goal
-                                    (workspace-active (session-workspace session))
-                                    selected
+                                    goal '() selected
                                     #:constraints
                                     (list completion-criteria
                                           "Use an explicit Action before requesting execution."
@@ -117,8 +166,7 @@ process independent from Goblins actors and from a particular LLM/runtime."
                                           (context-for . ,(co-id goal))))))
                      (session-emit! session 'MemoryRetrieved context-co #:origin 'MEMORY)
                      (list (make-processor-proposal context-co
-                                                    #:priority 80
-                                                    #:relevance 1)))
+                                                    #:priority 80 #:relevance 1)))
                    '())))))
 
          (generative-processor
@@ -126,27 +174,25 @@ process independent from Goblins actors and from a particular LLM/runtime."
            'GENERATIVE '(WorkspaceBroadcast)
            (lambda (event)
              (let ((co (event-payload event)))
-               (when (and (active-process? session process)
-                          (belongs-to-process? co process)
-                          (eq? (co-type co) 'observation)
-                          (relation-ref co 'context-for))
-                 (generate
-                  (co-content co)
-                  (lambda (response-text)
-                    (when (active-process? session process)
-                      (set-car! hypothesis-text-cell response-text)
-                      (submit-processor-proposal!
-                       session generative-processor
-                       (make-processor-proposal
-                        (make-cognitive-object
-                         'hypothesis response-text #:provenance 'LLM
-                         #:relations `((process . ,process-id*)
-                                       (addresses . ,(co-id goal))))
-                        #:priority 70 #:relevance 1 #:uncertainty 1))))
-                  (lambda (error-text)
-                    (emit-answer! 'FAILED
-                                  (string-append "GCAS generative processor failed: " error-text)
-                                  ""))))
+               (cond
+                ((and (active-process? session process)
+                      (belongs-to-process? co process)
+                      (eq? (co-type co) 'observation)
+                      (relation-ref co 'context-for))
+                 (generate-hypothesis! (co-content co) #f))
+                ((and (active-process? session process)
+                      (belongs-to-process? co process)
+                      (eq? (co-type co) 'reflection)
+                      (relation-ref co 'replan))
+                 (if (< (car replan-count-cell) max-replans)
+                     (begin
+                       (set-car! replan-count-cell (+ 1 (car replan-count-cell)))
+                       (generate-hypothesis! (replan-context co) #t))
+                     (emit-answer!
+                      'FAILED
+                      "FAILED: the cognitive process exhausted its replanning budget."
+                      "")))
+                (else #f))
              '()))))
 
          (planner-processor
@@ -154,29 +200,79 @@ process independent from Goblins actors and from a particular LLM/runtime."
            'PLANNER '(WorkspaceBroadcast)
            (lambda (event)
              (let ((co (event-payload event)))
-               (if (and (active-process? session process)
-                        (belongs-to-process? co process)
-                        (eq? (co-type co) 'hypothesis))
-                   (let ((action-text (extract-action (co-content co))))
-                     (session-emit! session 'HypothesisProposed co #:origin 'GENERATIVE)
-                     (if action-text
+               (cond
+                ((and (active-process? session process)
+                      (belongs-to-process? co process)
+                      (eq? (co-type co) 'hypothesis))
+                 (let ((action-text (extract-action (co-content co))))
+                   (session-emit! session 'HypothesisProposed co #:origin 'GENERATIVE)
+                   (if action-text
+                       (list
+                        (make-processor-proposal
+                         (make-cognitive-object
+                          'plan
+                          `((action . ,action-text)
+                            (verification . "Record a reproducible execution observation."))
+                          #:provenance 'LLM
+                          #:relations `((process . ,process-id*)
+                                        (based-on . ,(co-id co))
+                                        (serves . ,(co-id goal))))
+                         #:priority 90 #:relevance 1 #:uncertainty 1))
+                       (begin
+                         (emit-answer!
+                          'INSUFFICIENT_INFORMATION
+                          (string-append
+                           "INSUFFICIENT_INFORMATION: the model produced an unverified hypothesis.\n"
+                           (co-content co))
+                          (co-content co))
+                         '()))))
+                ((and (active-process? session process)
+                      (belongs-to-process? co process)
+                      (eq? (co-type co) 'plan))
+                 (session-emit! session 'PlanProposed co #:origin 'PLANNER)
+                 (let ((action-text (assoc-ref (co-content co) 'action)))
+                   (if (string? action-text)
+                       (let ((subgoal
+                              (make-cognitive-object
+                               'goal
+                               (string-append "Verify the execution observation for: " action-text)
+                               #:provenance 'SYMBOLIC_INFERENCE
+                               #:relations `((process . ,process-id*)
+                                             (parent-goal . ,(co-id goal))
+                                             (implemented-by . ,(co-id co))))))
+                         ;; GCAS models subgoals as linked Goal COs, rather than
+                         ;; giving them an untyped side channel in a Plan.
+                         (state-store! (session-state session) subgoal)
+                         (session-emit! session 'GoalCreated subgoal #:origin 'PLANNER)
                          (list
                           (make-processor-proposal
                            (make-cognitive-object
                             'action action-text #:provenance 'LLM
                             #:relations `((process . ,process-id*)
-                                          (tests . ,(co-id co))
-                                          (serves . ,(co-id goal))))
-                           #:priority 85 #:relevance 1))
-                         (begin
-                           (emit-answer!
-                            'INSUFFICIENT_INFORMATION
-                            (string-append
-                             "INSUFFICIENT_INFORMATION: the model produced an unverified hypothesis.\n"
-                             (co-content co))
-                            (co-content co))
-                           '())))
-                   '())))))
+                                          (implements . ,(co-id co))
+                                          (serves . ,(co-id goal))
+                                          (advances . ,(co-id subgoal))))
+                           #:priority 85 #:relevance 1)
+                          (make-processor-proposal subgoal #:priority 60 #:relevance 1)))
+                       (begin
+                         (emit-answer! 'FAILED "FAILED: Planner produced a Plan without an Action." "")
+                         '()))))
+                ((and (active-process? session process)
+                      (belongs-to-process? co process)
+                      (eq? (co-type co) 'reflection)
+                      (not (relation-ref co 'replan)))
+                 ;; Result reached deliberation and returned here through a
+                 ;; Reflection.  Point 5 adds the verifier that may replace
+                 ;; this honest, bounded INCONCLUSIVE outcome with completion.
+                 (emit-answer!
+                  'INCONCLUSIVE
+                  (string-append
+                   "INCONCLUSIVE: verified execution observation recorded.\n"
+                   (co-content co)
+                   "\nThe original Goal is not accepted without a goal-specific verifier.")
+                  "")
+                 '())
+                (else '()))))))
 
          (execution-processor
           (make-cognitive-processor
@@ -215,33 +311,36 @@ process independent from Goblins actors and from a particular LLM/runtime."
 
          (deliberative-processor
           (make-cognitive-processor
-           'DELIBERATIVE '(ActionCompleted ActionFailed WorkspaceBroadcast)
+           'DELIBERATIVE '(ActionCompleted ActionFailed ConflictDetected WorkspaceBroadcast)
            (lambda (event)
              (let ((payload (event-payload event)))
                (cond
                 ((and (eq? (event-type event) 'ActionCompleted)
                       (active-process? session process)
                       (belongs-to-process? payload process))
-                 (let* ((action-id (relation-ref payload 'produced-by))
-                        (evidence
-                         (make-cognitive-object
-                          'evidence
-                          (string-append "Execution observed: " (co-content payload))
-                          #:provenance 'EXECUTION
-                          #:relations `((process . ,process-id*)
-                                        (observes . ,(co-id payload))
-                                        (produced-by . ,action-id)))))
-                   (list (make-processor-proposal evidence
-                                                  #:priority 95
-                                                  #:relevance 1))))
-                ((and (eq? (event-type event) 'ActionFailed)
+                 (let ((evidence
+                        (make-cognitive-object
+                         'evidence
+                         (string-append "Execution observed: " (co-content payload))
+                         #:provenance 'EXECUTION
+                         #:relations `((process . ,process-id*)
+                                       (observes . ,(co-id payload))
+                                       (produced-by . ,(relation-ref payload 'produced-by))))))
+                   (list (make-processor-proposal evidence #:priority 95 #:relevance 1))))
+                ((and (memq (event-type event) '(ActionFailed ConflictDetected))
                       (active-process? session process)
                       (belongs-to-process? payload process))
-                 (session-emit! session 'ReflectionRaised payload #:origin 'DELIBERATIVE)
-                 (emit-answer! 'FAILED
-                               (string-append "GCAS action failed: " (co-content payload))
-                               "")
-                 '())
+                 (let ((reflection
+                        (make-cognitive-object
+                         'reflection
+                         (string-append "Feedback requires replanning: " (co-content payload))
+                         #:provenance 'SYMBOLIC_INFERENCE
+                         #:relations `((process . ,process-id*)
+                                       (replan . #t)
+                                       (feedback-for . ,(co-id goal))
+                                       (based-on . ,(co-id payload))))))
+                   (session-emit! session 'ReflectionRaised reflection #:origin 'DELIBERATIVE)
+                   (list (make-processor-proposal reflection #:priority 100 #:relevance 1))))
                 ((and (eq? (event-type event) 'WorkspaceBroadcast)
                       (active-process? session process)
                       (belongs-to-process? payload process)
@@ -252,9 +351,8 @@ process independent from Goblins actors and from a particular LLM/runtime."
                          'claim
                          (string-append
                           "The approved action produced the observed REPL output: "
-                          (let ((result (state-find
-                                         (session-state session)
-                                         (relation-ref payload 'observes))))
+                          (let ((result (state-find (session-state session)
+                                                    (relation-ref payload 'observes))))
                             (if result (co-content result) "<missing result>")))
                          #:provenance 'SYMBOLIC_INFERENCE
                          #:epistemic-status 'ACCEPTED
@@ -262,23 +360,23 @@ process independent from Goblins actors and from a particular LLM/runtime."
                          #:relations `((process . ,process-id*)
                                        (supported-by . ,(co-id payload))
                                        (serves . ,(co-id goal))))))
-                   (list (make-processor-proposal claim
-                                                  #:priority 100
-                                                  #:relevance 1))))
+                   (list (make-processor-proposal claim #:priority 100 #:relevance 1))))
                 ((and (eq? (event-type event) 'WorkspaceBroadcast)
                       (active-process? session process)
                       (belongs-to-process? payload process)
                       (eq? (co-type payload) 'claim))
                  (session-emit! session 'BeliefUpdated payload #:origin 'DELIBERATIVE)
-                 (session-emit! session 'ReflectionRaised payload #:origin 'DELIBERATIVE)
-                 (emit-answer!
-                  'INCONCLUSIVE
-                  (string-append
-                   "INCONCLUSIVE: verified execution observation recorded.\n"
-                   (co-content payload)
-                   "\nThe original question is not accepted as true without independent evidence.")
-                  "")
-                 '())
+                 (let ((reflection
+                        (make-cognitive-object
+                         'reflection
+                         (co-content payload)
+                         #:provenance 'SYMBOLIC_INFERENCE
+                         #:relations `((process . ,process-id*)
+                                       (replan . #f)
+                                       (feedback-for . ,(co-id goal))
+                                       (based-on . ,(co-id payload))))))
+                   (session-emit! session 'ReflectionRaised reflection #:origin 'DELIBERATIVE)
+                   (list (make-processor-proposal reflection #:priority 100 #:relevance 1))))
                 (else '()))))))
 
          (answer-processor
@@ -300,25 +398,26 @@ process independent from Goblins actors and from a particular LLM/runtime."
           (make-cognitive-processor
            'CONTROL '(GoalCompleted ProcessTerminated)
            (lambda (event)
-             ;; Normal answers detach before finishing. This path also cleans up
-             ;; subscriptions when an external interrupt terminates the process.
-             (when (eq? (session-current-process session) process)
-               (detach!))
+             (when (eq? (session-current-process session) process) (detach!))
              '()))))
 
-      (let ((processors (list scheduler memory-processor generative-processor
-                              planner-processor execution-processor
-                              deliberative-processor answer-processor
+      (let ((processors (list memory-processor generative-processor planner-processor
+                              execution-processor deliberative-processor answer-processor
                               lifecycle-processor)))
+        (set-car! generative-processor-cell generative-processor)
         (set-car! subscriptions-cell
                   (append-map (lambda (processor)
-                                (attach-processor! session processor))
+                                (attach-processor! session processor
+                                                   #:after-submit request-round!))
                               processors)))
 
+      ;; Initial producers submit as one batch.  GoalCreated lets Memory add a
+      ;; context proposal before Control starts the first competition round.
       (session-submit! session question #:priority 10 #:relevance 1 #:origin 'USER)
       (session-emit! session 'ObservationReceived question #:origin 'USER)
       (session-submit! session goal #:priority 100 #:relevance 1 #:origin 'USER)
       (memory-store! (session-memory session) question)
       (memory-store! (session-memory session) goal)
       (session-emit! session 'GoalCreated goal #:origin 'CONTROL)
+      (request-round!)
       process)))

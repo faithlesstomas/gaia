@@ -1,6 +1,7 @@
 (define-module (tests test-production-processors)
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-64)
+  #:use-module (gaia com)
   #:use-module (gaia cognitive-bus)
   #:use-module (gaia cognitive-process)
   #:use-module (gaia cognitive-session)
@@ -49,9 +50,84 @@
                     '(MEMORY GENERATIVE PLANNER DELIBERATIVE))
              (every (lambda (required) (memq required types))
                     '(ObservationReceived GoalCreated MemoryRetrieved
-                      HypothesisProposed ActionRequested ActionCompleted
+                      HypothesisProposed PlanProposed ActionRequested ActionCompleted
                       EvidenceFound BeliefUpdated ReflectionRaised
-                      AnswerRequested ProcessTerminated)))))))
+                      AnswerRequested ProcessTerminated
+                      WorkspaceRoundStarted WorkspaceRoundCompleted)))))))
+
+(test-assert "a failed Action feeds Reflection into a revised Plan and Action"
+  (let ((session (make-cognitive-session #:workspace-capacity 2))
+        (generated '())
+        (executed '())
+        (finished #f))
+    (let ((process
+           (start-production-process!
+            session "Repair a failed deterministic action"
+            #:max-replans 2
+            #:generate
+            (lambda (prompt succeed fail)
+              (let ((attempt (+ 1 (length generated))))
+                (set! generated (cons prompt generated))
+                (succeed (if (= attempt 1) "first attempt" "revised attempt"))))
+            #:extract-action
+            (lambda (response)
+              (if (string=? response "first attempt") "(bad-action)" "(good-action)"))
+            #:execute
+            (lambda (code succeed fail)
+              (set! executed (append executed (list code)))
+              (if (string=? code "(bad-action)")
+                  (fail 'runtime "first attempt failed")
+                  (succeed "verified second observation")))
+            #:on-finished
+            (lambda (outcome final-text hypothesis-text)
+              (set! finished outcome)))))
+      (let* ((events (state-events (session-state session)))
+             (types (map event-type events))
+             (plans (filter (lambda (co) (eq? (co-type co) 'plan))
+                            (state-objects (session-state session))))
+             (subgoals (filter (lambda (co)
+                                (and (eq? (co-type co) 'goal)
+                                     (assoc-ref (co-relations co) 'parent-goal)))
+                              (state-objects (session-state session))))
+             (reflections (filter (lambda (co)
+                                    (and (eq? (co-type co) 'reflection)
+                                         (assoc-ref (co-relations co) 'replan)))
+                                  (state-objects (session-state session)))))
+        (and (not (process-active? process))
+             (eq? (process-outcome process) 'INCONCLUSIVE)
+             (eq? finished 'INCONCLUSIVE)
+             (= (length generated) 2)
+             (equal? executed '("(bad-action)" "(good-action)"))
+             (>= (length plans) 2)
+             (>= (length subgoals) 2)
+             (pair? reflections)
+             (every (lambda (required) (memq required types))
+                    '(ActionFailed ReflectionRaised HypothesisProposed PlanProposed
+                      ActionCompleted EvidenceFound BeliefUpdated
+                      WorkspaceRoundStarted WorkspaceRoundCompleted)))))))
+
+(test-assert "a Conflict is reflected and routed to Generative replanning"
+  (let ((session (make-cognitive-session #:workspace-capacity 2))
+        (generation-calls 0))
+    (let ((process
+           (start-production-process!
+            session "Resolve conflicting evidence"
+            #:generate (lambda (prompt succeed fail)
+                         (set! generation-calls (+ generation-calls 1)))
+            #:execute (lambda (code succeed fail) (succeed "unexpected"))
+            #:extract-action (lambda (response) "(unused)"))))
+      (let ((conflict
+             (make-cognitive-object
+              'conflict "Independent evidence conflicts with the current plan."
+              #:provenance 'SYMBOLIC_INFERENCE
+              #:relations `((process . ,(process-id process))))))
+        (session-emit! session 'ConflictDetected conflict #:origin 'DELIBERATIVE)
+        (let ((types (map event-type (state-events (session-state session)))))
+          (session-request-interrupt! session)
+          (and (= generation-calls 2)
+               (memq 'ConflictDetected types)
+               (memq 'ReflectionRaised types)
+               (not (process-active? process))))))))
 
 (test-assert "an unexecutable hypothesis terminates once without calling execution"
   (let ((session (make-cognitive-session #:workspace-capacity 8))

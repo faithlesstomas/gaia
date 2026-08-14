@@ -22,6 +22,7 @@
             session-persist!
             session-submit!
             session-advance!
+            session-run-workspace-round!
             session-emit!
             session-release-workspace-object!
             session-clear-workspace!
@@ -153,6 +154,35 @@ process, but retains every previous Goal and terminal event for audit."
                  (control-record-transition! (session-control session))
                  (emit! session (make-cognitive-event 'WorkspaceBroadcast admitted #:origin 'WORKSPACE))
                  admitted))))))
+
+(define (workspace-round-payload session candidates admitted)
+  `((process-id . ,(let ((process (session-current-process session)))
+                     (and process (process-id process))))
+    (candidate-count . ,(length candidates))
+    (candidate-ids . ,(map (lambda (entry) (co-id (candidate-co entry))) candidates))
+    (winner . ,(and admitted (co-id admitted)))))
+
+(define (session-run-workspace-round! session)
+  "Run one explicit Workspace competition round.
+
+All pending proposals are visible to Control before one is admitted.  The
+admitted CO is broadcast synchronously, then released from active Workspace
+focus while its durable Cognitive State record remains available to processors.
+This makes the Workspace a bounded, dynamic broadcast process rather than a
+growing execution history."
+  (let ((candidates (workspace-candidate-entries (session-workspace session))))
+    (and (pair? candidates)
+         (begin
+           (session-emit! session 'WorkspaceRoundStarted
+                          (workspace-round-payload session candidates #f)
+                          #:origin 'CONTROL)
+           (let ((admitted (session-advance! session)))
+             (when admitted
+               (session-release-workspace-object! session (co-id admitted)))
+             (session-emit! session 'WorkspaceRoundCompleted
+                            (workspace-round-payload session candidates admitted)
+                            #:origin 'CONTROL)
+             admitted)))))
 
 (define (session-release-workspace-object! session object-id)
   "Remove a processed object from bounded active workspace without deleting it

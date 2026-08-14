@@ -43,9 +43,9 @@ the same cognitive process without requiring a network source or model service.
 Control primitives track transitions, observable progress, consecutive
 non-progressing transitions, execution failures, and explicit user interruption.
 They define `BUDGET_EXHAUSTED`, `NO_PROGRESS`, `FAILURE_BUDGET_EXHAUSTED`, and
-`USER_INTERRUPTED`. Production now creates a fresh Control/process lifecycle per
-Goal and enforces exactly one durable terminal outcome; recurrence under these
-budgets remains part of the next implementation stage.
+`USER_INTERRUPTED`. Production creates a fresh Control/process lifecycle per
+Goal, enforces exactly one durable terminal outcome, and bounds feedback-driven
+replanning with transition, failure, stalled-transition, and replan budgets.
 
 ## Workspace and Processor Contract
 
@@ -75,7 +75,7 @@ by `ActionCompleted` or `ActionFailed`:
 
 ```text
 session-submit! → CandidateSubmitted
-session-advance! → selective admission → WorkspaceBroadcast
+session-run-workspace-round! → competition → selective admission → WorkspaceBroadcast → release focus
 session-record-result! / session-record-failure! → ActionCompleted / ActionFailed
 ```
 
@@ -103,17 +103,22 @@ about the observed execution, and `ReflectionRaised`. The terminal outcome is
 currently hard-coded as `INCONCLUSIVE` for successful execution because no
 goal-specific verifier exists.
 
-This path is now assembled from Memory Retrieval, Generative, Planner, Execution,
+This path is assembled from Memory Retrieval, Generative, Planner, Execution,
 Deliberative, Answer, and Control processors attached to the Cognitive Bus. Each
 `solve` owns a separate Goal process, completion criteria, Control budgets, and
-exactly one terminal transition. The session orchestrator supplies asynchronous
-LLM/sandbox adapters and persists the client transcript; it no longer sequences
-the cognitive stages directly.
+exactly one terminal transition. Control collects proposal batches into explicit
+Workspace rounds, selects one candidate, broadcasts it, then releases that
+focus while preserving its durable CO record.
 
-The pass is not recurrent yet. Candidates are normally submitted and admitted
-one at a time, Planner creates at most one Action, and Result/Failure does not
-re-enter planning. The legacy recursive LLM–REPL loop remains behind
-`investigate` and is not the GCAS cycle.
+Planner turns each Hypothesis into a `Plan`, a linked subgoal represented as a
+`Goal` CO, and then an `Action`. An
+`ActionFailed` or `ConflictDetected` creates a `Reflection` candidate; when it
+is selected, Generative reconstructs context containing that feedback and
+proposes a revised Hypothesis, Plan, and Action. A successful Result similarly
+returns through Evidence, Claim, and Reflection to Planner, which currently
+ends as `INCONCLUSIVE` because point 5 has not yet supplied a goal verifier.
+The legacy recursive LLM–REPL loop remains behind `investigate` and is not the
+GCAS cycle.
 
 `gaia deliberative-processor` now provides the first deliberative contract:
 an execution observation first becomes `Evidence`, then an independently

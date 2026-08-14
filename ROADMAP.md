@@ -12,9 +12,9 @@
 GAIA has a functional legacy RLM-style investigation loop, persistent Guile REPL environment, safety validation,
 trajectory logging, and LiteLLM integration. It also has a substantial GCAS substrate: Cognitive Objects, durable
 state and events, a bounded Workspace implementation, Control primitives, structured memory, and auditable
-Action/Result execution. Production `solve` is now assembled from Bus-attached processors with a per-Goal lifecycle, but it is
-still single-pass: admission is immediate and outcomes cannot yet cause replanning. GAIA therefore does not yet claim GCAS-Core
-conformance.
+Action/Result execution. Production `solve` is assembled from Bus-attached processors with a per-Goal lifecycle, explicit
+Workspace rounds, and bounded replanning after failed actions or conflicts. Goal-specific verification and answer policy remain,
+so GAIA does not yet claim GCAS-Core conformance.
 
 **Architecture:** Rust Client - GAIA Server (Guile REPL) - LiteLLM Proxy - LLM backends (Ollama, Lemonade, external LLM API etc.)
 
@@ -64,12 +64,12 @@ The legacy RLM loop is retained only as a compatibility and long-context investi
 
 - [x] **Cognitive Object Model** — Validated COs carry provenance, epistemic and verification statuses, temporal validity, confidence, and relations.
 - [x] **Session Cognitive State** — Each server session owns durable CO state and an event log. Action outcomes receive linked reproducibility observations.
-- [/] **Bounded Global Workspace** — Capacity, proposal metadata, scoring, admission, and broadcast exist. Production `solve` immediately advances one submitted CO at a time, so meaningful multi-candidate competition remains.
+- [x] **Bounded Global Workspace** — Capacity, proposal metadata, scoring, explicit competition rounds, selective admission, broadcast, and release of the active focus are implemented. Durable COs remain in Cognitive State after their Workspace focus ends.
 - [x] **Cognitive Process and Control lifecycle** — Each `solve` owns an explicit Goal process, completion criteria, isolated Control budgets, exactly-once terminal state, interruption cleanup, and rejection of late callbacks.
 - [x] **Production processor assembly** — Memory Retrieval, Generative, Planner, Execution, Deliberative, Answer, and Control processors are attached to the Cognitive Bus. The server orchestrator now supplies only LLM/sandbox/client adapters and session history persistence for `solve`.
 - [x] **Execution boundary** — Default `solve` and direct REPL cross explicit Action → Result/Failure boundaries with auditable links and reproduction observations. Richer capability policy remains post-Core hardening.
 - [/] **Memory and context reconstruction** — Durable structured memory and transcript-free context reconstruction exist. Evidence/Claim consolidation, typed memory roles, and useful cross-turn retrieval remain.
-- [/] **Recurrent cognitive cycle** — The deterministic showcase exercises the target event vocabulary, but production `solve` is linear and cannot replan after Result, Failure, Conflict, or Reflection.
+- [x] **Recurrent cognitive cycle** — Production `solve` represents `Plan` COs and routes failed actions and conflicts through `Reflection` into bounded Generative replanning. Successful Results return through deliberation and planning to an honest `INCONCLUSIVE` outcome until goal verification exists.
 - [ ] **Goal-specific verification and Answer Processor** — Define completion criteria per Goal; produce user-visible answers only from accepted Claims and terminal goal state.
 - [ ] **Operational vertical acceptance test** — A failure-first Fibonacci scenario must reject an initial bad Action, feed evidence back through the bus, select a revised proposal, verify deterministic criteria, and terminate with `GoalCompleted`.
 
@@ -82,9 +82,9 @@ The detailed gap analysis and conformance gate are maintained in [docs/gcas-core
 2. **[Completed] Event-driven processor assembly** — Attach Planner, Memory Retrieval,
    Generative, Execution, Deliberative, and Answer processors to the session Bus.
    Reduce the session orchestrator to lifecycle and client transport duties.
-3. **Workspace scheduling rounds** — Collect proposals before admission, perform
+3. **[Completed] Workspace scheduling rounds** — Collect proposals before admission, perform
    real competition, broadcast the winner, and release or supersede processed COs.
-4. **Planning and feedback recurrence** — Represent Plan/Subgoal COs and route
+4. **[Completed] Planning and feedback recurrence** — Represent `Plan` COs and linked subgoals as `Goal` COs, then route
    Result, Failure, Conflict, and Reflection back into planning or generation.
 5. **Goal verification** — Add deterministic verifier contracts and ensure that
    execution success alone never satisfies a Goal.
