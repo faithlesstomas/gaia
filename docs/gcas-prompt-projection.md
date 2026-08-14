@@ -78,6 +78,13 @@ Native model tool calls can later become another Generative/Planner adapter.
 They should still cross the same Action, policy, execution, evidence, and
 verification boundaries.
 
+The first live matrix exposed a smaller provider-format mismatch: `gemma4:e2b`
+consistently emitted executable Guile in a `scheme` fence instead of the requested
+`repl` fence. Production GCAS now normalizes that alias at the Action adapter;
+the prompt keeps one preferred schema, and the legacy notebook extractor remains
+strict. This raised the exploratory five-task result from 0/5 to 3/5 and separated
+protocol mismatch from the remaining Scheme-generation and repair failures.
+
 ## NCSI and J-space
 
 NCSI/J-space could provide a stronger bidirectional channel for selecting or

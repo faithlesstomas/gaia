@@ -169,6 +169,10 @@
     (test-equal "extract-code: scheme block"
       #f
       (extract-code "```scheme\n(* 3 4)\n```"))
+
+    (test-equal "extract-gcas-action: normalizes a scheme block"
+      "(* 3 4)"
+      (extract-gcas-action "```scheme\n(* 3 4)\n```"))
     
     (test-equal "extract-code: no block"
       #f

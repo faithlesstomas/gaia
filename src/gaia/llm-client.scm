@@ -271,15 +271,18 @@ Returns (response-header . response-body) or throws 'user-interrupt."
                                     (when (eq? key 'user-interrupt) (apply throw key args))
                                     `(("error" . ,body-str))))))
             ;; OpenAI format translation to GAIA expected format
-            (let ((choices (assoc-ref json-response "choices")))
+            (let ((choices (assoc-ref json-response "choices"))
+                  (usage (assoc-ref json-response "usage")))
               (if (and choices (> (vector-length choices) 0))
                   (let* ((first-choice (vector-ref choices 0))
                          (message (assoc-ref first-choice "message"))
                          (content (if message (assoc-ref message "content") #f))
                          (reasoning (if message (assoc-ref message "reasoning_content") #f)))
                     (if content
-                        `(("payload" . (("content" . ,content)
-                                        ("reasoning" . ,(or reasoning "")))))
+                        (append
+                         `(("payload" . (("content" . ,content)
+                                         ("reasoning" . ,(or reasoning "")))))
+                         (if usage `(("usage" . ,usage)) '()))
                         json-response))
                   json-response)))))))
 

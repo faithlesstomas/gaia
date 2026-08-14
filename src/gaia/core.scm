@@ -11,7 +11,7 @@
   #:use-module (srfi srfi-13)
   #:use-module (srfi srfi-43)
   #:use-module (gaia config)
-  #:export (start-gaia SYSTEM_PROMPT GCAS_SYSTEM_PROMPT get-system-prompt get-solver-system-prompt get-gcas-system-prompt extract-code extract-final-signal extract-confidence
+  #:export (start-gaia SYSTEM_PROMPT GCAS_SYSTEM_PROMPT get-system-prompt get-solver-system-prompt get-gcas-system-prompt extract-code extract-gcas-action extract-final-signal extract-confidence
             extract-delegation markdown->ansi MAX-RECURSION-DEPTH CONFIDENCE-THRESHOLD
             C-RESET C-BOLD C-RED C-GREEN C-YELLOW C-BLUE C-CYAN C-GREY
             start-gaia rlm-loop *interrupted* check-interrupt! gaia-log clean-assistant-content
@@ -333,24 +333,24 @@ small for local models."
           (loop (+ idx (string-length pattern)) idx)
           last-idx))))
 
-(define (extract-code response)
-  "Extracts Scheme or Wisp code from the LLM response.
-Prefers the LAST code block (either ```repl or ```wisp) to support LLM self-correction patterns."
+(define (extract-code-block response markers)
   (let ((str (if (string? response) response (scm->json response))))
-    (let* ((repl-idx (string-contains-last str "```repl"))
-           (wisp-idx (string-contains-last str "```wisp"))
-           (block-info (cond
-                        ((and repl-idx wisp-idx)
-                         (if (> repl-idx wisp-idx)
-                             (cons repl-idx 'repl)
-                             (cons wisp-idx 'wisp)))
-                        (repl-idx (cons repl-idx 'repl))
-                        (wisp-idx (cons wisp-idx 'wisp))
-                        (else #f))))
+    (let* ((candidates
+            (filter-map
+             (lambda (marker)
+               (let ((idx (string-contains-last str (cdr marker))))
+                 (and idx (list idx (car marker) (cdr marker)))))
+             markers))
+           (block-info
+            (and (pair? candidates)
+                 (fold (lambda (candidate best)
+                         (if (> (car candidate) (car best)) candidate best))
+                       (car candidates) (cdr candidates)))))
       (if block-info
           (let* ((idx (car block-info))
-                 (type (cdr block-info))
-                 (start (+ idx 7))
+                 (type (cadr block-info))
+                 (marker (caddr block-info))
+                 (start (+ idx (string-length marker)))
                  (end (string-contains str "```" start))
                  (raw-code (if end (substring str start end) #f)))
             (if raw-code
@@ -365,6 +365,22 @@ Prefers the LAST code block (either ```repl or ```wisp) to support LLM self-corr
                       #f))
                 #f))
           #f))))
+
+(define (extract-code response)
+  "Extract executable legacy REPL/Wisp code from RESPONSE.
+Prefers the last accepted block to support model self-correction."
+  (extract-code-block response '((repl . "```repl") (wisp . "```wisp"))))
+
+(define (extract-gcas-action response)
+  "Extract a production GCAS Action from RESPONSE.
+
+`scheme' is accepted as a provider-normalization alias for `repl'. The Action
+still crosses the same policy, sandbox execution, evidence, and verification
+boundaries; legacy notebook extraction remains strict."
+  (extract-code-block response
+                      '((repl . "```repl")
+                        (wisp . "```wisp")
+                        (scheme . "```scheme"))))
 
 (define (extract-delegation response)
   "Extracts delegation S-expression from the LLM response."

@@ -195,6 +195,9 @@ make gcas-showcase
 # Run the model-free deterministic GCAS competence corpus
 make gcas-eval
 
+# Run the opt-in live-model matrix (uses GAIA_MODEL by default)
+make gcas-live-eval
+
 # Run the production GCAS-Core conformance gate, including CLI and Emacs protocol tests
 make gcas-conformance
 ```

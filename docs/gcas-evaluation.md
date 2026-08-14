@@ -63,6 +63,61 @@ terminal rate, false completion, repeated Actions, calls, tokens, and latency by
 task class. Prompt, native tool-schema, and later NCSI/J-space adapters can then
 be compared while reusing the deterministic corpus as the invariant floor.
 
+## Live-model matrix
+
+`make gcas-live-eval` implements that second layer as an opt-in benchmark. It is
+model-agnostic within GAIA's current OpenAI-compatible chat adapter: the same
+tasks, execution environment, and deterministic datum verifiers are reused for
+every configured model. It is deliberately excluded from `make check` and
+`make gcas-conformance`, so offline CI neither requires a model server nor incurs
+remote inference cost.
+
+The initial safe corpus contains arithmetic, list mapping, list filtering,
+recursive factorial, and Fibonacci tasks. It performs no filesystem mutation
+and denies permission-gated sandbox capabilities. Configure the matrix with:
+
+```sh
+# One model, one run of every task (defaults to GAIA_MODEL)
+make gcas-live-eval
+
+# Multiple models and three repetitions per model/task cell
+GAIA_EVAL_MODELS='gemma4:e2b,another-model' \
+GAIA_EVAL_REPEATS=3 \
+make gcas-live-eval
+
+# A subset, explicit reasoning mode, and a machine-readable report
+GAIA_EVAL_TASKS='arithmetic-42,fibonacci-10' \
+GAIA_EVAL_THINKING=1 \
+GAIA_EVAL_OUTPUT=/tmp/gcas-live-eval.json \
+make gcas-live-eval
+```
+
+`GAIA_LLM_URL` selects the endpoint and `GAIA_SYSTEM_PROMPT` supplies a prompt
+override, exactly as in the server. `GAIA_EVAL_THINKING` is off by default so
+the benchmark configuration is explicit. The report records endpoint, model names,
+task names, repetitions, thinking mode, the complete effective system prompt,
+per-run trajectories,
+model/task cells, and per-model totals. Token counts remain zero when an endpoint
+does not return the OpenAI `usage` object.
+
+The production Action adapter accepts `scheme` fences as a normalization alias
+for the contract's preferred `repl` fence. This is intentionally scoped to GCAS:
+the legacy notebook extractor remains strict, and normalized Actions still pass
+through policy, sandbox execution, evidence, and independent verification.
+
+An exploratory one-shot `gemma4:e2b` run on 2026-08-14 first scored 0/5 because
+all five otherwise actionable responses used `scheme` fences. After adapter
+normalization, the identical matrix scored 3/5: arithmetic and factorial passed
+on the first Action, list mapping passed after repair, and list filtering plus
+Fibonacci exhausted the three-failure budget. All five lifecycles terminated
+correctly. This is diagnostic evidence, not a readiness baseline; repeated runs
+are still required.
+
+Benchmark task failure does not make the command fail: a weak-model result is
+valid measurement. The command exits non-zero only when a GCAS lifecycle
+invariant fails. Readiness thresholds should be applied after a repeated baseline
+has been collected, rather than chosen from a single trajectory.
+
 ## Extending the corpus
 
 Add a fixture when introducing a new terminal outcome, repair branch, budget,

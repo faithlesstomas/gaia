@@ -47,6 +47,7 @@
          "test-goal-verifier.scm"
          "test-production-processors.scm"
          "test-gcas-eval-corpus.scm"
+         "test-gcas-live-evaluation.scm"
          "test-cognitive-memory.scm"
          "test-deliberative-processor.scm"
          "test-gcas-showcase.scm")))

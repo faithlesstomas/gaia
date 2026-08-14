@@ -260,7 +260,7 @@
                       (('error type message) (fail type message))))
                   #:catch (lambda (err)
                             (fail 'runtime (format #f "~a" err))))))
-          #:extract-action extract-code
+          #:extract-action extract-gcas-action
           #:completion-criteria (goal-completion-criteria task)
           #:verify-goal (select-goal-verifier task)
           #:on-client-event event-sink
