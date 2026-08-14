@@ -85,17 +85,15 @@
            "my favourite" "my favorite" "moim ulubionym" "lubię"))))
 
 (define (make-user-memory-claim text)
-  "Represent an explicit user assertion as verified user testimony.
+  "Represent an explicit user assertion as an unverified Observation.
 
-VERIFIED here means that GAIA can verify the user supplied the statement; it
-does not promote the statement to an independently established world fact."
+The system observed that the user supplied the statement; it does not thereby
+accept the proposition expressed by the statement as a verified world fact."
   (and (string? text)
        (user-assertion? text)
        (make-cognitive-object
-        'claim text
+        'observation (string-append "User stated: " text)
         #:provenance 'USER
-        #:epistemic-status 'ACCEPTED
-        #:verification-status 'VERIFIED
         #:relations '((memory-role . USER_TESTIMONY)))))
 
 (define* (memory-retrieve memory goal #:key (limit 5))
@@ -108,12 +106,20 @@ order. Empty-overlap memories are excluded to prevent transcript-like flooding."
          (take (sort scored (lambda (left right) (> (cdr left) (cdr right))))
                (min limit (length scored))))))
 
+(define (temporally-valid? co)
+  (let ((now (current-time)))
+    (and (<= (co-valid-from co) now)
+         (not (co-invalidated-by co))
+         (or (eq? (co-valid-to co) 'INF)
+             (>= (co-valid-to co) now)))))
+
 (define* (memory-retrieve-facts memory goal #:key (limit 3) (minimum-overlap 2))
   "Return accepted facts sufficiently related to GOAL for memory-only answering."
   (let ((scored
          (filter (lambda (pair) (>= (cdr pair) minimum-overlap))
                  (map (lambda (co) (cons co (overlap-score goal co)))
-                      (filter fact? (memory-objects memory))))))
+                      (filter (lambda (co) (and (fact? co) (temporally-valid? co)))
+                              (memory-objects memory))))))
     (map car
          (take (sort scored (lambda (left right) (> (cdr left) (cdr right))))
                (min limit (length scored))))))

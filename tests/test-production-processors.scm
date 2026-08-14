@@ -168,7 +168,7 @@
                     '(ActionCompleted GoalVerificationCompleted ConflictDetected
                       ReflectionRaised GoalVerified GoalCompleted AnswerRequested)))))))
 
-(test-assert "accepted user testimony answers a later Goal through structured memory"
+(test-assert "user testimony is context but cannot bypass Goal verification"
   (let ((session (make-cognitive-session #:workspace-capacity 3))
         (generation-calls 0)
         (second-finish #f))
@@ -184,19 +184,18 @@
             session "Jak mam na imię?"
             #:generate (lambda (prompt succeed fail)
                          (set! generation-calls (+ generation-calls 1))
-                         (succeed "This callback should not be needed."))
+                         (succeed "No independently verifiable action is available."))
             #:extract-action (lambda (response) #f)
             #:execute (lambda args (error "memory answer must not execute"))
             #:on-finished
             (lambda (outcome final-text hypothesis-text)
               (set! second-finish (list outcome final-text))))))
       (let ((types (map event-type (state-events (session-state session)))))
-        (and (eq? (process-outcome process) 'COMPLETED)
-             (eq? (car second-finish) 'COMPLETED)
-             (string-contains (cadr second-finish) "Mam na imię Tomasz")
-             (= generation-calls 1)
-             (memq 'GoalVerified types)
-             (memq 'GoalCompleted types))))))
+        (and (eq? (process-outcome process) 'INSUFFICIENT_INFORMATION)
+             (eq? (car second-finish) 'INSUFFICIENT_INFORMATION)
+             (= generation-calls 2)
+             (memq 'MemoryRetrieved types)
+             (not (memq 'GoalCompleted types)))))))
 
 (test-assert "completed evidence graph and consolidated memory survive restart"
   (let* ((state-path "/tmp/gaia-production-restart-state.scm")
@@ -258,6 +257,32 @@
                (memq 'ConflictDetected types)
                (memq 'ReflectionRaised types)
                (not (process-active? process))))))))
+
+(test-assert "a repeated Action is detected as a loop and is not executed twice"
+  (let ((session (make-cognitive-session #:workspace-capacity 2))
+        (generation-calls 0)
+        (execution-calls 0)
+        (finished #f))
+    (let ((process
+           (start-production-process!
+            session "Do not repeat a failed action"
+            #:max-replans 1
+            #:generate (lambda (prompt succeed fail)
+                         (set! generation-calls (+ generation-calls 1))
+                         (succeed "same proposal"))
+            #:extract-action (lambda (response) "(always-fails)")
+            #:execute (lambda (code succeed fail)
+                        (set! execution-calls (+ execution-calls 1))
+                        (fail 'runtime "repeatable failure"))
+            #:on-finished (lambda (outcome final-text hypothesis-text)
+                            (set! finished outcome)))))
+      (let ((types (map event-type (state-events (session-state session)))))
+        (and (not (process-active? process))
+             (eq? finished 'FAILED)
+             (= generation-calls 2)
+             (= execution-calls 1)
+             (memq 'ConflictDetected types)
+             (memq 'ReflectionRaised types))))))
 
 (test-assert "an unexecutable hypothesis terminates once without calling execution"
   (let ((session (make-cognitive-session #:workspace-capacity 8))

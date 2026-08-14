@@ -30,13 +30,35 @@
          (string-contains context "Retrieved structured memory:")
          (string-contains context "Require verification."))))
 
-(test-assert "explicit user testimony is consolidated and retrieved across turns"
+(test-assert "explicit user testimony remains an unverified observation"
   (let* ((memory (make-cognitive-memory))
-         (claim (make-user-memory-claim "Mam na imię Tomasz")))
-    (memory-store! memory claim)
-    (let ((facts (memory-retrieve-facts memory "Jak mam na imię?")))
-      (and (fact? claim)
-           (= (length facts) 1)
-           (string=? (co-content (car facts)) "Mam na imię Tomasz")))))
+         (observation (make-user-memory-claim "Mam na imię Tomasz")))
+    (memory-store! memory observation)
+    (let ((facts (memory-retrieve-facts memory "Jak mam na imię?"))
+          (retrieved (memory-retrieve memory "Jak mam na imię?")))
+      (and (eq? (co-type observation) 'observation)
+           (eq? (co-epistemic-status observation) 'UNKNOWN)
+           (eq? (co-verification-status observation) 'UNVERIFIED)
+           (null? facts)
+           (= (length retrieved) 1)))))
+
+(test-assert "expired and invalidated facts are excluded from retrieval"
+  (let* ((memory (make-cognitive-memory))
+         (now (current-time))
+         (expired (make-cognitive-object
+                   'claim "Guile arithmetic fact expired"
+                   #:provenance 'SYMBOLIC_INFERENCE
+                   #:epistemic-status 'ACCEPTED
+                   #:verification-status 'VERIFIED
+                   #:valid-from (- now 20) #:valid-to (- now 10)))
+         (invalidated (make-cognitive-object
+                       'claim "Guile arithmetic fact invalidated"
+                       #:provenance 'SYMBOLIC_INFERENCE
+                       #:epistemic-status 'ACCEPTED
+                       #:verification-status 'VERIFIED
+                       #:invalidated-by "co-refutation")))
+    (memory-store! memory expired)
+    (memory-store! memory invalidated)
+    (null? (memory-retrieve-facts memory "Guile arithmetic fact" #:minimum-overlap 2))))
 
 (test-end "gaia-cognitive-memory")

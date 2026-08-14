@@ -3,6 +3,7 @@
   #:use-module (srfi srfi-9)
   #:use-module (gaia com)
   #:use-module (gaia cognitive-bus)
+  #:use-module (gaia cognitive-control)
   #:use-module (gaia cognitive-session)
   #:export (<cognitive-processor>
             <processor-proposal>
@@ -86,7 +87,21 @@ the bus; valid returned proposals become candidates, never direct broadcasts."
          (bus-subscribe
           (session-bus session) subscription
           (lambda (event)
-            (for-each (lambda (proposal) (submit-processor-proposal! session processor proposal))
-                      ((processor-handler processor) event))
+            (let ((proposals
+                   (catch #t
+                     (lambda () ((processor-handler processor) event))
+                     (lambda (key . args)
+                       (control-record-failure! (session-control session))
+                       (session-emit!
+                        session 'ProcessorFailed
+                        `((processor . ,(processor-id processor))
+                          (event . ,(event-id event))
+                          (error-key . ,key)
+                          (details . ,(format #f "~s" args)))
+                        #:origin 'CONTROL)
+                       '()))))
+              (for-each (lambda (proposal)
+                          (submit-processor-proposal! session processor proposal))
+                        proposals))
             (when after-submit (after-submit)))))
        (processor-subscriptions processor)))

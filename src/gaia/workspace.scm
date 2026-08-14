@@ -18,7 +18,8 @@
             workspace-active
             workspace-propose!
             workspace-admit-next!
-            workspace-retract!))
+            workspace-retract!
+            workspace-clear!))
 
 ;; The workspace is bounded and separates proposal from admission.  A scheduler
 ;; calls workspace-admit-next! after Cognitive Control has selected a policy.
@@ -125,3 +126,9 @@
               (filter (lambda (entry) (not (equal? (co-id (candidate-co entry)) object-id)))
                       (car candidate-cell)))
     object-id))
+
+(define (workspace-clear! workspace)
+  "Clear active focus and every pending proposal at a process boundary."
+  (set-car! (workspace-active-cell workspace) '())
+  (set-car! (workspace-candidates-cell workspace) '())
+  'ok)

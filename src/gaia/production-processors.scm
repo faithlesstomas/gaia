@@ -23,6 +23,13 @@
   (let ((current (session-current-process session)))
     (and current (eq? current process) (process-active? process))))
 
+(define (duplicate-action? session process action-text)
+  (any (lambda (co)
+         (and (eq? (co-type co) 'action)
+              (belongs-to-process? co process)
+              (equal? (co-content co) action-text)))
+       (state-objects (session-state session))))
+
 (define* (answer-request process outcome final-text hypothesis-text
                          #:key (verified-claim #f))
   `((process-id . ,(process-id process))
@@ -264,7 +271,18 @@ during a broadcast set the flag for a subsequent round."
                  (session-emit! session 'PlanProposed co #:origin 'PLANNER)
                  (let ((action-text (assoc-ref (co-content co) 'action)))
                    (if (string? action-text)
-                       (let ((subgoal
+                       (if (duplicate-action? session process action-text)
+                           (list
+                            (make-processor-proposal
+                             (make-cognitive-object
+                              'conflict
+                              "Planner repeated an Action already attempted in this process."
+                              #:provenance 'SYMBOLIC_INFERENCE
+                              #:relations `((process . ,process-id*)
+                                            (goal . ,(co-id goal))
+                                            (repeated-action . ,action-text)))
+                             #:priority 100 #:relevance 1))
+                           (let ((subgoal
                               (make-cognitive-object
                                'goal
                                (string-append "Verify the execution observation for: " action-text)
@@ -285,7 +303,7 @@ during a broadcast set the flag for a subsequent round."
                                           (serves . ,(co-id goal))
                                           (advances . ,(co-id subgoal))))
                            #:priority 85 #:relevance 1)
-                          (make-processor-proposal subgoal #:priority 60 #:relevance 1)))
+                          (make-processor-proposal subgoal #:priority 60 #:relevance 1))))
                        (begin
                          (emit-answer! 'FAILED "FAILED: Planner produced a Plan without an Action." "")
                          '()))))
@@ -529,9 +547,18 @@ during a broadcast set the flag for a subsequent round."
 
          (lifecycle-processor
           (make-cognitive-processor
-           'CONTROL '(GoalCompleted ProcessTerminated)
+           'CONTROL '(GoalCompleted ProcessTerminated ProcessorFailed)
            (lambda (event)
-             (when (eq? (session-current-process session) process) (detach!))
+             (cond
+              ((and (eq? (event-type event) 'ProcessorFailed)
+                    (active-process? session process))
+               (emit-answer!
+                'FAILED
+                (string-append
+                 "FAILED: cognitive processor error: "
+                 (format #f "~s" (event-payload event)))
+                ""))
+              ((eq? (session-current-process session) process) (detach!)))
              '()))))
 
       (let ((processors (list memory-processor generative-processor planner-processor

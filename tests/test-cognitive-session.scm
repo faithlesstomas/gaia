@@ -92,7 +92,8 @@
                    #:provenance 'SYMBOLIC_INFERENCE
                    #:epistemic-status 'ACCEPTED
                    #:verification-status 'VERIFIED
-                   #:relations `((satisfies . ,(co-id goal))))))
+                   #:relations `((satisfies . ,(co-id goal))
+                                 (supported-by . "co-independent-evidence")))))
       (and (eq? (session-complete-goal! session claim) 'COMPLETED)
            (eq? (process-outcome process) 'COMPLETED)
            (eq? (event-type (last (state-events (session-state session))))
@@ -153,14 +154,33 @@
                           (map event-type (state-events (session-state session)))))
              (eq? (co-provenance (car plans)) 'SYMBOLIC_INFERENCE)))))
 
-  (test-assert "terminal cleanup releases capacity without deleting the cognitive record"
+  (test-assert "terminal cleanup removes active and pending proposals without deleting records"
     (let* ((session (make-cognitive-session #:workspace-capacity 1))
-           (goal (make-cognitive-object 'goal "Complete a bounded process" #:provenance 'USER)))
+           (goal (make-cognitive-object 'goal "Complete a bounded process" #:provenance 'USER))
+           (pending (make-cognitive-object 'question "Pending old work" #:provenance 'USER)))
       (session-submit! session goal #:priority 100 #:origin 'USER)
+      (session-submit! session pending #:priority 10 #:origin 'USER)
       (session-advance! session)
       (session-clear-workspace! session)
       (and (null? (workspace-active (session-workspace session)))
-           (state-has-object? (session-state session) (co-id goal))))))
+           (null? (workspace-candidates (session-workspace session)))
+           (state-has-object? (session-state session) (co-id goal))
+           (state-has-object? (session-state session) (co-id pending))))))
+
+  (test-assert "processor failures become durable semantic events"
+    (let* ((session (make-cognitive-session))
+           (broken (make-cognitive-processor
+                    'BROKEN '(GoalCreated)
+                    (lambda (event) (error "processor exploded"))))
+           (goal (make-cognitive-object 'goal "Observe processor failure" #:provenance 'USER)))
+      (attach-processor! session broken)
+      (session-emit! session 'GoalCreated goal #:origin 'CONTROL)
+      (let ((failure (find (lambda (event) (eq? (event-type event) 'ProcessorFailed))
+                           (state-events (session-state session)))))
+        (and failure
+             (eq? (assoc-ref (event-payload failure) 'processor) 'BROKEN)
+             (string-contains (assoc-ref (event-payload failure) 'details)
+                              "processor exploded")))))
 
   (test-assert "state, event log, and reproducibility record survive session restoration"
     (let* ((path "/tmp/gaia-gcas-state-test.scm")
@@ -177,7 +197,12 @@
         (delete-file path)
         (and (state-has-object? (session-state restored) (co-id result))
              (member 'ActionCompleted (map event-type (state-events (session-state restored))))
-             (= (length (filter (lambda (co) (eq? (co-type co) 'observation)) objects)) 1)))))
+             (let* ((records (filter (lambda (co) (eq? (co-type co) 'observation)) objects))
+                    (record (and (pair? records) (co-content (car records)))))
+               (and (= (length records) 1)
+                    (assoc-ref record 'environment-hash)
+                    (assoc-ref record 'output-hash)
+                    (assoc-ref record 'dependencies)))))))
 
   (test-assert "an explicitly cleared durable session does not restore old state"
     (let* ((path "/tmp/gaia-gcas-cleared-state-test.scm")

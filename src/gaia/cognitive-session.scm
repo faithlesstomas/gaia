@@ -113,6 +113,9 @@ satisfies it.  This is the sole production path to GoalCompleted."
   (let ((process (session-current-process session)))
     (unless (and process (process-active? process)
                  (fact? verified-claim)
+                 (memq (co-provenance verified-claim)
+                       '(SYMBOLIC_INFERENCE FORMAL_PROOF))
+                 (assoc-ref (co-relations verified-claim) 'supported-by)
                  (equal? (assoc-ref (co-relations verified-claim) 'satisfies)
                          (co-id (process-goal process))))
       (error "Goal completion requires a verified Claim satisfying the active Goal"
@@ -212,11 +215,9 @@ from Cognitive State."
   (workspace-retract! (session-workspace session) object-id))
 
 (define (session-clear-workspace! session)
-  "Release all active COs at a terminal boundary while preserving State and
-Memory. A later goal reconstructs its own bounded working set from them."
-  (for-each (lambda (co) (workspace-retract! (session-workspace session) (co-id co)))
-            (workspace-active (session-workspace session)))
-  'ok)
+  "Release active and pending COs at a terminal boundary while preserving
+State and Memory. No proposal from a completed process may compete in the next."
+  (workspace-clear! (session-workspace session)))
 
 (define (session-request-interrupt! session)
   "Let cognitive control terminate the active process on an explicit user stop."
@@ -238,6 +239,12 @@ Memory. A later goal reconstructs its own bounded working set from them."
        (outcome . ,outcome)
        (output . ,(co-content result-co))
        (runtime . ,environment)
+       (environment-hash . ,(number->string (hash environment 4294967295) 16))
+       (dependencies . ())
+       (parameters . ,(co-relations action-co))
+       (output-hash . ,(number->string
+                        (hash (format #f "~s" (co-content result-co)) 4294967295)
+                        16))
        (recorded-at . ,(current-time)))
      #:provenance 'EXECUTION
      #:relations `((reproduces . ,action-id)

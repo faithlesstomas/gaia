@@ -20,14 +20,14 @@ Status meanings:
 
 | GCAS-Core requirement | Status | Implemented substrate | Remaining conformance gap |
 |---|---|---|---|
-| Explicit COs, 3-axis metadata, provenance | Implemented | `gaia com` defines immutable COs with epistemic status, verification status, confidence, temporal validity, provenance, and relations. | Expand lifecycle validation as the ontology grows; this is not a current Core blocker. |
+| Explicit COs, 3-axis metadata, provenance | Implemented | `gaia com` defines immutable COs with epistemic status, verification status, confidence, temporal validity, provenance, and relations. Persisted COs are validated again on restoration. | Expand lifecycle versioning as the ontology grows; this is not a current Core blocker. |
 | Hypotheses distinct from beliefs | Implemented | LLM output begins as `HYPOTHESIS`/`UNVERIFIED`; execution success does not establish the user's original claim. | Keep accepted execution observations explicitly scoped so `BeliefUpdated` cannot be mistaken for goal verification. |
-| Bounded Workspace with selective admission/broadcast | Implemented | Control records explicit Workspace rounds, selects one pending candidate by scheduling metadata, broadcasts it, and releases active focus while preserving the CO in State. | Improve scheduling policy with novelty, urgency, information gain, and goal-aware attention. |
+| Bounded Workspace with selective admission/broadcast | Implemented | Control records explicit Workspace rounds, selects one pending candidate by scheduling metadata, broadcasts it, and releases active focus while preserving the CO in State. Terminal boundaries clear active and pending proposals so processes remain isolated. | Improve scheduling policy with novelty, urgency, information gain, and goal-aware attention. |
 | At least Generative and Deliberative processors | Implemented | Memory Retrieval, Generative, Planner, Execution, Deliberative, Goal Verifier, Answer, and Control processors subscribe through the Cognitive Bus. The orchestrator supplies asynchronous LLM, sandbox, and client adapters. | Planner currently maps one Hypothesis to at most one Action; richer planning remains future work. |
-| Memory separate from prompt history | Implemented at Core minimum | Structured CO memory is persisted separately; accepted user testimony and verified Result/Evidence/Claim chains are consolidated and selected context is reconstructed without appending chat history. | Add semantic retrieval, conflict/supersession policies, and more typed memory roles. |
+| Memory separate from prompt history | Implemented at Core minimum | Structured CO memory is persisted separately; user testimony remains an unverified Observation, verified Result/Evidence/Claim chains are consolidated, and selected context is reconstructed without appending chat history. | Add semantic retrieval, conflict/supersession policies, and more typed memory roles. |
 | Recurrent cognitive cycle with progress and loop monitoring | Implemented at bounded minimum | Every `solve` has isolated budgets and exactly-once termination. Failed actions and conflicts become Reflection COs, which trigger a bounded revised Hypothesis → Plan → linked subgoal → Action pass; Control monitors transition, failure, stall, and replan limits. A Goal Verifier decides completion from explicit evidence. | Add richer strategy switching and goal-aware progress measures. |
 | Separate execution with auditable Action/Result | Implemented | An admitted Action crosses an explicit sandbox boundary; Result/Failure links to it and receives a reproducibility observation. | Extend the policy gate beyond checking only the `action` type and add richer environment manifests after Core. |
-| Explicit uncertainty, time, and failure | Implemented | COs represent confidence and temporal validity; failure and inconclusive terminal states are durable. `/cognitive-state` exposes process outcome, completion criteria, Control counters and termination reason, Workspace, State, and Memory. | Add richer calibrated goal-level uncertainty after Core. |
+| Explicit uncertainty, time, and failure | Implemented | COs receive real creation times; expired or invalidated facts are excluded from fact retrieval. Processor failures and inconclusive terminal states are durable. `/cognitive-state` exposes process outcome, completion criteria, Control counters and termination reason, Workspace, State, and Memory. | Add richer calibrated goal-level uncertainty after Core. |
 
 ## Production behavior observed in the audit
 
@@ -43,7 +43,8 @@ The current `solve` path:
 7. routes ActionFailed and ConflictDetected through Reflection into bounded replanning;
 8. lets the independent Goal Verifier accept, reject, or leave the execution
    claim inconclusive; only an accepted verified Claim satisfying the Goal can
-   reach the Answer Processor and emit `GoalCompleted`.
+   reach the Answer Processor and emit `GoalCompleted`. Memory retrieval cannot
+   create this acceptance edge: user testimony remains an unverified Observation.
 
 The event trace drives a multi-processor recurrent production process, rather
 than merely recording direct orchestrator calls. A successful sandbox call still

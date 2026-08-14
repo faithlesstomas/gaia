@@ -48,6 +48,13 @@
   (unless (and (number? value) (<= 0 value 1))
     (error (format #f "Confidence must be a number in [0, 1]: ~s" value))))
 
+(define (valid-temporal-interval? valid-from valid-to)
+  (unless (and (number? valid-from)
+               (or (eq? valid-to 'INF)
+                   (and (number? valid-to) (>= valid-to valid-from))))
+    (error (format #f "Invalid temporal validity interval: [~s, ~s]"
+                   valid-from valid-to))))
+
 ;; Definition of Cognitive Object Record
 (define-record-type <cognitive-object>
   (%make-co id type content provenance epistemic-status verification-status confidence valid-from valid-to invalidated-by relations)
@@ -74,7 +81,7 @@
                                 (epistemic-status #f)
                                 (verification-status #f)
                                 (confidence 1.0)
-                                (valid-from 0)
+                                (valid-from #f)
                                 (valid-to 'INF)
                                 (invalidated-by #f)
                                 (relations '()))
@@ -82,7 +89,8 @@
   (valid-member? type VALID-TYPES 'Cognitive-Object-type)
   (valid-member? provenance VALID-PROVENANCES 'provenance)
   (valid-confidence? confidence)
-  (let* ((actual-id (or id (generate-co-id)))
+  (let* ((actual-valid-from (or valid-from (current-time)))
+         (actual-id (or id (generate-co-id)))
          ;; Rule 1: LLM outputs automatically carry HYPOTHESIS & UNVERIFIED unless specified
          (actual-epistemic
           (or epistemic-status
@@ -100,13 +108,14 @@
                 (else 'UNVERIFIED)))))
     (valid-member? actual-epistemic VALID-EPISTEMIC-STATUSES 'epistemic-status)
     (valid-member? actual-verification VALID-VERIFICATION-STATUSES 'verification-status)
+    (valid-temporal-interval? actual-valid-from valid-to)
     ;; An LLM proposal must cross an explicit verification/update boundary before
     ;; it can become accepted knowledge.  Provenance remains LLM afterwards.
     (when (and (eq? provenance 'LLM)
                (or (not (eq? actual-epistemic 'HYPOTHESIS))
                    (not (eq? actual-verification 'UNVERIFIED))))
       (error "LLM output must initially be HYPOTHESIS and UNVERIFIED"))
-    (%make-co actual-id type content provenance actual-epistemic actual-verification confidence valid-from valid-to invalidated-by relations)))
+    (%make-co actual-id type content provenance actual-epistemic actual-verification confidence actual-valid-from valid-to invalidated-by relations)))
 
 (define (fact? co)
   "Predicate: Returns #t if Cognitive Object is an ACCEPTED Fact with VERIFIED or FORMALLY_VERIFIED status."
@@ -168,7 +177,11 @@
     ("relations" . ,(map (lambda (p) (cons (symbol->string (car p)) (cdr p))) (co-relations co)))))
 
 (define (alist->co alist)
-  "Deserializes alist representation into a <cognitive-object> record."
+  "Deserialize and validate a persisted Cognitive Object.
+
+Restoration deliberately permits an LLM-origin object that crossed a recorded
+verification boundary after creation, but never permits malformed ontology,
+confidence, or temporal metadata to enter Cognitive State."
   (let ((id (assoc-ref alist "id"))
         (type (string->symbol (or (assoc-ref alist "type") "claim")))
         (content (or (assoc-ref alist "content") ""))
@@ -184,6 +197,15 @@
                      (if rel
                          (map (lambda (pair) (cons (string->symbol (car pair)) (cdr pair))) rel)
                          '()))))
-    (%make-co id type content prov epistemic verif conf valid-from
-              (if (and (string? valid-to-val) (string=? valid-to-val "INF")) 'INF valid-to-val)
-              invalidated-by relations)))
+    (let ((valid-to (if (and (string? valid-to-val) (string=? valid-to-val "INF"))
+                        'INF valid-to-val)))
+      (unless (and (string? id) (positive? (string-length id)))
+        (error "Persisted Cognitive Object requires a non-empty id" id))
+      (valid-member? type VALID-TYPES 'Cognitive-Object-type)
+      (valid-member? prov VALID-PROVENANCES 'provenance)
+      (valid-member? epistemic VALID-EPISTEMIC-STATUSES 'epistemic-status)
+      (valid-member? verif VALID-VERIFICATION-STATUSES 'verification-status)
+      (valid-confidence? conf)
+      (valid-temporal-interval? valid-from valid-to)
+      (%make-co id type content prov epistemic verif conf valid-from valid-to
+                invalidated-by relations))))

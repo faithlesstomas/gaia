@@ -59,6 +59,18 @@
            (eq? (co-type orig) (co-type restored))
            (string=? (co-content orig) (co-content restored))
            (eq? (co-provenance orig) (co-provenance restored))
-           (eq? (co-epistemic-status orig) (co-epistemic-status restored))))))
+           (eq? (co-epistemic-status orig) (co-epistemic-status restored)))))
+
+  (test-assert "alist->co rejects persisted metadata outside COM invariants"
+    (catch #t
+      (lambda ()
+        (alist->co
+         '(("id" . "bad-co") ("type" . "claim") ("content" . "malformed")
+           ("provenance" . "LLM") ("epistemic-status" . "HYPOTHESIS")
+           ("verification-status" . "UNVERIFIED") ("confidence" . 2.0)
+           ("valid-from" . 0) ("valid-to" . "INF")
+           ("invalidated-by" . "null") ("relations" . ())))
+        #f)
+      (lambda _ #t))))
 
 (test-end "gaia-com")
