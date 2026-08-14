@@ -182,6 +182,27 @@
              (string-contains (assoc-ref (event-payload failure) 'details)
                               "processor exploded")))))
 
+  (test-assert "trace sink observes every semantic event with current workspace state"
+    (let ((traces '()))
+      (let* ((session
+              (make-cognitive-session
+               #:trace-sink
+               (lambda (observed-session event)
+                 (set! traces
+                       (cons (list (event-type event)
+                                   (length (workspace-candidates
+                                            (session-workspace observed-session))))
+                             traces)))))
+             (goal (make-cognitive-object 'goal "Trace this goal" #:provenance 'USER)))
+        (session-submit! session goal #:priority 100 #:origin 'USER)
+        (session-run-workspace-round! session)
+        (let ((ordered (reverse traces)))
+          (and (equal? (caar ordered) 'CandidateSubmitted)
+               (= (cadar ordered) 1)
+               (member 'WorkspaceRoundStarted (map car ordered))
+               (member 'WorkspaceBroadcast (map car ordered))
+               (member 'WorkspaceRoundCompleted (map car ordered)))))))
+
   (test-assert "state, event log, and reproducibility record survive session restoration"
     (let* ((path "/tmp/gaia-gcas-state-test.scm")
            (_ (when (file-exists? path) (delete-file path)))

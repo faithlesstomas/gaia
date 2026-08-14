@@ -35,7 +35,8 @@
 ;; an LLM or a REPL: processors are attached through bus subscriptions and make
 ;; their own proposals.  That keeps cognition separate from any one processor.
 (define-record-type <cognitive-session>
-  (%make-session state workspace bus fallback-control memory state-path current-process-cell)
+  (%make-session state workspace bus fallback-control memory state-path
+                 current-process-cell trace-sink)
   cognitive-session?
   (state session-state)
   (workspace session-workspace)
@@ -43,10 +44,14 @@
   (fallback-control session-fallback-control)
   (memory session-memory)
   (state-path session-state-path)
-  (current-process-cell session-current-process-cell))
+  (current-process-cell session-current-process-cell)
+  (trace-sink session-trace-sink))
 
 (define* (make-cognitive-session #:key (workspace-capacity 7) (max-transitions 32)
-                                (memory-path #f) (state-path #f) (restore? #t))
+                                (memory-path #f) (state-path #f) (restore? #t)
+                                (trace-sink #f))
+  (unless (or (not trace-sink) (procedure? trace-sink))
+    (error "trace-sink must be a procedure or #f" trace-sink))
   (let ((session
          (%make-session (if (and state-path restore?)
                             (load-cognitive-state state-path)
@@ -56,7 +61,8 @@
                         (make-cognitive-control #:max-transitions max-transitions)
                         (make-cognitive-memory #:path memory-path #:restore? restore?)
                         state-path
-                        (list #f))))
+                        (list #f)
+                        trace-sink)))
     ;; Start an explicitly cleared session with an empty, durable state rather
     ;; than letting an old audit graph be restored later.
     (when (and state-path (not restore?))
@@ -137,6 +143,14 @@ satisfies it.  This is the sole production path to GoalCompleted."
 
 (define (emit! session event)
   (state-record-event! (session-state session) event)
+  ;; Trace before synchronous Bus delivery so nested reactions appear after
+  ;; their cause in the server log. A logging failure must never alter Bus
+  ;; semantics or stop the active process.
+  (let ((sink (session-trace-sink session)))
+    (when sink
+      (catch #t
+        (lambda () (sink session event))
+        (lambda _ #f))))
   (bus-publish (session-bus session) event)
   (session-persist! session)
   event)

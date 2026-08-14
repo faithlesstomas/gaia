@@ -184,6 +184,14 @@ LLM–REPL investigation processor, `/eval <scheme>` for direct REPL execution,
 (alias `/cognitive-objects`) to inspect the current Goal, Control budgets,
 Workspace, Cognitive Objects, and structured Memory.
 
+The server writes the same operational trace to `gaia-server.log`. Lines marked
+`[GCAS][session-id]` record every semantic event together with the relevant CO
+metadata, process and Control counters, and the pending/active Workspace IDs.
+This trace is ordered before synchronous processor reactions, so causes appear
+before the events they trigger. CO content is truncated to keep the log usable;
+the complete durable graph remains available through `/cognitive-state` and
+the session's `sessions/*.gcas-state.scm` file.
+
 **4. Curate Data for Fine-tuning:**
 
 ```bash
