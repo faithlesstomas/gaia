@@ -19,6 +19,7 @@
             proposal-risk
             proposal-cost
             proposal-uncertainty
+            submit-processor-proposal!
             attach-processor!))
 
 ;; Processors are intentionally small and stateless at this layer.  Their
@@ -63,7 +64,7 @@ processor proposals.  A subscription is an event type symbol or predicate."
     (error "Processor proposals must contain a Cognitive Object" object))
   (%make-proposal object priority relevance risk cost uncertainty))
 
-(define (submit-proposal! session processor proposal)
+(define (submit-processor-proposal! session processor proposal)
   (unless (processor-proposal? proposal)
     (error "Processor handler must return processor proposals" proposal))
   (session-submit! session (proposal-object proposal)
@@ -83,6 +84,6 @@ the bus; valid returned proposals become candidates, never direct broadcasts."
          (bus-subscribe
           (session-bus session) subscription
           (lambda (event)
-            (for-each (lambda (proposal) (submit-proposal! session processor proposal))
+            (for-each (lambda (proposal) (submit-processor-proposal! session processor proposal))
                       ((processor-handler processor) event)))))
        (processor-subscriptions processor)))

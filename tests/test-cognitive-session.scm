@@ -5,6 +5,7 @@
   #:use-module (gaia cognitive-bus)
   #:use-module (gaia cognitive-session)
   #:use-module (gaia cognitive-control)
+  #:use-module (gaia cognitive-process)
   #:use-module (gaia cognitive-state)
   #:use-module (gaia workspace)
   #:use-module (gaia cognitive-processor))
@@ -51,6 +52,36 @@
       (session-advance! session)
       (session-advance! session)
       (event-payload (last (state-events (session-state session)))))))
+
+(test-group "per-goal-process-lifecycle"
+  (test-assert "each Goal receives an isolated Control budget"
+    (let* ((session (make-cognitive-session #:max-transitions 99))
+           (first-goal (make-cognitive-object 'goal "First process" #:provenance 'USER))
+           (first (session-start-process! session first-goal "Complete the first process"
+                                          #:max-transitions 1)))
+      (session-submit! session first-goal #:origin 'USER)
+      (session-advance! session)
+      (let ((first-count (control-transition-count (process-control first))))
+        (session-finish-process! session 'INCONCLUSIVE)
+        (let* ((second-goal (make-cognitive-object 'goal "Second process" #:provenance 'USER))
+               (second (session-start-process! session second-goal "Complete the second process"
+                                               #:max-transitions 3)))
+          (and (= first-count 1)
+               (= (control-transition-count (process-control second)) 0)
+               (not (eq? (process-control first) (process-control second))))))))
+
+  (test-assert "a process emits exactly one terminal event"
+    (let* ((session (make-cognitive-session))
+           (goal (make-cognitive-object 'goal "Exactly once" #:provenance 'USER)))
+      (session-start-process! session goal "Emit one terminal outcome")
+      (session-finish-process! session 'FAILED)
+      (let ((second-result (session-finish-process! session 'INCONCLUSIVE))
+            (terminals (filter (lambda (event)
+                                 (memq (event-type event) '(GoalCompleted ProcessTerminated)))
+                               (state-events (session-state session)))))
+        (and (not second-result)
+             (= (length terminals) 1)
+             (eq? (event-payload (car terminals)) 'FAILED))))))
 
 (test-group "workspace-policy-and-processors"
   (test-assert "control selects the safer, more relevant candidate and enforces workspace capacity"

@@ -6,9 +6,9 @@
 
 **GAIA** is a local-first project implementing the [General Cognitive Architecture Specification (GCAS)](gcas.md).
 The current codebase provides persistent cognitive state, explicit epistemic provenance, a bounded Workspace substrate,
-processor contracts, and an auditable execution environment built in **GNU Guile**. Production `solve` is still being migrated
-from a centrally orchestrated single-pass LLM pipeline to a recurrent, event-driven GCAS-Core process; the project does not yet
-claim operational GCAS-Core conformance.
+processor contracts, and an auditable execution environment built in **GNU Guile**. Production `solve` is now assembled from
+processors reacting through the Cognitive Bus, but remains single-pass: Workspace admission is immediate and Result/Failure does
+not yet trigger replanning. The project therefore does not yet claim operational GCAS-Core conformance.
 
 Thanks to the Guile language, GAIA treats code as data (homoiconicity), enabling structural validation,
 sandboxed evaluation, and white-box auditability. These mechanisms constrain generated code; they do not eliminate LLM errors.
@@ -46,8 +46,9 @@ Question / Environment → Cognitive Objects → Workspace competition
 ```
 
 In the current transitional `solve` path, LLM output begins as a hypothesis and sandbox execution crosses an explicit
-Action/Result boundary. State and event traces are durable, but production processors are still invoked directly by the session
-orchestrator, Workspace competition is normally degenerate, and there is no feedback-driven replanning cycle. See
+Action/Result boundary. State and event traces are durable, and Memory, Generative, Planner, Execution, Deliberative, Answer,
+and Control processors react through the Cognitive Bus. Workspace competition is still normally degenerate and there is no
+feedback-driven replanning cycle. See
 [the conformance gap audit](docs/gcas-core-conformance.md) for the exact status and [gcas.md](gcas.md) for the normative specification.
 
 ## RLM as a compatibility and investigation capability
@@ -81,7 +82,7 @@ GAIA is designed with a **Kernel + Pluggable Modules** architecture, built on to
 ## Key Features
 
 * **Client-Server Architecture:** Native Rust CLI client connected to a headless Guile Scheme engine over UNIX sockets.
-* **GCAS substrate:** Durable CO/event state, bounded Workspace APIs, Control primitives, structured memory, and auditable execution; recurrent production coordination is in progress.
+* **GCAS substrate:** Per-Goal process lifecycle, Bus-attached production processors, durable CO/event state, bounded Workspace APIs, structured memory, and auditable execution; recurrent coordination is in progress.
 * **Investigation toolkit:** Persistent Guile REPL and sandbox for RLM-style exploration of large or external data.
 * **Safety Validation:** AST-level recursive scan of LLM-generated code for banned primitives before execution.
 * **Multi-Model Support:** Hot-swappable LLM backends via LiteLLM (Gemma, Ollama, Gemini, Anthropic).

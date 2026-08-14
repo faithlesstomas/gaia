@@ -12,8 +12,9 @@
 GAIA has a functional legacy RLM-style investigation loop, persistent Guile REPL environment, safety validation,
 trajectory logging, and LiteLLM integration. It also has a substantial GCAS substrate: Cognitive Objects, durable
 state and events, a bounded Workspace implementation, Control primitives, structured memory, and auditable
-Action/Result execution. The production `solve` path is still a centrally orchestrated single-pass pipeline, so
-GAIA does not yet claim GCAS-Core conformance.
+Action/Result execution. Production `solve` is now assembled from Bus-attached processors with a per-Goal lifecycle, but it is
+still single-pass: admission is immediate and outcomes cannot yet cause replanning. GAIA therefore does not yet claim GCAS-Core
+conformance.
 
 **Architecture:** Rust Client - GAIA Server (Guile REPL) - LiteLLM Proxy - LLM backends (Ollama, Lemonade, external LLM API etc.)
 
@@ -64,8 +65,8 @@ The legacy RLM loop is retained only as a compatibility and long-context investi
 - [x] **Cognitive Object Model** — Validated COs carry provenance, epistemic and verification statuses, temporal validity, confidence, and relations.
 - [x] **Session Cognitive State** — Each server session owns durable CO state and an event log. Action outcomes receive linked reproducibility observations.
 - [/] **Bounded Global Workspace** — Capacity, proposal metadata, scoring, admission, and broadcast exist. Production `solve` immediately advances one submitted CO at a time, so meaningful multi-candidate competition remains.
-- [/] **Cognitive Control** — Transition, progress, stall, failure, and interruption monitoring exist. Budgets must move from the long-lived session to an explicit per-Goal cognitive process, with terminal state preventing late callbacks.
-- [/] **Production processor assembly** — Processor and bus subscription contracts exist, but production `solve` invokes the LLM, executor, and deliberation directly. Planner and metacognition are currently labels rather than attached processors.
+- [x] **Cognitive Process and Control lifecycle** — Each `solve` owns an explicit Goal process, completion criteria, isolated Control budgets, exactly-once terminal state, interruption cleanup, and rejection of late callbacks.
+- [x] **Production processor assembly** — Memory Retrieval, Generative, Planner, Execution, Deliberative, Answer, and Control processors are attached to the Cognitive Bus. The server orchestrator now supplies only LLM/sandbox/client adapters and session history persistence for `solve`.
 - [x] **Execution boundary** — Default `solve` and direct REPL cross explicit Action → Result/Failure boundaries with auditable links and reproduction observations. Richer capability policy remains post-Core hardening.
 - [/] **Memory and context reconstruction** — Durable structured memory and transcript-free context reconstruction exist. Evidence/Claim consolidation, typed memory roles, and useful cross-turn retrieval remain.
 - [/] **Recurrent cognitive cycle** — The deterministic showcase exercises the target event vocabulary, but production `solve` is linear and cannot replan after Result, Failure, Conflict, or Reflection.
@@ -76,9 +77,9 @@ The detailed gap analysis and conformance gate are maintained in [docs/gcas-core
 
 ### Operational completion sequence
 
-1. **Cognitive Process lifecycle** — Introduce a process object containing Goal,
+1. **[Completed] Cognitive Process lifecycle** — Introduce a process object containing Goal,
    completion criteria, per-process budgets, progress state, and one terminal outcome.
-2. **Event-driven processor assembly** — Attach Planner, Memory Retrieval,
+2. **[Completed] Event-driven processor assembly** — Attach Planner, Memory Retrieval,
    Generative, Execution, Deliberative, and Answer processors to the session Bus.
    Reduce the session orchestrator to lifecycle and client transport duties.
 3. **Workspace scheduling rounds** — Collect proposals before admission, perform
@@ -159,7 +160,7 @@ Hardening the agentic loop to handle syntax constraints of smaller local models 
 - [ ] **STI/LTI Memory** — Implement Short-Term Importance (STI) and Long-Term Importance (LTI) weights for memory candidates. Decimate STI asynchronously after cognitive process transitions. | *→ gaia-sci: Cognitive State Serialization*
 - [ ] **J-space to AtomSpace Mapping** — Integrate Jacobian Lens (J-lens) token projection weights directly with the Goblins-based AtomSpace. Use dynamic activation of J-space vectors during model forward passes to automatically adjust STI values of symbolic nodes in active memory. | *→ gaia-proof: J-space Guided Theorem Proving*
 - [ ] **J-lens Activation Injection** — Use the J-lens intervention protocol (steering/patching) to inject symbolic states and REPL errors directly into the LLM's continuous workspace layers, bypassing context window clutter and directing model focus natively. | *→ K3: CRT, gaia-proof: J-space Guided Theorem Proving*
-- [/] **Context Reconstruction** — Transitional `solve` builds a prompt from the current goal, admitted Workspace COs, lexically selected structured memories, and active constraints without appending the transcript. Production integration, richer retrieval, and evidence/claim consolidation remain.
+- [/] **Context Reconstruction** — Production `solve` reconstructs a prompt from the current goal, admitted Workspace COs, lexically selected structured memories, and active constraints without appending the transcript. Richer retrieval and evidence/claim consolidation remain.
 - [ ] **G-Expressions ("Context Teleportation")** — Use GNU Guix's G-expressions (`#~`) to serialize variable contexts and modules when spawning sub-agents. | *→ gaia-os: Guix Containers, gaia-sci: Cognitive State Serialization*
 - [ ] **Governed self-modification** — Route proposals to modify procedures, policies, models, or architecture through the GCAS proposal, sandbox, verification, approval, deployment, and rollback pipeline. | *→ Learning & evolution*
 - [ ] **AND/OR Tree State Orchestration** — Refactor session orchestration to track nested tasks in a tree format (delegations as AND nodes; alternative execution pathways as OR nodes), enabling backpropagation of goal success/failure and clean transactional rollbacks. | *→ gaia-proof: Global Goal Caching*

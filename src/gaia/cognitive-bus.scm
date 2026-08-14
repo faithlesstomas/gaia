@@ -26,6 +26,7 @@
             make-cognitive-bus
             cognitive-bus?
             bus-subscribe
+            bus-unsubscribe
             bus-publish
             bus-retract
             bus-supersede
@@ -99,6 +100,12 @@
          (cell (bus-subscribers-cell bus)))
     (set-car! cell (cons sub (car cell)))
     sub))
+
+(define (bus-unsubscribe bus subscription)
+  "Remove the exact subscription token returned by bus-subscribe."
+  (let ((cell (bus-subscribers-cell bus)))
+    (set-car! cell (delq subscription (car cell))))
+  'ok)
 
 (define (bus-publish bus event-or-co)
   "Publishes a Cognitive Event or Cognitive Object to all matching subscribers on the bus."

@@ -569,7 +569,7 @@
                          (string-contains output "notebook-done")
                          (string-contains output "ActionCompleted"))))))
 
-            ;; 6. The default solve command is a single GCAS-controlled cycle.
+            ;; 6. The default solve command is assembled from Bus processors.
             (let* ((sandbox (spawn ^repl-sandbox "direct-solve-session" (lambda _ #t) (lambda _ #t) '()))
                    (llm-calls 0)
                    (mock-llm
@@ -589,7 +589,7 @@
                    (mock-socket (open-output-string))
                    (mock-channel #f)
                    (orch (spawn ^session-orchestrator "direct-solve-session" mock-socket mock-channel (lambda (expr) #t) sandbox agent mock-llm '() "gemma4:e2b" #t)))
-              (test-assert "direct-orchestrator: solve completes Evidence and deliberation, then reports an explicit inconclusive outcome"
+              (test-assert "direct-orchestrator: solve is driven by production Bus processors"
                 (begin
                   (<- orch 'handle-message '(solve "run this solve"))
                   (run-turns-synchronously)
@@ -599,12 +599,15 @@
                     (and (string-contains output "code")
                          (string-contains output "result")
                          (string-contains output "final")
+                         (string-contains output "GoalCreated")
+                         (string-contains output "MemoryRetrieved")
                          (string-contains output "HypothesisProposed")
                          (string-contains output "ActionRequested")
                          (string-contains output "ActionCompleted")
                          (string-contains output "EvidenceFound")
                          (string-contains output "BeliefUpdated")
                          (string-contains output "ReflectionRaised")
+                         (string-contains output "AnswerRequested")
                          (string-contains output "ProcessTerminated")
                          (string-contains output "INCONCLUSIVE")
                          (= llm-calls 1))))))

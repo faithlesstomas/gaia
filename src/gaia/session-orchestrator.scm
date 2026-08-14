@@ -14,9 +14,7 @@
   #:use-module (gaia cognitive-session)
   #:use-module (gaia cognitive-state)
   #:use-module (gaia cognitive-bus)
-  #:use-module (gaia cognitive-memory)
-  #:use-module (gaia workspace)
-  #:use-module (gaia deliberative-processor)
+  #:use-module (gaia production-processors)
   #:export (^session-orchestrator))
 
 (define (clean-history history)
@@ -49,12 +47,6 @@
            (type . ,(event-type event))
            (origin . ,(event-origin event))))
        (state-events (session-state cognitive-session))))
-
-(define (finish-cognitive-process! cognitive-session outcome)
-  "End one cognitive process and release bounded working-state capacity.
-The CO graph and durable memory remain available for audit and retrieval."
-  (session-emit! cognitive-session 'ProcessTerminated outcome #:origin 'CONTROL)
-  (session-clear-workspace! cognitive-session))
 
 ;; Session Orchestrator Actor
 (define-actor (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model thinking #:optional (workspace-dir #f) (cognitive-session (make-cognitive-session #:memory-path (string-append "sessions/" session-id ".gcas-memory.scm") #:state-path (string-append "sessions/" session-id ".gcas-state.scm"))))
@@ -159,96 +151,50 @@ The CO graph and durable memory remain available for audit and retrieval."
 
       (('solve task)
        (gaia-log (format #f "[SERVER] Received solve task: ~a" task))
-       (let ((question-co (make-cognitive-object 'question task #:provenance 'USER))
-             (goal-co (make-cognitive-object 'goal task #:provenance 'USER)))
-         (submit-cognitive-object! cognitive-session question-co 10 'USER)
-         (submit-cognitive-object! cognitive-session goal-co 100 'USER)
-         (memory-store! (session-memory cognitive-session) question-co)
-         (memory-store! (session-memory cognitive-session) goal-co)
-         (let* ((selected-memory (memory-retrieve (session-memory cognitive-session) task))
-                (context (reconstruct-context goal-co
-                                              (workspace-active (session-workspace cognitive-session))
-                                              selected-memory
-                                              #:constraints '("Use an explicit Action before requesting execution."
-                                                              "Do not present an execution result as a world fact without verification.")))
-                (event-sink (lambda (event) (send-event client-socket event)))
-                ;; History remains an episodic record.  It is not prompt memory.
-                (chat-promise (<- llm-client 'chat session-id context model
-                                  (get-solver-system-prompt) thinking '() event-sink)))
-         (on chat-promise
-             (lambda (response)
-               (let* ((payload (assoc-ref response "payload"))
-                      (err (assoc-ref response "error"))
-                      (response-text (if payload (assoc-ref payload "content")
-                                         (string-append "Error from LLM API: "
-                                                        (if (string? err) err (format #f "~a" err))))))
-                 (if (and err (string=? err "user-interrupt"))
-                     (send-event client-socket `(error "user-interrupt"))
-                     (let* ((hypothesis-co (make-cognitive-object 'hypothesis response-text #:provenance 'LLM))
-                            (action-code (extract-code response-text))
-                            (updated-history (append history
-                                                     (list `(("role" . "user") ("content" . ,task))
-                                                           `(("role" . "assistant") ("content" . ,response-text))))))
-                       (submit-cognitive-object! cognitive-session hypothesis-co 70 'LLM)
-                       (session-emit! cognitive-session 'HypothesisProposed hypothesis-co #:origin 'LLM)
-                       (if (not action-code)
-                           (begin
-                             (save-session session-id updated-history)
-                             (send-event client-socket
-                                         `(final ,(string-append
-                                                   "INSUFFICIENT_INFORMATION: the model produced an unverified hypothesis.\n"
-                                                   (clean-assistant-content response-text))))
-                             (<- self 'update-history updated-history)
-                             (finish-cognitive-process! cognitive-session 'INSUFFICIENT_INFORMATION))
-                           (let ((action-co (make-cognitive-object 'action action-code #:provenance 'LLM
-                                                                    #:relations `((tests . ,(co-id hypothesis-co))))))
-                             (submit-cognitive-object! cognitive-session action-co 85 'PLANNER)
-                             (session-emit! cognitive-session 'ActionRequested action-co #:origin 'CONTROL)
-                             (send-event client-socket `(code ,action-code))
-                             (let ((eval-promise (<- sandbox-actor 'eval action-code)))
-                               (on eval-promise
-                                   (lambda (eval-res)
-                                     (match eval-res
-                                       (('ok res)
-                                        (let ((result-co
-                                               (make-cognitive-object 'result res #:provenance 'REPL
-                                                                      #:relations `((produced-by . ,(co-id action-co))))))
-                                          (session-record-result! cognitive-session (co-id action-co) result-co)
-                                          (let ((observation-claim
-                                                 (deliberate-execution!
-                                                  cognitive-session action-co result-co
-                                                  (lambda (approved-action observed-result)
-                                                    ;; This verifies only the bounded observation:
-                                                    ;; the approved Action produced this REPL Result.
-                                                    (and (eq? (co-type approved-action) 'action)
-                                                         (eq? (co-type observed-result) 'result)
-                                                         (assoc-ref (co-relations observed-result) 'produced-by)))
-                                                  #:claim-content
-                                                  (string-append "The approved action produced the observed REPL output: " res))))
-                                            (session-emit! cognitive-session 'ReflectionRaised observation-claim #:origin 'METACOGNITION)
-                                            (save-session session-id updated-history)
-                                            (send-event client-socket `(result ,res))
-                                            (send-event client-socket
-                                                        `(final ,(string-append
-                                                                  "INCONCLUSIVE: verified execution observation recorded.\n"
-                                                                  (co-content observation-claim)
-                                                                  "\nThe original question is not accepted as true without independent evidence.")))
-                                            (<- self 'update-history updated-history)
-                                            (finish-cognitive-process! cognitive-session 'INCONCLUSIVE))))
-                                       (('error type msg)
-                                        (let ((err-msg (string-append "Runtime Error (" (symbol->string type) "): " msg)))
-                                          (let ((failure-co
-                                                 (make-cognitive-object 'result err-msg #:provenance 'REPL
-                                                                        #:relations `((produced-by . ,(co-id action-co))))))
-                                            (session-record-failure! cognitive-session (co-id action-co) failure-co)
-                                          (send-event client-socket `(repl-error ,err-msg))
-                                          (send-event client-socket `(final ,(string-append "GCAS action failed: " err-msg)))
-                                            (session-emit! cognitive-session 'ReflectionRaised failure-co #:origin 'METACOGNITION)
-                                            (finish-cognitive-process! cognitive-session 'FAILED)))))
-                                   #:catch (lambda (err)
-                                             (send-event client-socket `(error ,(format #f "GCAS action execution crash: ~a" err)))))))))))
-             #:catch (lambda (err)
-                       (send-event client-socket `(error ,(format #f "LLM request failed: ~a" err))))))))))
+       (let ((event-sink (lambda (event) (send-event client-socket event))))
+         (start-production-process!
+          cognitive-session task
+          #:generate
+          (lambda (context succeed fail)
+            ;; The Generative Processor receives reconstructed cognitive context,
+            ;; never the transcript. The actor is only an asynchronous adapter.
+            (let ((chat-promise (<- llm-client 'chat session-id context model
+                                     (get-solver-system-prompt) thinking '() event-sink)))
+              (on chat-promise
+                  (lambda (response)
+                    (let ((payload (assoc-ref response "payload"))
+                          (err (assoc-ref response "error")))
+                      (if (and payload (not err))
+                          (succeed (assoc-ref payload "content"))
+                          (fail (if (string? err) err (format #f "~a" err))))))
+                  #:catch (lambda (err) (fail (format #f "~a" err))))))
+          #:execute
+          (lambda (action-code succeed fail)
+            ;; The Execution Processor owns ActionRequested/Result semantics;
+            ;; this closure only adapts the Goblins sandbox vow.
+            (let ((eval-promise (<- sandbox-actor 'eval action-code)))
+              (on eval-promise
+                  (lambda (eval-res)
+                    (match eval-res
+                      (('ok result) (succeed result))
+                      (('error type message) (fail type message))))
+                  #:catch (lambda (err)
+                            (fail 'runtime (format #f "~a" err))))))
+          #:extract-action extract-code
+          #:on-client-event event-sink
+          #:on-finished
+          (lambda (outcome final-text hypothesis-text)
+            (let ((updated-history
+                   (append history
+                           (list `(("role" . "user") ("content" . ,task))
+                                 `(("role" . "assistant")
+                                   ("content" . ,hypothesis-text))))))
+              (save-session session-id updated-history)
+              (with-output-to-file ".last_session" (lambda () (display session-id)))
+              (send-event client-socket `(final ,(if (eq? outcome 'INSUFFICIENT_INFORMATION)
+                                                     (clean-assistant-content final-text)
+                                                     final-text)))
+              (<- self 'update-history updated-history))))))
 
       ;; Explicit compatibility path for the legacy recursive LLM–REPL loop.
       ;; It is an investigation processor, not the default cognitive control loop.

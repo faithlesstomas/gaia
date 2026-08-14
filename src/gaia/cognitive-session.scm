@@ -5,6 +5,7 @@
   #:use-module (gaia cognitive-state)
   #:use-module (gaia workspace)
   #:use-module (gaia cognitive-control)
+  #:use-module (gaia cognitive-process)
   #:use-module (gaia cognitive-memory)
   #:export (<cognitive-session>
             make-cognitive-session
@@ -13,6 +14,9 @@
             session-workspace
             session-bus
             session-control
+            session-current-process
+            session-start-process!
+            session-finish-process!
             session-memory
             session-state-path
             session-persist!
@@ -29,14 +33,15 @@
 ;; an LLM or a REPL: processors are attached through bus subscriptions and make
 ;; their own proposals.  That keeps cognition separate from any one processor.
 (define-record-type <cognitive-session>
-  (%make-session state workspace bus control memory state-path)
+  (%make-session state workspace bus fallback-control memory state-path current-process-cell)
   cognitive-session?
   (state session-state)
   (workspace session-workspace)
   (bus session-bus)
-  (control session-control)
+  (fallback-control session-fallback-control)
   (memory session-memory)
-  (state-path session-state-path))
+  (state-path session-state-path)
+  (current-process-cell session-current-process-cell))
 
 (define* (make-cognitive-session #:key (workspace-capacity 7) (max-transitions 32)
                                 (memory-path #f) (state-path #f) (restore? #t))
@@ -48,12 +53,55 @@
                         (make-cognitive-bus)
                         (make-cognitive-control #:max-transitions max-transitions)
                         (make-cognitive-memory #:path memory-path #:restore? restore?)
-                        state-path)))
+                        state-path
+                        (list #f))))
     ;; Start an explicitly cleared session with an empty, durable state rather
     ;; than letting an old audit graph be restored later.
     (when (and state-path (not restore?))
       (session-persist! session))
     session))
+
+(define (session-current-process session)
+  (car (session-current-process-cell session)))
+
+(define (session-control session)
+  (let ((process (session-current-process session)))
+    (if (and process (process-active? process))
+        (process-control process)
+        (session-fallback-control session))))
+
+(define* (session-start-process! session goal completion-criteria
+                                 #:key
+                                 (max-transitions 32)
+                                 (max-stalled-transitions 8)
+                                 (max-failures 3))
+  "Start one isolated Goal lifecycle. A session may have at most one active
+process, but retains every previous Goal and terminal event for audit."
+  (let ((current (session-current-process session)))
+    (when (and current (process-active? current))
+      (error "Cannot start a second Cognitive Process while one is active"
+             (process-id current))))
+  (let ((process (make-cognitive-process
+                  goal completion-criteria
+                  #:max-transitions max-transitions
+                  #:max-stalled-transitions max-stalled-transitions
+                  #:max-failures max-failures)))
+    (set-car! (session-current-process-cell session) process)
+    process))
+
+(define (session-finish-process! session outcome)
+  "Finish the active process exactly once and emit its durable terminal event."
+  (let ((process (session-current-process session)))
+    (and process
+         (process-finish! process outcome)
+         (begin
+           (emit! session
+                  (make-cognitive-event
+                   (if (eq? outcome 'COMPLETED) 'GoalCompleted 'ProcessTerminated)
+                   (if (eq? outcome 'COMPLETED) (process-goal process) outcome)
+                   #:origin 'CONTROL))
+           (session-clear-workspace! session)
+           outcome))))
 
 (define (session-persist! session)
   (let ((path (session-state-path session)))
@@ -92,7 +140,8 @@
 (define (session-advance! session)
   (let ((reason (control-termination-reason (session-control session))))
     (if reason
-        (emit! session (make-cognitive-event 'ProcessTerminated reason #:origin 'CONTROL))
+        (or (session-finish-process! session reason)
+            (emit! session (make-cognitive-event 'ProcessTerminated reason #:origin 'CONTROL)))
         (let ((admitted (workspace-admit-next!
                          (session-workspace session)
                          #:selector (lambda (candidates)
@@ -120,8 +169,12 @@ Memory. A later goal reconstructs its own bounded working set from them."
 (define (session-request-interrupt! session)
   "Let cognitive control terminate the active process on an explicit user stop."
   (let ((reason (control-request-interrupt! (session-control session))))
-    (emit! session (make-cognitive-event 'ProcessTerminated reason #:origin 'CONTROL))
-    (session-clear-workspace! session)
+    (if (and (session-current-process session)
+             (process-active? (session-current-process session)))
+        (session-finish-process! session reason)
+        (begin
+          (emit! session (make-cognitive-event 'ProcessTerminated reason #:origin 'CONTROL))
+          (session-clear-workspace! session)))
     reason))
 
 (define (make-reproducibility-record session action-id result-co outcome environment)
@@ -145,8 +198,8 @@ Memory. A later goal reconstructs its own bounded working set from them."
   (state-store! (session-state session) result-co)
   (state-store! (session-state session)
                 (make-reproducibility-record session action-id result-co 'SUCCEEDED environment))
-  (emit! session (make-cognitive-event 'ActionCompleted result-co #:origin 'EXECUTION))
   (control-record-progress! (session-control session))
+  (emit! session (make-cognitive-event 'ActionCompleted result-co #:origin 'EXECUTION))
   result-co)
 
 (define* (session-record-failure! session action-id failure-co #:key (environment "Guile sandbox"))
@@ -156,6 +209,6 @@ Memory. A later goal reconstructs its own bounded working set from them."
   (state-store! (session-state session) failure-co)
   (state-store! (session-state session)
                 (make-reproducibility-record session action-id failure-co 'FAILED environment))
-  (emit! session (make-cognitive-event 'ActionFailed failure-co #:origin 'EXECUTION))
   (control-record-failure! (session-control session))
+  (emit! session (make-cognitive-event 'ActionFailed failure-co #:origin 'EXECUTION))
   failure-co)

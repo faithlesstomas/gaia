@@ -35,6 +35,20 @@
         (bus-publish bus (make-hypothesis-proposed-event co2))
         (= hypothesis-count 1))))
 
+  (test-assert "bus-unsubscribe removes the exact subscription"
+    (let* ((bus (make-cognitive-bus))
+           (received 0)
+           (subscription
+            (bus-subscribe
+             bus 'GoalCreated
+             (lambda (event) (set! received (+ received 1))))))
+      (bus-unsubscribe bus subscription)
+      (bus-publish
+       bus
+       (make-goal-created-event
+        (make-cognitive-object 'goal "Detached process")))
+      (= received 0)))
+
   (test-assert "bus-retract and bus-supersede emit semantic control events"
     (let ((bus (make-cognitive-bus))
           (retracted-id #f)
