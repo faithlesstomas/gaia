@@ -59,7 +59,8 @@ failure/conflict feedback can produce a revised hypothesis, Plan, and Action und
 testimony are stored separately from chat transcripts and can be retrieved across turns. See
 [the conformance audit](docs/gcas-core-conformance.md) for the exact scope,
 [the prompt projection design](docs/gcas-prompt-projection.md) for what the model
-currently receives, and [gcas.md](gcas.md) for the normative specification.
+currently receives, [the GCAS 0.2 research synthesis](docs/gcas-0.2-research-synthesis.md)
+for the consolidated rationale, and [gcas.md](gcas.md) for the normative specification.
 
 Production `solve` does **not** replay chat history to the model. It currently
 sends a compact GCAS-specific Action contract plus a transient projection reconstructed
