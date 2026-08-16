@@ -133,7 +133,9 @@ NCSI/J-space
 remains a planned neural adapter and research direction, not a blocker for this
 milestone: textual prompt projection is the currently available
 cognitive-to-neural control channel and should first be made correct and
-measurable.
+measurable. The cross-project architecture, ownership boundaries, acceptance
+gates, and canonical milestone checklist are maintained in
+[docs/ncsi-jlens-integration.md](docs/ncsi-jlens-integration.md).
 
 ### Legacy RLM status
 
@@ -198,8 +200,9 @@ Hardening the agentic loop to handle syntax constraints of smaller local models 
 
 - [/] **Atoms as Goblins Actors** — Leverage the `guile-goblins` library to create a lightweight, local AtomSpace *specifically for cognitive working memory (active relevance context, up to ~1000 nodes)*. Each semantic node and relation becomes an autonomous actor, leveraging Goblins' transactional vats (for automatic state rollback on execution errors) and asynchronous message passing (for spreading activation). *(Partially completed: Goblins is used for session REPLs, but not semantic mapping).* | *→ gaia-sci: Hyperon FFI, gaia-proof: Goal Caching*
 - [ ] **STI/LTI Memory** — Implement Short-Term Importance (STI) and Long-Term Importance (LTI) weights for memory candidates. Decimate STI asynchronously after cognitive process transitions. | *→ gaia-sci: Cognitive State Serialization*
-- [ ] **J-space to AtomSpace Mapping** — Integrate Jacobian Lens (J-lens) token projection weights directly with the Goblins-based AtomSpace. Use dynamic activation of J-space vectors during model forward passes to automatically adjust STI values of symbolic nodes in active memory. | *→ gaia-proof: J-space Guided Theorem Proving*
-- [ ] **J-lens Activation Injection** — Use the J-lens intervention protocol (steering/patching) to inject symbolic states and REPL errors directly into the LLM's continuous workspace layers, bypassing context window clutter and directing model focus natively. | *→ K3: CRT, gaia-proof: J-space Guided Theorem Proving*
+- [ ] **NCSI/J-space Integration Program** — Add a versioned NCSI contract, an optional RAI-hosted neural sidecar, a GAIA transport adapter and JSPACE processor, and evaluation against the existing textual projection. Read-only neural observations precede any steering capability; signals remain observations and cannot directly confer `VERIFIED` or `ACCEPTED`. Detailed status is tracked only in the [canonical integration plan](docs/ncsi-jlens-integration.md).
+  - **J-space to AtomSpace Mapping (M7)** — After AtomSpace and STI/LTI exist, evaluate whether J-lens activations can improve symbolic-node importance over simpler textual or symbolic controls. | *→ gaia-proof: J-space Guided Theorem Proving*
+  - **J-lens Activation Injection (M6)** — After the read-only adapter passes comparative evaluation, evaluate bounded steering/patching of symbolic states and REPL errors with explicit Control policy, causal controls, audit, and fallback. | *→ K3: CRT, gaia-proof: J-space Guided Theorem Proving*
 - [/] **Context Reconstruction** — Production `solve` reconstructs a prompt from the current goal, admitted Workspace COs, lexically selected structured memories, and active constraints without appending the transcript. Richer retrieval and evidence/claim consolidation remain.
 - [ ] **G-Expressions ("Context Teleportation")** — Use GNU Guix's G-expressions (`#~`) to serialize variable contexts and modules when spawning sub-agents. | *→ gaia-os: Guix Containers, gaia-sci: Cognitive State Serialization*
 - [ ] **Governed self-modification** — Route proposals to modify procedures, policies, models, or architecture through the GCAS proposal, sandbox, verification, approval, deployment, and rollback pipeline. | *→ Learning & evolution*

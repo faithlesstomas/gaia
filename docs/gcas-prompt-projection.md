@@ -106,6 +106,10 @@ typed Cognitive State
 This lets evaluation compare adapters without changing Control, Workspace,
 Memory, execution, or verification semantics.
 
+The cross-project RAI sidecar design, versioned NCSI boundary, implementation
+milestones, and acceptance gates are defined in the
+[NCSI/J-lens integration plan](ncsi-jlens-integration.md).
+
 ## Evaluation rule
 
 Do not tune the prompt from a single Fibonacci trajectory. Establish a small
