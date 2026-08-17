@@ -102,6 +102,10 @@ build:
   image: rust:latest
   timeout: 15 minutes
   interruptible: true
+  before_script:
+    # The official image provides rustup and Cargo, but its minimal default
+    # toolchain does not guarantee that the formatting component is installed.
+    - rustup component add rustfmt
   variables:
     CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
   cache:
