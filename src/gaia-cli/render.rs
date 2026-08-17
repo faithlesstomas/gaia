@@ -1,15 +1,15 @@
 use lexpr::Value;
-use pulldown_cmark::{Parser, Event, Tag, TagEnd};
-use syntect::easy::HighlightLines;
-use syntect::parsing::SyntaxSet;
-use syntect::highlighting::{ThemeSet, Style};
-use syntect::util::as_24_bit_terminal_escaped;
+use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use similar::{ChangeTag, TextDiff};
-use std::sync::{Arc, Mutex};
+use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
-use std::io::{self, Write};
+use syntect::easy::HighlightLines;
+use syntect::highlighting::{Style, ThemeSet};
+use syntect::parsing::SyntaxSet;
+use syntect::util::as_24_bit_terminal_escaped;
 
 pub const BOLD: &str = "\x1b[1m";
 pub const DIM: &str = "\x1b[2m";
@@ -24,22 +24,28 @@ pub fn print_scheme(code: &str) {
     let ps = SyntaxSet::load_defaults_newlines();
     let ts = ThemeSet::load_defaults();
 
-    let syntax = ps.find_syntax_by_extension("scm")
+    let syntax = ps
+        .find_syntax_by_extension("scm")
         .or_else(|| ps.find_syntax_by_name("Scheme"))
         .unwrap_or_else(|| ps.find_syntax_plain_text());
 
     let theme = &ts.themes["base16-ocean.dark"];
     let mut h = HighlightLines::new(syntax, theme);
 
-    println!("\n{}╭─ scheme ───────────────────────────────────────────────────────────{}", DIM, RESET);
+    println!(
+        "\n{}╭─ scheme ───────────────────────────────────────────────────────────{}",
+        DIM, RESET
+    );
     for line in code.lines() {
         let ranges: Vec<(Style, &str)> = h.highlight_line(line, &ps).unwrap_or_default();
         let escaped = as_24_bit_terminal_escaped(&ranges[..], false);
         println!("{}│{} {}", DIM, RESET, escaped);
     }
-    println!("{}╰───────────────────────────────────────────────────────────────────{}\n", DIM, RESET);
+    println!(
+        "{}╰───────────────────────────────────────────────────────────────────{}\n",
+        DIM, RESET
+    );
 }
-
 
 pub fn print_result(msg: &str) {
     println!("{}{}{}", GREEN, msg, RESET);
@@ -66,8 +72,12 @@ pub fn print_history(val: &Value) {
                         if let Value::Cons(kv) = item_pair.car() {
                             let k = kv.car().as_str().unwrap_or("");
                             let v = kv.cdr().as_str().unwrap_or("");
-                            if k == "role" { role = v.to_string(); }
-                            if k == "content" { content = v.to_string(); }
+                            if k == "role" {
+                                role = v.to_string();
+                            }
+                            if k == "content" {
+                                content = v.to_string();
+                            }
                         }
                         items = item_pair.cdr().clone();
                     }
@@ -158,8 +168,11 @@ pub fn print_list(val: &Value) {
 pub fn print_file_diff(path: &str, new_content: &str) {
     let old_content = std::fs::read_to_string(path).unwrap_or_default();
     let diff = TextDiff::from_lines(old_content.as_str(), new_content);
-    
-    println!("\n{}╭─ diff: {} ───────────────────────────────────────────────────────────{}", DIM, path, RESET);
+
+    println!(
+        "\n{}╭─ diff: {} ───────────────────────────────────────────────────────────{}",
+        DIM, path, RESET
+    );
     for change in diff.iter_all_changes() {
         match change.tag() {
             ChangeTag::Delete => {
@@ -173,7 +186,10 @@ pub fn print_file_diff(path: &str, new_content: &str) {
             }
         }
     }
-    println!("{}╰───────────────────────────────────────────────────────────────────{}\n", DIM, RESET);
+    println!(
+        "{}╰───────────────────────────────────────────────────────────────────{}\n",
+        DIM, RESET
+    );
 }
 
 pub struct Spinner {

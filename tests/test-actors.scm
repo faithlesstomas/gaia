@@ -193,7 +193,18 @@
      (lambda ()
        (with-vat session-vat
          (set! sandbox-actor (spawn ^repl-sandbox "session-orch-test" (lambda (evt) #t) (lambda (expr) #t) '()))
-         (set! llm-client (spawn ^llm-client session-vat))
+         ;; Keep this command-routing test deterministic.  A real ^llm-client
+         ;; starts a POSIX worker thread whose callback may outlive this test's
+         ;; Fibers scheduler, even though get-models itself is mocked above.
+         (set! llm-client
+               (spawn
+                (lambda (bcom)
+                  (methods
+                   [(get-models)
+                    (let-values (((promise resolver)
+                                  (spawn-promise-and-resolver)))
+                      (<-np resolver 'fulfill (get-models-mock))
+                      promise)]))))
          (set! agent-actor (spawn ^agent-actor "session-orch-test" sandbox-actor llm-client (lambda (evt) #t) (lambda (expr) #t)))
          (set! orchestrator (spawn ^session-orchestrator "session-orch-test" mock-socket channel (lambda (expr) #t) sandbox-actor agent-actor llm-client '() "gemma4:e2b" #t)))
 

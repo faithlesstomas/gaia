@@ -33,6 +33,9 @@ test:
     # Each suite runs in a fresh process with its own timeout (see run-coverage.scm).
     # Test logs are uploaded as artifacts, so avoid dumping every Guix build log.
     - GAIA_TEST_TIMEOUT=120 guix shell -m guix.scm make -- make check
+    # Enforce the GCAS contract and the Emacs protocol adapter on every branch.
+    - guix shell -m guix.scm make -- make gcas-conformance-scheme
+    - guix shell -m guix.scm make -- make test-emacs-client
   artifacts:
     name: "test-logs-$CI_COMMIT_REF_SLUG"
     paths:
@@ -65,7 +68,10 @@ build:
   timeout: 15 minutes
   interruptible: true
   script:
-    # Build the Rust CLI binary in release mode using official Rust container
+    # Keep the Rust protocol adapter formatted and covered before packaging it.
+    - cargo fmt --manifest-path src/gaia-cli/Cargo.toml -- --check
+    - cargo test --manifest-path src/gaia-cli/Cargo.toml
+    # Build the Rust CLI binary in release mode using official Rust container.
     - cargo build --manifest-path src/gaia-cli/Cargo.toml --release
   artifacts:
     name: "gaia-cli-$CI_COMMIT_REF_SLUG"

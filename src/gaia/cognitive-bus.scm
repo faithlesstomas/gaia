@@ -11,7 +11,7 @@
             event-payload
             event-origin
             event-timestamp
-            
+
             ;; Specialized Event Constructors
             make-goal-created-event
             make-hypothesis-proposed-event

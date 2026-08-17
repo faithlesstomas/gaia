@@ -8,7 +8,7 @@ export GAIA_MODEL
 export GAIA_BASE_MODEL
 export GAIA_ALLOW_SANDBOX_FALLBACK
 
-.PHONY: run repl check test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-actors test-server test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop clean-trajectories monitor client server gcas-showcase gcas-eval gcas-live-eval gcas-conformance test-clients
+.PHONY: run repl check test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-actors test-server test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop clean-trajectories monitor client server gcas-showcase gcas-eval gcas-live-eval gcas-conformance gcas-conformance-scheme test-clients test-emacs-client
 
 GUIX_SHELL = guix shell -m guix.scm --
 GUIX_DEV_SHELL = guix shell -m guix-dev.scm --
@@ -36,9 +36,12 @@ gcas-live-eval:
 
 test-clients:
 	cargo test --manifest-path src/gaia-cli/Cargo.toml
+	$(MAKE) test-emacs-client
+
+test-emacs-client:
 	emacs --batch -Q -L src/gaia-desktop/emacs -l tests/test-emacs-client.el
 
-gcas-conformance:
+gcas-conformance-scheme:
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-goal-verifier.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-cognitive-memory.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-cognitive-session.scm
@@ -46,6 +49,8 @@ gcas-conformance:
 	$(MAKE) gcas-eval
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-server.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-actors.scm
+
+gcas-conformance: gcas-conformance-scheme
 	$(MAKE) test-clients
 
 test-server:

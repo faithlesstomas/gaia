@@ -8,6 +8,7 @@
              (gnu packages compression)
              (gnu packages version-control)
              (gnu packages base)
+             (gnu packages emacs)
              (gnu packages perl)
              (gnu packages code))
 
@@ -21,6 +22,7 @@
        guile-wisp
        nss-certs
        coreutils
+       emacs-minimal
        git
        texinfo
        gzip

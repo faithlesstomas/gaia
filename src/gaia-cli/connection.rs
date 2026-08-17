@@ -1,6 +1,6 @@
+use anyhow::Result;
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
-use anyhow::Result;
 
 pub const SOCKET_PATH: &str = "/tmp/gaia.sock";
 
@@ -19,11 +19,7 @@ pub fn connect_with_retry(path: &str) -> Result<UnixStream> {
                 std::thread::sleep(Duration::from_secs(2));
             }
             Err(e) => {
-                return Err(anyhow::anyhow!(
-                    "Failed to connect to {}: {}",
-                    path,
-                    e
-                ));
+                return Err(anyhow::anyhow!("Failed to connect to {}: {}", path, e));
             }
         }
     }
