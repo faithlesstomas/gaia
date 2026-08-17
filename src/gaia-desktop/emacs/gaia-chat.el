@@ -10,6 +10,7 @@
 ;;; Code:
 
 (require 'org)
+(require 'pp)
 (require 'gaia-connection)
 
 (defgroup gaia-chat nil
@@ -109,6 +110,21 @@
                            '(read-only t rear-nonsticky t face bold)))
     (gaia-chat--lock-history)))
 
+(defun gaia-chat--input-message (input)
+  "Translate user input into the public GAIA cognitive protocol.
+Normal text starts GCAS `solve`; one-shot chat, direct execution, and the
+legacy investigation processor are opt-in commands."
+  (cond
+   ((string-prefix-p "/solve " input) `(solve ,(string-trim (substring input 7))))
+   ((string-prefix-p "/investigate " input) `(investigate ,(string-trim (substring input 13))))
+   ((string-prefix-p "/ask " input) `(ask ,(string-trim (substring input 5))))
+   ((string-prefix-p "/eval " input) `(repl ,(string-trim (substring input 6))))
+   ((string= input "/cognitive-events") '(get-cognitive-events))
+   ((member input '("/cognitive-state" "/cognitive-objects")) '(get-cognitive-state))
+   ;; Other slash commands remain server-owned for compatibility.
+   ((string-prefix-p "/" input) `(eval ,input))
+   (t `(solve ,input))))
+
 (defun gaia-chat-send ()
   "Send the text written after the prompt to the GAIA server."
   (interactive)
@@ -144,7 +160,7 @@
               ;; Send command
               (setq gaia-chat--active-request t)
               (setq gaia-chat--code-executed nil)
-              (gaia-send `(eval ,input))
+              (gaia-send (gaia-chat--input-message input))
               (setq gaia-chat--stream-state nil)
               (message "Prompt sent to GAIA..."))))))))
 
@@ -545,6 +561,24 @@
       (gaia-chat--scroll-to-bottom)
       (pop-to-buffer (current-buffer) '((display-buffer-reuse-window display-buffer-same-window))))))
 
+(defun gaia-chat--on-cognitive-events (events)
+  "Render the session event trace supplied by the GCAS server."
+  (with-current-buffer (gaia-chat-buffer)
+    (let ((inhibit-read-only t))
+      (goto-char (point-max))
+      (insert "\n*** GCAS Event Trace\n#+BEGIN_EXAMPLE\n"
+              (format "%S" events) "\n#+END_EXAMPLE\n")
+      (gaia-chat--scroll-to-bottom))))
+
+(defun gaia-chat--on-cognitive-state (state)
+  "Render Goal, Control, Workspace, CO, and Memory state from the server."
+  (with-current-buffer (gaia-chat-buffer)
+    (let ((inhibit-read-only t))
+      (goto-char (point-max))
+      (insert "\n*** GCAS Cognitive State\n#+BEGIN_EXAMPLE\n"
+              (pp-to-string state) "#+END_EXAMPLE\n")
+      (gaia-chat--scroll-to-bottom))))
+
 (defun gaia-chat--on-repl-private-result (val)
   "Handle a private REPL execution result (no state change)."
   (when (and gaia-chat--repl-buffer (buffer-live-p gaia-chat--repl-buffer))
@@ -577,6 +611,8 @@
 (gaia-connection-register-handler 'repl-private-result-error #'gaia-chat--on-repl-private-result-error)
 (gaia-connection-register-handler 'thinking-info #'gaia-chat--on-thinking-info)
 (gaia-connection-register-handler 'models-list #'gaia-chat--on-models-list)
+(gaia-connection-register-handler 'cognitive-events #'gaia-chat--on-cognitive-events)
+(gaia-connection-register-handler 'cognitive-state #'gaia-chat--on-cognitive-state)
 
 (provide 'gaia-chat)
 ;;; gaia-chat.el ends here

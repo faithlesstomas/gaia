@@ -94,8 +94,17 @@
       (if (string-null? args)
           #f
           `(solve ,args)))
+     ((string=? cmd "/investigate")
+      (if (string-null? args)
+          #f
+          `(investigate ,args)))
      ((string=? cmd "/ask")
       `(ask ,args))
+     ((string=? cmd "/cognitive-events")
+      '(get-cognitive-events))
+     ((or (string=? cmd "/cognitive-state")
+          (string=? cmd "/cognitive-objects"))
+      '(get-cognitive-state))
      ((string=? cmd "/eval")
       (if (string-null? args)
           #f

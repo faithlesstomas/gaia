@@ -24,7 +24,7 @@
                (lambda* (url #:key body headers)
                  (cond
                   ((string-contains url "/v1/chat/completions")
-                   (values 'mock-hdr "{\"choices\": [{\"message\": {\"content\": \"Sync Hello\", \"reasoning_content\": \"Thinking hard\"}}]}"))
+                   (values 'mock-hdr "{\"choices\": [{\"message\": {\"content\": \"Sync Hello\", \"reasoning_content\": \"Thinking hard\"}}], \"usage\": {\"prompt_tokens\": 8, \"completion_tokens\": 2, \"total_tokens\": 10}}"))
                   (else
                    (values 'mock-hdr "{}")))))
 
@@ -62,9 +62,15 @@
   (get-models))
 
 ;; 2. Test chat-with-llm synchronous non-streaming
-(test-equal "chat-with-llm synchronous"
-  '(("payload" . (("content" . "Sync Hello") ("reasoning" . "Thinking hard"))))
-  (chat-with-llm "session-sync" "Hello sync" "gpt-4o" "System prompt"))
+(test-assert "chat-with-llm synchronous preserves token usage"
+  (let* ((response (chat-with-llm "session-sync" "Hello sync" "gpt-4o" "System prompt"))
+         (payload (assoc-ref response "payload"))
+         (usage (assoc-ref response "usage")))
+    (and (equal? (assoc-ref payload "content") "Sync Hello")
+         (equal? (assoc-ref payload "reasoning") "Thinking hard")
+         (= (assoc-ref usage "prompt_tokens") 8)
+         (= (assoc-ref usage "completion_tokens") 2)
+         (= (assoc-ref usage "total_tokens") 10))))
 
 ;; 3. Test chat-with-llm streaming path
 (test-assert "chat-with-llm streaming"

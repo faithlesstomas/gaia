@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use lexpr::Value;
-use std::io::{BufReader, Write};
+use std::io::{BufRead, Write};
 use std::os::unix::net::UnixStream;
 
 pub fn send_sexp(stream: &mut UnixStream, val: &Value) -> Result<()> {
@@ -11,39 +11,100 @@ pub fn send_sexp(stream: &mut UnixStream, val: &Value) -> Result<()> {
     Ok(())
 }
 
-pub fn receive_event(reader: &mut BufReader<UnixStream>) -> Result<Option<Value>> {
-    let mut buffer = String::new();
+/// Guile's writer emits selected characters as `\xHH` inside strings, while
+/// `lexpr` implements the R7RS `\xHEX;` spelling.  Normalize only unescaped
+/// hexadecimal escapes inside strings; a literal `\\x...` remains untouched.
+fn normalize_guile_string_escapes(input: &str) -> Result<String> {
+    let chars: Vec<char> = input.chars().collect();
+    let mut output = String::with_capacity(input.len());
+    let mut in_string = false;
+    let mut index = 0;
+
+    while index < chars.len() {
+        let ch = chars[index];
+        if ch == '"' {
+            in_string = !in_string;
+            output.push(ch);
+            index += 1;
+        } else if in_string && ch == '\\' {
+            if index + 1 < chars.len() && chars[index + 1] == '\\' {
+                output.push('\\');
+                output.push('\\');
+                index += 2;
+            } else if index + 3 < chars.len() && chars[index + 1] == 'x' {
+                let start = index + 2;
+                let end = start + 2;
+                if !chars[start..end].iter().all(|ch| ch.is_ascii_hexdigit()) {
+                    anyhow::bail!("Guile hexadecimal escape must contain two digits");
+                }
+                let digits: String = chars[start..end].iter().collect();
+                let codepoint =
+                    u32::from_str_radix(&digits, 16).context("Invalid Guile hexadecimal escape")?;
+                let decoded = char::from_u32(codepoint)
+                    .ok_or_else(|| anyhow::anyhow!("Invalid Unicode codepoint: {digits}"))?;
+                output.push(decoded);
+                index = end;
+            } else {
+                output.push(ch);
+                if index + 1 < chars.len() {
+                    output.push(chars[index + 1]);
+                    index += 2;
+                } else {
+                    index += 1;
+                }
+            }
+        } else {
+            output.push(ch);
+            index += 1;
+        }
+    }
+    Ok(output)
+}
+
+pub fn receive_event<R: BufRead>(reader: &mut R) -> Result<Option<Value>> {
     loop {
         let mut line = String::new();
-        let n = std::io::BufRead::read_line(reader, &mut line).context("Failed to read from socket")?;
+        let n = reader
+            .read_line(&mut line)
+            .context("Failed to read from socket")?;
         if n == 0 {
-            if buffer.trim().is_empty() {
-                return Ok(None);
-            } else {
-                return Err(anyhow::anyhow!("Unexpected EOF while parsing S-expression: {}", buffer));
-            }
+            return Ok(None);
         }
-        buffer.push_str(&line);
-        
-        let trimmed = buffer.trim();
+
+        let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        
-        // Use Parser to check if we have a complete S-expression
-        let mut parser = lexpr::Parser::from_str(trimmed);
-        match parser.next_value() {
-            Ok(Some(val)) => return Ok(Some(val)),
-            Ok(None) => continue, // Need more data
-            Err(e) => {
-                // Check if the error is "premature EOF" which means we need more data
-                let err_str = e.to_string();
-                if err_str.contains("EOF") || err_str.contains("expected") || err_str.contains("unclosed") {
-                    continue;
-                } else {
-                    return Err(anyhow::anyhow!("Failed to parse S-expression: {}\nBuffer: {}", e, buffer));
-                }
-            }
-        }
+
+        // The socket protocol is newline framed: both Guile `write` and
+        // send_sexp escape embedded newlines.  A parse failure after one frame
+        // is therefore malformed input, never a reason to wait indefinitely.
+        let normalized = normalize_guile_string_escapes(trimmed)?;
+        let value = lexpr::from_str(&normalized)
+            .with_context(|| format!("Failed to parse S-expression frame: {line}"))?;
+        return Ok(Some(value));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn receives_guile_hex_escape_without_waiting_for_more_input() {
+        let input = b"(cognitive-state ((content . \"wartosc\\xa0face\")))\n";
+        let mut reader = Cursor::new(input);
+
+        let value = receive_event(&mut reader).unwrap().unwrap();
+        assert!(value.to_string().contains("wartosc\u{a0}face"));
+    }
+
+    #[test]
+    fn rejects_a_malformed_complete_frame_instead_of_hanging() {
+        let mut reader = Cursor::new(b"(cognitive-state (broken)\n");
+
+        let error = receive_event(&mut reader).unwrap_err().to_string();
+        assert!(error.contains("Failed to parse S-expression frame"));
     }
 }

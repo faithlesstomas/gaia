@@ -20,6 +20,14 @@ enum Action {
     Exit,
 }
 
+fn cognitive_inspection_operation(command: &str) -> Option<&'static str> {
+    match command {
+        "/cognitive-events" => Some("get-cognitive-events"),
+        "/cognitive-state" | "/cognitive-objects" => Some("get-cognitive-state"),
+        _ => None,
+    }
+}
+
 /// Events forwarded from the listener thread to the main thread.
 /// Only "end-of-operation" events are forwarded. Informational events
 /// (status, thought, result, stream-log, info) are printed directly
@@ -44,7 +52,7 @@ fn main() -> Result<()> {
     );
 
     println!("\n{BOLD}{GREEN}GAIA CLI {}{RESET}", env!("GAIA_VERSION"));
-    println!("Type {BOLD}/help{RESET} for commands or enter a task.\n");
+    println!("Type {BOLD}/help{RESET} for commands. Normal input runs the GCAS solve process.\n");
 
     let mut stream = connect_with_retry(SOCKET_PATH)?;
 
@@ -239,7 +247,10 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                         "result" => {
                             if let Value::Cons(c) = cdr {
                                 if let Some(res) = c.car().as_str() {
-                                    println!("{GREEN}Result >{RESET} {}", truncate_output(res, 500));
+                                    println!(
+                                        "{GREEN}Result >{RESET} {}",
+                                        truncate_output(res, 500)
+                                    );
                                 }
                             }
                         }
@@ -266,10 +277,9 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                         }
 
                         // === TERMINAL EVENTS ===
-                        "final" | "repl-result" | "error"
-                        | "session-list" | "history-list" | "env-list"
-                        | "model-info" | "models-list" | "thinking-info" 
-                        | "permission-request" => {
+                        "final" | "repl-result" | "error" | "cognitive-events"
+                        | "cognitive-state" | "session-list" | "history-list" | "env-list"
+                        | "model-info" | "models-list" | "thinking-info" | "permission-request" => {
                             if in_token_stream || in_thought_stream {
                                 println!();
                             }
@@ -279,7 +289,10 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                                     if let Some(ans) = c.car().as_str() {
                                         let trimmed_accum = accumulated_tokens.trim();
                                         let trimmed_ans = ans.trim();
-                                        if !trimmed_ans.is_empty() && (trimmed_accum == trimmed_ans || trimmed_accum.ends_with(trimmed_ans)) {
+                                        if !trimmed_ans.is_empty()
+                                            && (trimmed_accum == trimmed_ans
+                                                || trimmed_accum.ends_with(trimmed_ans))
+                                        {
                                             should_print_final = false;
                                         }
                                     }
@@ -287,7 +300,10 @@ fn listener_loop(reader: &mut BufReader<UnixStream>, tx: Sender<ServerEvent>) {
                             }
                             // Clear any residual status line before forwarding
                             eprint!("\r\x1b[K");
-                            if tx.send(ServerEvent::Terminal(event.clone(), should_print_final)).is_err() {
+                            if tx
+                                .send(ServerEvent::Terminal(event.clone(), should_print_final))
+                                .is_err()
+                            {
                                 return;
                             }
                             in_token_stream = false;
@@ -322,7 +338,11 @@ fn truncate_output(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
     } else {
-        format!("{}...\n{DIM}[output truncated: {} chars total]{RESET}", &s[..max], s.len())
+        format!(
+            "{}...\n{DIM}[output truncated: {} chars total]{RESET}",
+            &s[..max],
+            s.len()
+        )
     }
 }
 
@@ -330,14 +350,14 @@ fn edit_prompt_in_editor() -> Result<Option<String>> {
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
     let temp_dir = std::env::temp_dir();
     let temp_path = temp_dir.join("gaia_prompt.scm");
-    
+
     // Create an empty file
     std::fs::write(&temp_path, "")?;
-    
+
     let status = std::process::Command::new(&editor)
         .arg(&temp_path)
         .status()?;
-        
+
     if status.success() {
         let content = std::fs::read_to_string(&temp_path)?;
         let _ = std::fs::remove_file(&temp_path);
@@ -375,11 +395,40 @@ fn dispatch(
             }
             Ok(Action::Continue)
         }
-        _ => {
-            // Drain any stale events in the channel
+        "/solve" | "/investigate" | "/ask" | "/eval" => {
+            let query = input[cmd.len()..].trim();
+            if query.is_empty() {
+                return Err(anyhow::anyhow!("{} requires an argument", cmd));
+            }
+            let operation = match cmd {
+                "/solve" => "solve",
+                "/investigate" => "investigate",
+                "/ask" => "ask",
+                "/eval" => "repl",
+                _ => unreachable!(),
+            };
             while rx.try_recv().is_ok() {}
-
-            // Send everything else directly as raw string `(eval input)` to the server
+            send_sexp(
+                stream,
+                &Value::list(vec![
+                    Value::symbol(operation),
+                    Value::string(query.to_string()),
+                ]),
+            )?;
+            wait_and_print(rx, stream)?;
+            Ok(Action::Continue)
+        }
+        _ if cognitive_inspection_operation(cmd).is_some() => {
+            while rx.try_recv().is_ok() {}
+            let operation = cognitive_inspection_operation(cmd).expect("guarded operation");
+            send_sexp(stream, &Value::list(vec![Value::symbol(operation)]))?;
+            wait_and_print(rx, stream)?;
+            Ok(Action::Continue)
+        }
+        _ if cmd.starts_with('/') => {
+            while rx.try_recv().is_ok() {}
+            // Compatibility commands such as /help and /model remain parsed
+            // by the server's shared slash-command parser.
             send_sexp(
                 stream,
                 &Value::list(vec![
@@ -390,6 +439,44 @@ fn dispatch(
             wait_and_print(rx, stream)?;
             Ok(Action::Continue)
         }
+        _ => {
+            // Drain any stale events in the channel
+            while rx.try_recv().is_ok() {}
+
+            // Normal input starts a GCAS process. One-shot chat and legacy
+            // investigation are available through explicit commands.
+            send_sexp(
+                stream,
+                &Value::list(vec![
+                    Value::symbol("solve"),
+                    Value::string(input.to_string()),
+                ]),
+            )?;
+            wait_and_print(rx, stream)?;
+            Ok(Action::Continue)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cognitive_inspection_operation;
+
+    #[test]
+    fn maps_gcas_inspection_commands_to_protocol_operations() {
+        assert_eq!(
+            cognitive_inspection_operation("/cognitive-events"),
+            Some("get-cognitive-events")
+        );
+        assert_eq!(
+            cognitive_inspection_operation("/cognitive-state"),
+            Some("get-cognitive-state")
+        );
+        assert_eq!(
+            cognitive_inspection_operation("/cognitive-objects"),
+            Some("get-cognitive-state")
+        );
+        assert_eq!(cognitive_inspection_operation("/help"), None);
     }
 }
 
@@ -408,14 +495,16 @@ fn wait_and_print(rx: &Receiver<ServerEvent>, stream: &mut UnixStream) -> Result
                         "permission-request" => {
                             if let Value::Cons(c) = cdr {
                                 let expr = c.car();
-                                
+
                                 let mut handled_diff = false;
                                 if let Value::Cons(expr_cons) = expr {
                                     if let Some("write-file") = expr_cons.car().as_symbol() {
                                         if let Value::Cons(path_cons) = expr_cons.cdr() {
                                             if let Some(path) = path_cons.car().as_str() {
                                                 if let Value::Cons(content_cons) = path_cons.cdr() {
-                                                    if let Some(content) = content_cons.car().as_str() {
+                                                    if let Some(content) =
+                                                        content_cons.car().as_str()
+                                                    {
                                                         println!("\n{BOLD}{YELLOW}Permission Request: Write File{RESET}");
                                                         print_file_diff(path, content);
                                                         handled_diff = true;
@@ -425,7 +514,7 @@ fn wait_and_print(rx: &Receiver<ServerEvent>, stream: &mut UnixStream) -> Result
                                         }
                                     }
                                 }
-                                
+
                                 if !handled_diff {
                                     println!("\n{BOLD}{YELLOW}Permission Request: Execute Scheme Expression{RESET}");
                                     let expr_str = format!("{}", expr);
@@ -441,10 +530,22 @@ fn wait_and_print(rx: &Receiver<ServerEvent>, stream: &mut UnixStream) -> Result
                                     std::io::stdin().read_line(&mut input)?;
                                     let ans = input.trim().to_lowercase();
                                     if ans == "y" || ans == "yes" {
-                                        send_sexp(stream, &Value::list(vec![Value::symbol("permission-response"), Value::Bool(true)]))?;
+                                        send_sexp(
+                                            stream,
+                                            &Value::list(vec![
+                                                Value::symbol("permission-response"),
+                                                Value::Bool(true),
+                                            ]),
+                                        )?;
                                         break;
                                     } else if ans == "" || ans == "n" || ans == "no" {
-                                        send_sexp(stream, &Value::list(vec![Value::symbol("permission-response"), Value::Bool(false)]))?;
+                                        send_sexp(
+                                            stream,
+                                            &Value::list(vec![
+                                                Value::symbol("permission-response"),
+                                                Value::Bool(false),
+                                            ]),
+                                        )?;
                                         break;
                                     }
                                 }
@@ -512,6 +613,20 @@ fn wait_and_print(rx: &Receiver<ServerEvent>, stream: &mut UnixStream) -> Result
                                 if let Some(state) = c.car().as_str() {
                                     println!("{BOLD}Thinking Mode:{RESET} {}", state);
                                 }
+                            }
+                            break;
+                        }
+                        "cognitive-events" => {
+                            println!("{BOLD}GCAS Event Trace:{RESET}");
+                            if let Value::Cons(c) = cdr {
+                                print_list(c.car());
+                            }
+                            break;
+                        }
+                        "cognitive-state" => {
+                            println!("{BOLD}GCAS Cognitive State:{RESET}");
+                            if let Value::Cons(c) = cdr {
+                                print_list(c.car());
                             }
                             break;
                         }

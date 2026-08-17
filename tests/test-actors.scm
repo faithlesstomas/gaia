@@ -193,7 +193,18 @@
      (lambda ()
        (with-vat session-vat
          (set! sandbox-actor (spawn ^repl-sandbox "session-orch-test" (lambda (evt) #t) (lambda (expr) #t) '()))
-         (set! llm-client (spawn ^llm-client session-vat))
+         ;; Keep this command-routing test deterministic.  A real ^llm-client
+         ;; starts a POSIX worker thread whose callback may outlive this test's
+         ;; Fibers scheduler, even though get-models itself is mocked above.
+         (set! llm-client
+               (spawn
+                (lambda (bcom)
+                  (methods
+                   [(get-models)
+                    (let-values (((promise resolver)
+                                  (spawn-promise-and-resolver)))
+                      (<-np resolver 'fulfill (get-models-mock))
+                      promise)]))))
          (set! agent-actor (spawn ^agent-actor "session-orch-test" sandbox-actor llm-client (lambda (evt) #t) (lambda (expr) #t)))
          (set! orchestrator (spawn ^session-orchestrator "session-orch-test" mock-socket channel (lambda (expr) #t) sandbox-actor agent-actor llm-client '() "gemma4:e2b" #t)))
 
@@ -557,13 +568,135 @@
                 (begin
                   (<- orch 'handle-message '(eval "run this code"))
                   (run-turns-synchronously)
+                  ;; A direct REPL request must enter the session GCAS cycle as
+                  ;; Action → ActionCompleted, rather than bypassing it.
+                  (<- orch 'handle-message '(repl "(+ 20 22)"))
+                  (run-turns-synchronously)
+                  (<- orch 'handle-message '(get-cognitive-events))
+                  (run-turns-synchronously)
                   (let ((output (get-output-string mock-socket)))
                     (and (string-contains output "code")
                          (string-contains output "result")
-                         (string-contains output "notebook-done"))))))
+                         (string-contains output "notebook-done")
+                         (string-contains output "ActionCompleted"))))))
 
-            ;; 6. Test session-orchestrator solve command (recursive solver mode)
+            ;; 6. The default solve command is assembled from Bus processors
+            ;; and uses the task-specific verifier selected by production.
             (let* ((sandbox (spawn ^repl-sandbox "direct-solve-session" (lambda _ #t) (lambda _ #t) '()))
+                   (llm-calls 0)
+                   (solve-system-prompts '())
+                   (solve-histories '())
+                   (mock-llm
+                    (spawn
+                     (lambda (bcom)
+                       (methods
+                        [(chat session-id prompt model system-prompt think history stream-callback #:optional (role "user"))
+                         (set! llm-calls (+ llm-calls 1))
+                         (set! solve-system-prompts (cons system-prompt solve-system-prompts))
+                         (set! solve-histories (cons history solve-histories))
+                         (let-values (((promo resolver) (spawn-promise-and-resolver)))
+                          (<-np resolver 'fulfill
+                                `(("payload" . (("content" . ,(if (= llm-calls 1)
+                                                                   "First attempt:\n```repl\n(display '(0 1 2 3 5 8 13 21 34 55))\n```"
+                                                                   "Revised implementation:\n```repl\n(define (fibonacci-sequence n)\n  (let loop ((remaining n) (a 0) (b 1) (result '()))\n    (if (= remaining 0)\n        (reverse result)\n        (loop (- remaining 1) b (+ a b) (cons a result)))))\n(display (fibonacci-sequence 10))\n```"))
+                                                 ("reasoning" . "Reasoning...")))))
+                           promo)]))))
+                   (agent (spawn ^agent-actor "direct-solve-session" sandbox mock-llm (lambda _ #t) (lambda _ #t)))
+                   (mock-socket (open-output-string))
+                   (mock-channel #f)
+                   (orch (spawn ^session-orchestrator "direct-solve-session" mock-socket mock-channel (lambda (expr) #t) sandbox agent mock-llm '() "gemma4:e2b" #t)))
+              (test-assert "direct-orchestrator: failure-first Fibonacci solve completes through production GCAS"
+                (begin
+                  ;; The session identifier is intentionally stable so test
+                  ;; reruns exercise the same persistence location. Establish
+                  ;; an explicit fresh boundary before asserting this process.
+                  (<- orch 'handle-message '(clear))
+                  (run-turns-synchronously)
+                  (<- orch 'handle-message '(solve "Write a function returning the first ten Fibonacci terms."))
+                  (run-turns-synchronously)
+                  (<- orch 'handle-message '(get-cognitive-events))
+                  (run-turns-synchronously)
+                  (<- orch 'handle-message '(get-cognitive-state))
+                  (run-turns-synchronously)
+                  (let ((output (get-output-string mock-socket)))
+                    (and (string-contains output "code")
+                         (string-contains output "result")
+                         (string-contains output "final")
+                         (string-contains output "GoalCreated")
+                         (string-contains output "MemoryRetrieved")
+                         (string-contains output "WorkspaceRoundStarted")
+                         (string-contains output "HypothesisProposed")
+                         (string-contains output "PlanProposed")
+                         (string-contains output "ActionRequested")
+                         (string-contains output "ActionCompleted")
+                         (string-contains output "EvidenceFound")
+                         (string-contains output "BeliefUpdated")
+                         (string-contains output "GoalVerificationCompleted")
+                         (string-contains output "ConflictDetected")
+                         (string-contains output "ReflectionRaised")
+                         (string-contains output "WorkspaceRoundCompleted")
+                         (string-contains output "AnswerRequested")
+                         (string-contains output "GoalVerified")
+                         (string-contains output "GoalCompleted")
+                         (string-contains output "COMPLETED")
+                         (string-contains output "Verified Scheme implementation")
+                         (string-contains output "define (fibonacci-sequence")
+                         (string-contains output "cognitive-state")
+                         (string-contains output "completion-criteria")
+                         (string-contains output "workspace")
+                         (string-contains output "memory")
+                         (equal? solve-histories '(() ()))
+                         (= (length solve-system-prompts) 2)
+                         (string-contains (car solve-system-prompts) "# ACTION CONTRACT")
+                         (not (string-contains (car solve-system-prompts) "# COMPLETION SIGNALS"))
+                         (= llm-calls 2))))))
+
+            ;; A Control budget outcome is as terminal for the client as a
+            ;; verified answer.  Regress the real server adapter boundary: the
+            ;; third distinct REPL failure must produce (final ...), otherwise
+            ;; the Rust CLI remains blocked waiting for a terminal message.
+            (let* ((sandbox (spawn ^repl-sandbox "direct-failure-budget-session" (lambda _ #t) (lambda _ #t) '()))
+                   (llm-calls 0)
+                   (attempts
+                    '("Attempt one:\n```repl\n(if #t 1 2 3)\n```"
+                      "Attempt two:\n```repl\n(let ((x 1) (if #t x 0)) x)\n```"
+                      "Attempt three:\n```repl\n(if #t (begin 1) 2 3)\n```"))
+                   (mock-llm
+                    (spawn
+                     (lambda (bcom)
+                       (methods
+                        [(chat session-id prompt model system-prompt think history stream-callback #:optional (role "user"))
+                         (let ((response (list-ref attempts llm-calls)))
+                           (set! llm-calls (+ llm-calls 1))
+                           (let-values (((promo resolver) (spawn-promise-and-resolver)))
+                             (<-np resolver 'fulfill
+                                   `(("payload" . (("content" . ,response)
+                                                    ("reasoning" . "Reasoning...")))))
+                             promo))]))))
+                   (agent (spawn ^agent-actor "direct-failure-budget-session" sandbox mock-llm (lambda _ #t) (lambda _ #t)))
+                   (mock-socket (open-output-string))
+                   (orch (spawn ^session-orchestrator "direct-failure-budget-session" mock-socket #f (lambda (expr) #t) sandbox agent mock-llm '() "gemma4:e2b" #t)))
+              (test-assert "direct-orchestrator: three REPL failures return a terminal final event"
+                (begin
+                  (<- orch 'handle-message '(clear))
+                  (run-turns-synchronously)
+                  (<- orch 'handle-message '(solve "Produce a result despite three syntax failures."))
+                  (run-turns-synchronously)
+                  (<- orch 'handle-message '(get-cognitive-events))
+                  (run-turns-synchronously)
+                  (<- orch 'handle-message '(get-cognitive-state))
+                  (run-turns-synchronously)
+                  (let ((output (get-output-string mock-socket)))
+                    (and (= llm-calls 3)
+                         (string-contains output "repl-error")
+                         (string-contains output "FAILURE_BUDGET_EXHAUSTED")
+                         (string-contains output "ProcessTerminated")
+                         (string-contains output "(final")
+                         (string-contains output "failed-action budget"))))))
+
+            ;; 7. The retained RLM loop is intentionally opt-in as an
+            ;; investigation processor rather than the solve control loop.
+            (let* ((sandbox (spawn ^repl-sandbox "direct-investigate-session" (lambda _ #t) (lambda _ #t) '()))
                    (llm-calls 0)
                    (mock-llm
                     (spawn
@@ -574,22 +707,19 @@
                          (let-values (((promo resolver) (spawn-promise-and-resolver)))
                            (<-np resolver 'fulfill
                                  `(("payload" . (("content" . ,(if (= llm-calls 1)
-                                                                   "Run code:\n```repl\n(define solve-var 999)\n```"
-                                                                   "FINAL(999) CONFIDENCE(100)"))
+                                                                   "```repl\n(define investigated 7)\n```"
+                                                                   "FINAL(investigated) CONFIDENCE(100)"))
                                                  ("reasoning" . "Reasoning...")))))
                            promo)]))))
-                   (agent (spawn ^agent-actor "direct-solve-session" sandbox mock-llm (lambda _ #t) (lambda _ #t)))
+                   (agent (spawn ^agent-actor "direct-investigate-session" sandbox mock-llm (lambda _ #t) (lambda _ #t)))
                    (mock-socket (open-output-string))
-                   (mock-channel #f)
-                   (orch (spawn ^session-orchestrator "direct-solve-session" mock-socket mock-channel (lambda (expr) #t) sandbox agent mock-llm '() "gemma4:e2b" #t)))
-              (test-assert "direct-orchestrator: solve (solver mode) runs recursively until final answer"
+                   (orch (spawn ^session-orchestrator "direct-investigate-session" mock-socket #f (lambda (expr) #t) sandbox agent mock-llm '() "gemma4:e2b" #t)))
+              (test-assert "direct-orchestrator: investigate explicitly invokes the legacy recursive loop"
                 (begin
-                  (<- orch 'handle-message '(solve "run this solve"))
+                  (<- orch 'handle-message '(investigate "run this investigation"))
                   (run-turns-synchronously)
                   (let ((output (get-output-string mock-socket)))
-                    (and (string-contains output "code")
-                         (string-contains output "result")
-                         (string-contains output "final")
+                    (and (string-contains output "final")
                          (> llm-calls 1))))))))
       
       (lambda ()

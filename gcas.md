@@ -1,16 +1,16 @@
 # GCAS — General Cognitive Architecture Specification
 
-## GCAS 0.1 — Architectural Foundations (Refined Draft)
+## GCAS 0.2 — Cognitive Process & Operational Semantics (Draft)
 
 **Status:** Draft / Specification Proposal
-**Version:** 0.1
+**Version:** 0.2
 **Scope:** Language- and implementation-independent cognitive architecture for persistent, hybrid neuro-symbolic intelligent systems.
 
 ---
 
 ## 0. Abstract
 
-GCAS defines an abstract, implementation-independent architecture for persistent artificial cognitive systems capable of reasoning,
+GCAS defines an abstract, implementation-independent architecture and operational model for persistent artificial cognitive systems capable of reasoning,
 remembering, learning, planning, acting, verifying information, and interacting with external environments over extended periods of time.
 
 GCAS is motivated by structural limitations of contemporary LLM-centric assistants, including:
@@ -41,8 +41,9 @@ The architecture synthesizes core insights from:
 * Event-driven reactive systems,
 * and Reproducible computation.
 
-GCAS specifies cognitive objects, interfaces, information flows, invariants, and behavioral requirements rather than programming languages,
-storage engines, neural architectures, or proprietary frameworks.
+GCAS specifies cognitive objects, interfaces, state transitions, information flows, invariants, and behavioral requirements rather than programming languages,
+storage engines, neural architectures, or proprietary frameworks. Version 0.2 extends the architectural foundations of GCAS 0.1 with normative
+operational semantics for epistemic change, Workspace rounds, Goals, Actions, Memory, metacognition, and process termination.
 
 ---
 
@@ -72,8 +73,9 @@ GCAS does NOT specify:
 * A specific database or storage engine,
 * A specific formal logic system,
 * An operating system or container runtime,
+* A definition, test, or certification of artificial general intelligence,
 * Consciousness, subjective experience, or qualia,
-* A claim that compliant systems are sentient.
+* A claim that compliant systems are generally intelligent or sentient.
 
 Global Workspace Theory and cognitive science concepts serve strictly as architectural inspirations for information routing, coordination, and memory management.
 
@@ -191,14 +193,19 @@ Every Cognitive Object SHOULD carry metadata including:
 * **Provenance:** Source or origin tag (`USER`, `SENSOR`, `LLM`, `MEMORY`, `EXECUTION`, `EXTERNAL_SOURCE`, `SYMBOLIC_INFERENCE`, `FORMAL_PROOF`).
 * **Epistemic Status:** Current epistemic state (`UNKNOWN`, `HYPOTHESIS`, `ASSUMPTION`, `BELIEF`, `ACCEPTED`, `REFUTED`, `DISPUTED`).
 * **Verification Status:** Level of validation (`UNVERIFIED`, `PARTIALLY_VERIFIED`, `VERIFIED`, `FORMALLY_VERIFIED`).
-* **Confidence:** Numerical or qualitative measure of reliability $[0.0, 1.0]$.
+* **Verification Target:** The property actually checked (`DERIVATION_VALIDITY`, `EXECUTION_RESULT`, `SOURCE_ATTESTATION`,
+  `EMPIRICAL_CLAIM`, `GOAL_SATISFACTION`, or a domain-specific extension).
+* **Confidence Profile:** One or more typed reliability measures such as model uncertainty, source reliability, evidential support,
+  verifier coverage, or derivation soundness. A scalar $[0.0, 1.0]$ MAY be used only when its semantics and calibration domain are declared.
 * **Timestamp & Temporal Validity:** Creation time and temporal validity interval (`valid_from`, `valid_to`, `invalidated_by`).
 * **Relations / Dependencies:** Graph links to supporting, parent, or contradicting COs.
-* **Scope & Lifecycle Metadata:** Validity boundaries, expiration, or status flags.
+* **Scope:** The entities, environment, task, time, and assumptions within which the content is asserted to hold.
+* **Lifecycle State:** Operational state independent of epistemic status (`CREATED`, `PROPOSED`, `ADMITTED`, `ACTIVE`, `SUPERSEDED`,
+  `RETRACTED`, `ARCHIVED`).
 
-## 3.2 Three-Axis Epistemic Model
+## 3.2 Multi-Axis Epistemic Model
 
-To prevent semantic conflation, GCAS separates epistemic classification into three independent axes:
+To prevent semantic conflation, GCAS requires three independent primary axes and additional scoped qualifiers:
 
 ```text
                           ┌───────────────────────────┐
@@ -227,15 +234,22 @@ Claim #402: "Compound X inhibits Target Y"
 provenance:          EXTERNAL_SOURCE ("paper-doi-10.1038/s41586")
 epistemic-status:    BELIEF
 verification-status: PARTIALLY_VERIFIED
-confidence:          0.82
+verification-target: EMPIRICAL_CLAIM
+confidence-profile:  {source-reliability: 0.90, evidential-support: 0.82}
 temporal-validity:   [2026-01-15, INF]
+scope:               {compound-batch: X-17, assay: A4}
 ```
 
 ### Epistemic Classification Rules
 1. **Observation ≠ Fact:** Information received from sensors or user input is an `Observation` with provenance `SENSOR` or `USER`.
    It MUST NOT automatically be classified as `VERIFIED` or `ACCEPTED` without verification (e.g. faulty sensor or unverified user claim).
 2. **LLM Output = Hypothesis:** Content generated by neural models MUST carry provenance `LLM` and initial epistemic status `HYPOTHESIS`.
-3. **Fact Definition:** A **Fact** is defined strictly as a Claim with epistemic status `ACCEPTED` and verification status `VERIFIED` or `FORMALLY_VERIFIED`.
+   When an LLM copies, transforms, or summarizes observations, each resulting Claim MUST additionally retain derivation links to those observations.
+3. **Fact Definition:** A **Fact** is defined strictly as a scoped Claim with epistemic status `ACCEPTED`, a declared verification target,
+   and verification evidence sufficient under an explicit acceptance policy. `FORMALLY_VERIFIED` with target `DERIVATION_VALIDITY` proves
+   only the derivation and MUST NOT by itself establish an `EMPIRICAL_CLAIM` as world truth.
+4. **Selection ≠ Verification:** Workspace admission, repetition, retrieval frequency, model agreement, or high confidence MUST NOT by
+   themselves change a Claim to `VERIFIED` or `ACCEPTED`.
 
 ## 3.3 Temporal Epistemic Model
 
@@ -262,6 +276,32 @@ Systems MUST NOT treat historical beliefs as timeless truths.
 11. **Conflict:** Explicit representation of mutually incompatible Cognitive Objects. MUST NOT be resolved by silent deletion.
 12. **Reflection:** Metacognitive assessment of a cognitive process, progress, or resource state.
 13. **Rule / Procedure:** Reusable strategy or operational guidance stored in procedural memory.
+
+## 3.5 Cognitive Object Identity and Versioning
+
+Cognitive Objects SHOULD be immutable semantic records. A substantive change of content, scope, epistemic status, verification status,
+temporal validity, or dependencies SHOULD create a new version linked by `supersedes`, `revises`, or `invalidates` rather than silently
+rewriting history. Implementations MAY use mutable physical records if they preserve an equivalent auditable version history.
+
+Content identity and assertion identity MUST remain distinguishable. Two processors MAY assert semantically equivalent content with
+different provenance, scope, or evidence; deduplication MUST NOT erase these distinctions.
+
+## 3.6 Evidence and Justification Graph
+
+Persistent epistemic Claims MUST participate in an explicit justification graph. Typed edges SHOULD include:
+
+* `supports(Evidence, Claim)`,
+* `opposes(Evidence, Claim)`,
+* `derived-from(Claim, Premise-or-Observation)`,
+* `assumes(Claim, Assumption)`,
+* `verified-by(Claim, Verification)`,
+* `contradicts(Claim, Claim)`,
+* `supersedes(New, Old)`,
+* `invalidates(Evidence, Claim)`.
+
+A Claim MUST NOT gain support merely because multiple retrieved objects repeat it. Systems SHOULD track source lineage and common
+ancestry so that copied or mutually dependent sources are not treated as independent evidence. Invalidating a premise MUST make every
+dependent Claim discoverable for re-evaluation; GCAS does not require one particular truth-maintenance algorithm.
 
 ---
 
@@ -403,6 +443,11 @@ GCAS formalizes a dual-process neuro-symbolic framework using functional terms:
   Implemented by symbolic reasoners, theorem provers, SMT solvers, neural tree search, code runtimes,
   and deterministic algorithms. Performs verification, proof, constraint checking, and execution.
 
+`Generative` and `Deliberative` are processor roles, not fixed implementation classes. A neural processor MAY perform deliberative
+search, and a symbolic processor MAY use heuristic generation. Processor contracts SHOULD additionally declare relevant properties,
+including whether operation is stochastic or deterministic, sound or heuristic, stateful or stateless, and internally inferred or
+externally grounded. No processor MAY be considered a verifier merely because it is labeled `Deliberative`.
+
 ## 7.2 Neuro-Symbolic Boundary
 
 ```
@@ -423,7 +468,13 @@ to expose internal signals beyond output tokens:
 * Attention maps and concept directions,
 * Steering coordinates.
 
-**J-space** is recognized as one possible neural workspace implementation or source adapter for NCSI.
+**J-space** is recognized as one possible internal representational mechanism or source adapter for NCSI. It is not the logical
+Global Workspace and its coordinates do not replace Cognitive Objects or explicit epistemic state.
+
+NCSI signals are observations about a neural processor, not evidence for the truth of generated content. Attention, activation,
+entropy, concept directions, verbalized confidence, or steering coordinates MAY influence scheduling or trigger verification, but
+MUST NOT directly promote a Claim to `VERIFIED` or `ACCEPTED`. Implementations SHOULD empirically validate signal stability,
+calibration, and causal relevance for each model and task domain.
 
 ## 7.4 Bidirectional Neural Steering
 
@@ -463,6 +514,14 @@ Transcripts record *what was said*; memory stores *what was learned, verified, a
 * **Controlled Forgetting:** Retention MUST be governed by relevance, confidence, utility, and decay policies. Forgetting, compression,
   summarization, supersession, and archival are essential system features.
 
+Retrieval is an epistemically neutral operation: retrieving a CO MUST NOT increase its epistemic or verification status. Retrieved
+objects MUST enter active cognition through a **guarded merge** that preserves current observations, scope, provenance, temporal
+validity, contradictions, and the identity of the originating episode. Episodic retrieval SHOULD supplement missing context rather
+than replace freshly observed state. A replacement-style merge requires an explicit policy decision and audit record.
+
+Memory admission and consolidation SHOULD record why an object was retained, its intended memory role, retention or revalidation
+conditions, and the evidence supporting any semantic generalization. Summaries MUST retain derivation links to the records summarized.
+
 ## 8.4 Context Reconstruction & Context Rot Mitigation
 
 To prevent context degradation (*context rot*), prompts provided to LLMs MUST be treated as **transient dynamic projections** of the current cognitive state:
@@ -483,6 +542,9 @@ GCAS strictly separates cognition (planning, reasoning) from execution (tool cal
 
 Runtimes MAY include REPLs, shell environments, containers, API clients, databases, or physical actuators. Runtimes MUST expose explicit,
 authoritative state rather than requiring LLMs to guess environment state.
+
+Successful execution verifies only the reported execution result within the observed environment and declared reproducibility scope.
+It MUST NOT automatically verify the semantic correctness of the Action, the premises that motivated it, or satisfaction of its parent Goal.
 
 ## 9.2 Environment Model & Reproducible Actions
 
@@ -627,76 +689,365 @@ GAIA may implement GCAS using the following stack. These mappings are non-normat
 
 ---
 
-# 13. Roadmap: GCAS 0.2 — Cognitive Process & Operational Semantics
+# 13. GCAS 0.2 Operational Semantics
 
-GCAS 0.1 establishes the normative ontology, invariants, and architectural components. **GCAS 0.2** will formalize
-the **Operational Semantics** ("How cognition proceeds") by defining state transitions, event triggers,
-and CO lifecycles over an explicit scientific inquiry dry-run.
+GCAS 0.2 defines cognition as a recurrent, event-driven transition system over explicit Cognitive State. These semantics describe
+observable architectural behavior, not a required scheduler, programming language, database, or physical transport.
 
-## 13.1 Benchmark Inquiry Dry-Run Cycle
+## 13.1 Abstract Machine
 
-GCAS 0.2 will formalize exact operational semantics across the following 14-stage execution sequence for the target query *"Is claim X from publication Y true?"*:
+At logical time $t$, a GCAS process is represented by:
 
 ```text
-User Question
-      ↓
-Question CO
-      ↓
-Goal CO
-      ↓
-Workspace activation
-      ↓
-Memory retrieval
-      ↓
-Generative Hypothesis (LLM)
-      ↓
-Evidence retrieval
-      ↓
-Competition
-      ↓
-Deliberative / Symbolic Verification
-      ↓
-Conflict / Confirmation Evaluation
-      ↓
-Belief Update
-      ↓
-Reflection
-      ↓
-Answer Generation
+S_t = <O_t, J_t, W_t, G_t, P_t, M_t, B_t, X_t>
 ```
 
-For each transition step, GCAS 0.2 will specify:
-1. Created/modified Cognitive Objects,
-2. Originating cognitive processor,
-3. Workspace admission criteria,
-4. Broadcast trigger conditions,
-5. Epistemic state mutation rules,
-6. Provenance graph update semantics,
-7. Termination and loop-interruption criteria.
+where:
+
+* `O` is the durable set of versioned Cognitive Objects,
+* `J` is the justification, provenance, contradiction, and supersession graph,
+* `W` is the bounded Workspace state, including pending and active candidates,
+* `G` is the set of Goals and their operational states,
+* `P` is the set of active Cognitive Processes and processor capabilities,
+* `M` is the set of memory stores, indexes, and consolidation metadata,
+* `B` is the remaining resource and failure budget,
+* `X` is the latest authoritative observations of accessible environments.
+
+A semantic Cognitive Event $e_t$ triggers a transition:
+
+```text
+transition(S_t, e_t, processor, policy) -> <S_(t+1), emitted-events, effects>
+```
+
+Every committed transition MUST identify its triggering event, responsible processor or policy, input COs, created or superseded COs,
+resource effects, and causal parent. A transition that changes durable epistemic state MUST be auditable after process termination.
+
+## 13.2 Events, Effects, and Ordering
+
+A Cognitive Event reports a semantic occurrence; it does not by itself authorize an external effect. External or persistent effects
+MUST cross the appropriate Action, Memory Admission, or governance boundary.
+
+Implementations MAY process independent events concurrently. For causally related events they MUST preserve a recoverable partial order.
+Each event SHOULD carry `event_id`, `process_id`, `goal_id`, `caused_by`, `state_version`, `producer`, and `timestamp`. When deterministic
+replay is impossible, the system MUST record nondeterministic inputs and scheduling decisions sufficiently for probabilistic reproduction.
+
+Duplicate delivery MUST NOT cause duplicate terminal outcomes or ungoverned repeated effects. Implementations MUST define idempotency or
+deduplication behavior for Actions, terminal events, belief transitions, and Memory Admission.
+
+## 13.3 Processor Contracts and Capability Claims
+
+Each processor MUST declare the CO and event types it accepts and may emit, the external capabilities it requires, and whether it may
+request effects. A processor capability declaration is itself a scoped Claim subject to observation and revision from performance history.
+
+GCAS distinguishes logical roles that MAY be implemented by one or many physical modules:
+
+* **Generator:** proposes hypotheses, interpretations, candidate plans, or candidate actions;
+* **Retriever:** proposes existing COs relevant to active state;
+* **Planner:** constructs Plans, subgoals, and acceptance dependencies;
+* **Evaluator:** produces typed assessments or Evidence;
+* **Verifier:** evaluates a declared verification target under an explicit contract;
+* **Executor:** crosses an Action boundary and observes its result;
+* **Controller:** schedules work, enforces budgets, and decides termination;
+* **Consolidator:** proposes durable memory admission, generalization, supersession, or forgetting;
+* **Renderer:** constructs a user-facing answer from terminal Goal state and accepted supporting COs.
+
+Role separation is semantic rather than necessarily physical. If the same physical model occupies generator and verifier roles, the
+verification record MUST declare this shared failure source; the result MUST NOT be represented as independent verification.
+
+## 13.4 Cognitive Object Lifecycle
+
+Lifecycle state is independent of epistemic status. The normal operational lifecycle is:
+
+```text
+CREATED -> PROPOSED -> ADMITTED -> ACTIVE -> ARCHIVED
+                    \-> RETRACTED
+any non-terminal version -> SUPERSEDED by a linked new version
+```
+
+* `CREATED`: validated as a well-formed CO and added to Cognitive State;
+* `PROPOSED`: submitted as a candidate for Workspace admission or another governed decision;
+* `ADMITTED`: selected during a Workspace round;
+* `ACTIVE`: broadcast as part of the current bounded focus;
+* `RETRACTED`: withdrawn from competition without erasing history;
+* `SUPERSEDED`: replaced for current use by a linked version;
+* `ARCHIVED`: retained durably but excluded from ordinary active selection.
+
+Workspace selection MUST NOT change epistemic or verification status. Retraction from Workspace MUST NOT delete the CO from durable state.
+
+## 13.5 Workspace Round Semantics
+
+A conforming Workspace round MUST expose the following logical stages:
+
+```text
+COLLECT -> ELIGIBILITY -> SCORE -> ADMIT -> BROADCAST -> REACT -> RELEASE
+```
+
+1. **Collect:** processors submit typed candidate COs with goal and process scope.
+2. **Eligibility:** policy removes malformed, expired, unauthorized, or out-of-scope candidates; rejection reasons are recorded.
+3. **Score:** eligible candidates receive comparable scheduling priority from declared factors such as goal relevance, novelty,
+   urgency, uncertainty, conflict, expected information gain, risk, and cost.
+4. **Admit:** at most the bounded capacity is selected. Tie-breaking and nondeterministic choices MUST be traceable.
+5. **Broadcast:** admitted COs become available to subscribed processors through semantic events.
+6. **React:** processors independently produce proposals, requests, or no response.
+7. **Release:** active focus is cleared or carried forward under an explicit retention policy; durable COs remain in Cognitive State.
+
+A Workspace implementation MAY fuse stages or execute them asynchronously, provided the observable semantics are equivalent. Workspace
+capacity and scoring policy MUST be configurable and evaluable; GWT inspiration alone does not establish their effectiveness.
+
+## 13.6 Epistemic Transition Semantics
+
+Epistemic transitions MUST be justified by new CO versions and graph relations. Minimum rules are:
+
+1. Model-generated content begins as `HYPOTHESIS/UNVERIFIED` with `LLM` provenance.
+2. User and sensor input begins as an `Observation`; observation does not imply truth.
+3. Retrieval, broadcast, repetition, source count without lineage analysis, or model consensus does not promote status.
+4. An Evaluator or Verifier creates a typed Verification or Evidence record declaring target, method, scope, inputs, outcome, coverage,
+   and known shared failure sources.
+5. `FORMALLY_VERIFIED/DERIVATION_VALIDITY` establishes only that the conclusion follows in the declared formal system from the declared premises.
+6. An `EXECUTION_RESULT` verification establishes only what was observed from that execution in its recorded environment.
+7. Promotion to `ACCEPTED` requires an explicit domain or Goal acceptance policy whose evidence requirements are satisfied.
+8. Opposing evidence or incompatible scoped Claims create a `Conflict` CO. Conflict MUST NOT be resolved by silent deletion or scalar averaging.
+9. Refutation, expiration, or invalidation of a supporting premise makes dependent Claims eligible for re-evaluation. Historical acceptance remains auditable.
+10. `UNKNOWN`, `INCONCLUSIVE`, and `CONFLICTING_EVIDENCE` are valid outcomes and require no fabricated balancing Claim.
+
+GCAS does not mandate AGM, Bayesian, Dempster-Shafer, Subjective Logic, paraconsistent logic, NARS, or an ATMS. An implementation MUST,
+however, declare the belief-change and evidence-combination semantics used in each domain and MUST NOT combine heterogeneous confidence
+values as if they shared an undeclared scale.
+
+## 13.7 Goal and Process Semantics
+
+Every executable Goal MUST declare:
+
+* its scope and parent Goal, if any,
+* observable completion criteria or a named acceptance contract,
+* admissible evidence and required verification target,
+* resource and failure budgets,
+* terminal outcomes available when the criteria cannot be established.
+
+Goal operational states are:
+
+```text
+PENDING | ACTIVE | SATISFIED | INCONCLUSIVE | FAILED | CANCELLED
+```
+
+Goal state is distinct from process state and from the epistemic status of any individual Claim. A successful Action or accepted
+intermediate Claim MUST NOT set a Goal to `SATISFIED` unless a Goal Verifier establishes `GOAL_SATISFACTION` under the Goal's acceptance
+contract. Open-ended questions MAY use an acceptance contract based on adequate evidence coverage and calibrated abstention rather than
+an executable oracle, but the weaker assurance MUST be declared.
+
+Subgoals inherit neither truth nor completion automatically. Their relation to the parent Goal and the rule for composing their evidence
+MUST be explicit.
+
+## 13.8 Governed Action Transaction
+
+Every effectful Action follows this logical transaction:
+
+```text
+Action Proposal
+  -> Policy and Capability Check
+  -> Authorization
+  -> Execution
+  -> Result or Failure Observation
+  -> Reproducibility Record
+  -> Evaluation
+  -> Goal/Belief Reconciliation
+```
+
+Authorization MUST be bound to the exact or explicitly parameterized Action, capability scope, environment, and process. Failure before
+execution MUST NOT be represented as an environment Result. Late or duplicate callbacks after cancellation or termination MAY be retained
+as observations but MUST NOT reopen a terminal Goal or produce a second terminal response.
+
+Runtime governance is not assumed complete. Implementations SHOULD distinguish statically guaranteed properties, runtime-enforced
+properties, best-effort detections, sandbox containment, and properties known to be undecidable or outside monitor visibility.
+
+## 13.9 Memory Retrieval and Consolidation Process
+
+Memory retrieval produces candidate COs plus retrieval metadata; it does not copy epistemic authority into the active Goal. Before a
+retrieved object affects planning or belief, guarded merge MUST check goal relevance, scope, temporal validity, provenance, contradiction,
+and relation to fresh observations.
+
+Consolidation from episodic into semantic or procedural memory is a governed epistemic transition. It MUST preserve source episodes and
+MUST record any abstraction, summarization, loss, or generalization. A semantic memory Claim derived solely from model-generated summaries
+remains unverified unless independently evaluated. Controlled forgetting MUST preserve the justification needed to understand surviving Claims.
+
+## 13.10 Metacognitive Process
+
+Metacognition operates on explicit first- and higher-order COs representing process state, capabilities, budgets, progress, failures,
+strategy history, and uncertainty. It MAY reuse ordinary retrieval, reasoning, planning, and learning mechanisms; GCAS does not require a
+dedicated metacognitive homunculus.
+
+Metacognitive outputs are hypotheses about system operation unless grounded by trace evidence or external evaluation. A processor's
+self-report of confidence, success, or error is not authoritative merely because it concerns itself. Metacognitive memory SHOULD support
+empirical revision of capability Claims such as verifier coverage, tool reliability, or expected strategy cost.
+
+## 13.11 Progress, Replanning, and Termination
+
+Control MUST detect bounded non-progress using declared signals such as repeated equivalent Actions, unchanged unresolved criteria,
+oscillating Plans, repeated tool failures, exhausted budgets, or absence of eligible proposals. Replanning SHOULD consume a typed
+Reflection containing the failed criterion, relevant observations, and remaining budgets rather than replaying an undifferentiated transcript.
+
+A process MUST emit exactly one terminal outcome visible to its caller:
+
+```text
+COMPLETED | INCONCLUSIVE | FAILED | CANCELLED | INTERRUPTED
+```
+
+`COMPLETED` requires a `SATISFIED` Goal and accepted `GOAL_SATISFACTION` verification. Budget exhaustion, lack of verifier coverage,
+unresolved conflict, and insufficient information normally produce `INCONCLUSIVE` or `FAILED` according to the Goal contract. Terminal
+events MUST include the reason, remaining unresolved criteria, and supporting CO identifiers.
+
+## 13.12 Normative Scientific Inquiry Trace
+
+For the inquiry *"Is claim X from publication Y supported?"*, a conforming process exposes at least the following logical trace.
+Physical implementations MAY interleave or repeat stages but MUST preserve their epistemic boundaries.
+
+| Stage | Trigger | Required output and invariant |
+| :--- | :--- | :--- |
+| 1. Intake | User input | `Question` Observation; user text is not a verified Claim. |
+| 2. Goal formation | `ObservationReceived` | Goal with scope, completion criteria, evidence policy, and budgets. |
+| 3. Initial activation | `GoalCreated` | Goal proposed to a bounded Workspace round. |
+| 4. Memory retrieval | Goal broadcast | Relevant CO candidates with retrieval metadata; no status promotion. |
+| 5. Context projection | Retrieved candidates evaluated | Guarded merge of Goal, current observations, selected memories, and constraints. |
+| 6. Hypothesis generation | Context available | One or more `HYPOTHESIS/UNVERIFIED` Claims with LLM provenance. |
+| 7. Evidence acquisition | Hypothesis broadcast | Source Observations and Evidence with resolvable provenance and temporal scope. |
+| 8. Competition | Multiple candidates pending | Recorded eligibility, scoring, and admission; selection is not verification. |
+| 9. Deliberation | Evidence/hypothesis admitted | Derivations, tests, counterexamples, or verification requests with declared targets. |
+| 10. Evaluation | Result/evidence available | Typed Verification records stating scope, coverage, outcome, and failure dependencies. |
+| 11. Conflict handling | Incompatible Claims detected | Explicit Conflict CO; preserve both claims and their justification graphs. |
+| 12. Belief revision | Acceptance policy evaluated | New versioned Claim status or an explicit inconclusive outcome. |
+| 13. Reflection | Progress or failure event | Trace-grounded assessment and, when useful, revised strategy under remaining budget. |
+| 14. Goal verification | Candidate answer available | Independent or dependency-declared verification of `GOAL_SATISFACTION`. |
+| 15. Rendering | Goal terminal | Answer derived from terminal state, including uncertainty, conflicts, and sources. |
+| 16. Consolidation | Process terminal | Governed episodic record and optional semantic/procedural proposals; no automatic truth promotion. |
+
+The minimum correct result may be `INCONCLUSIVE`. A fluent answer unsupported by the recorded trace is non-conforming.
+
+## 13.13 Assurance and Verifier Independence
+
+Verification records SHOULD declare an assurance class:
+
+* **V0 — Self-report:** the generating processor assesses its own output;
+* **V1 — Re-sampling or prompt separation:** the same model family is reused with partially shared failure modes;
+* **V2 — Model diversity:** a distinct learned evaluator is used, but training data or representational biases may overlap;
+* **V3 — External deterministic check:** a test, parser, solver, theorem prover, or reproducible computation checks a bounded property;
+* **V4 — Independent empirical observation:** a separately governed source or measurement checks a world-facing claim;
+* **V5 — Formal proof plus verified grounding:** derivation validity and the required grounding assumptions are separately established.
+
+Higher class is not universally better and does not imply wider coverage. Goal policies SHOULD require the lowest class sufficient for
+risk and domain while recording uncovered properties. Multiple verifiers increase assurance only to the extent that their failure modes
+are independent and their evidence is relevant to the same scoped Claim.
 
 ---
 
-# 14. Open Research Questions (GCAS 0.2 Candidate Topics)
+# 14. GCAS 0.2 Conformance and Empirical Evaluation
+
+## 14.1 GCAS-Process Conformance
+
+In addition to GCAS-Core requirements, a claim of **GCAS-Process 0.2** conformance MUST demonstrate:
+
+1. versioned CO lifecycle separate from epistemic status;
+2. durable causal transition records and duplicate-safe terminal behavior;
+3. explicit verification targets, scopes, coverage, and shared verifier dependencies;
+4. Workspace rounds with bounded capacity and observable collect-to-release semantics;
+5. justification, contradiction, supersession, and invalidation relations;
+6. Goals with acceptance contracts, budgets, and exactly one terminal process outcome;
+7. governed Action transactions in which execution success is distinct from Goal satisfaction;
+8. epistemically neutral retrieval and guarded memory merge;
+9. trace-grounded Reflection and bounded non-progress handling;
+10. at least one complete implementation-independent inquiry trace conforming to §13.12.
+
+Architectural conformance establishes that these boundaries exist and behave according to the specification. It does not establish broad
+competence, calibrated factuality, safety, general intelligence, consciousness, or superiority over a simpler system.
+
+## 14.2 Required Evaluation Separation
+
+Implementations SHOULD maintain three distinct evaluation layers:
+
+* **Invariant tests:** deterministic checks of transition, lifecycle, authorization, persistence, and terminal semantics;
+* **Competence tests:** task-specific executable or human-validated success criteria;
+* **Architectural evidence:** controlled comparisons showing whether GCAS mechanisms improve reliability, cost, or long-horizon behavior.
+
+These layers MUST NOT be reported as interchangeable. A scripted good proposal tests orchestration, not whether a live model will produce it.
+
+## 14.3 Recommended Baselines, Ablations, and Metrics
+
+Empirical claims for GCAS SHOULD compare, where feasible:
+
+1. a model-only or single-turn baseline;
+2. transcript or maximum-context accumulation;
+3. retrieval-augmented generation without epistemic control;
+4. tiered memory without GCAS verification semantics;
+5. full GCAS and ablations removing Workspace competition, guarded merge, provenance, external verification, or Reflection.
+
+Primary reliability metrics SHOULD include false acceptance rate, correct abstention, risk-coverage behavior, provenance and citation
+fidelity, contradiction retention, stale-memory use, terminal-response rate, repeated non-progressing Actions, task success, model and tool
+calls, tokens, latency, and cost. Long-context evaluations SHOULD vary evidence position and irrelevant context. Long-horizon evaluations
+SHOULD report success as a function of task length rather than only aggregate pass rate.
+
+# 15. Open Research Questions (GCAS 0.3 Candidate Topics)
 
 1. **Workspace Capacity:** How should workspace capacity bounds be mathematically or empirically defined?
-2. **Standardized Competition:** Can workspace competition algorithms be standardized across heterogeneous processors?
-3. **Identity & Deduplication:** What are the optimal graph deduplication algorithms for Cognitive Objects across long time spans?
-4. **Heterogeneous Confidence:** How can confidence metrics from neural, probabilistic, and symbolic systems be unified?
-5. **Formal Contradiction Models:** What paraconsistent logic models best represent coexisting contradictory beliefs?
-6. **Decay & Retention Curves:** What memory decay algorithms optimize retention vs. computational efficiency in persistent AI?
-7. **Attention Granularity:** Should attention be implemented as an explicit central processor, a distributed field, or both?
-8. **NCSI Standardization:** What is the minimal universal API for exposing internal neural representations across diverse model architectures?
-9. **Symbol Grounding:** How can continuous neural concept directions be aligned with discrete symbolic atoms without false equivalences?
-10. **Neural Steering Invariants:** How can activation steering be constrained to prevent degradation of model instruction-following?
-11. **Self-Model Architecture:** What minimal explicit self-model is required for robust metacognition?
-12. **Goal Provenance & Motivation:** What safety policies should govern goal creation, modification, and suspension?
-13. **Bus Transactional Guarantees:** Does the Cognitive Bus require causal ordering, transactional rollback, or vector clocks?
-14. **Resource-Aware Attention:** How can monetary cost, token budgets, and hardware latency participate directly in cognitive attention algorithms?
-15. **Execution Semantics & Dry Run:** Formalizing the step-by-step cognitive execution graph for a complex scientific benchmark task ("How cognition proceeds").
+2. **Competition Policy:** Which competition and broadcast policies produce measurable gains over simpler routing mechanisms?
+3. **Semantic Identity:** How should implementations deduplicate equivalent content while retaining distinct assertions, sources, and histories?
+4. **Evidence Combination:** Which calibrated belief models combine heterogeneous evidence without collapsing it into a misleading scalar?
+5. **Belief Revision:** When should GCAS use truth-maintenance, assumption-based, probabilistic, or paraconsistent semantics?
+6. **Source Independence:** How should shared ancestry, model dependence, and citation copying reduce the effective weight of corroboration?
+7. **Retention and Revalidation:** What governed forgetting, decay, and revalidation policies minimize both stale-memory use and catastrophic loss?
+8. **Distributed Consistency:** Which causal ordering, transaction, rollback, and vector-clock guarantees are required across deployments?
+9. **Open-Ended Goals:** How can acceptance contracts specify adequate evidence and coverage where no complete oracle exists?
+10. **Verifier Coverage:** How should correlated failure modes and untested properties be quantified across mixed assurance classes?
+11. **Metacognitive Learning:** Which control capabilities should be fixed, learned, or learned under a formally constrained policy?
+12. **NCSI Faithfulness:** What minimal interface and causal interventions establish that a neural-state signal is stable and behaviorally meaningful?
+13. **Symbol Grounding:** How can continuous neural concepts be aligned with symbolic objects without claiming false equivalence?
+14. **Safe Neural Steering:** How can activation steering be bounded, audited, and reversed without degrading instruction following?
+15. **Resource-Aware Scheduling:** How should risk, information value, monetary cost, tokens, time, and hardware jointly affect attention?
+16. **Runtime Governance Limits:** Which unsafe traces cannot be prevented by runtime policy enforcement alone and require upstream guarantees?
+17. **Transfer and Generalization:** Which GCAS mechanisms improve reliability across models, domains, and task horizons rather than on one benchmark?
 
 ---
 
-# 15. Core Maxim
+# 16. Research Grounding (Non-Normative)
+
+GCAS does not prescribe the following theories or mechanisms as implementation dependencies. They ground design choices and define
+comparison points that implementations SHOULD address when making scientific claims:
+
+* **Common cognitive architecture and metacognition:** the Standard Model/Common Model motivates reusable functional components and explicit
+  control state; GCAS keeps control distributed and empirically inspectable rather than postulating a privileged homunculus.
+* **Global Workspace Theory:** motivates bounded competition and broadcast; GCAS operationalizes these as observable rounds whose benefit
+  must be established by ablation rather than inferred from terminology.
+* **Truth-maintenance and assumption-based reasoning:** motivate versioned justification graphs, dependency invalidation, and preservation of
+  conflicting claims.
+* **Subjective logic and calibrated uncertainty:** motivate typed uncertainty and source dependence; GCAS intentionally does not mandate a
+  universal scalar confidence value.
+* **Executable world models and scientific workflows:** motivate separating proposal, execution, derivation checking, empirical observation,
+  and Goal satisfaction.
+* **Long-context and memory research:** motivates dynamic context projection and guarded merge instead of treating a growing transcript or
+  retrieved text as current belief.
+* **Hallucination detection and self-correction research:** motivates scoped verification and explicit verifier dependence; fluent self-review
+  is a weak assurance class, not proof.
+* **Runtime policy enforcement limits:** motivate layered governance and explicit acknowledgement that no monitor can guarantee arbitrary
+  semantic safety properties for unrestricted agents.
+
+Selected references:
+
+1. J. E. Laird, C. Lebiere, and P. S. Rosenbloom, “A Standard Model of the Mind,” *AI Magazine* 38(4), 2017. <https://doi.org/10.1609/aimag.v38i4.2744>
+2. J. E. Laird et al., “Unified, Comprehensive Metacognition within Common Model,” *AGI-26*, 2026. <https://doi.org/10.1007/978-3-032-33195-3_1>
+3. H. Schneider, “Improving Long-Horizon Task Completion in a Proto-AGI Cognitive Architecture: A Memory-Centric Approach,” *AGI-26*, 2026. <https://doi.org/10.1007/978-3-032-33195-3_20>
+4. S. Rodionov, “Executable World Models for ARC-AGI-3 in the Era of Coding Agents,” *AGI-26*, 2026. <https://doi.org/10.1007/978-3-032-33195-3_15>
+5. P. C. Tiffany III, “The Hypothesis Surface: An Operational Epistemology for Autonomous Research,” *AGI-26*, 2026. <https://doi.org/10.1007/978-3-032-33195-3_25>
+6. S. Shukla and H. Joshi, “Fundamental Limits of Runtime Policy Enforcement in Multi-agent AGI Systems,” *AGI-26*, 2026. <https://doi.org/10.1007/978-3-032-33195-3_21>
+7. J. Doyle, “A Truth Maintenance System,” *Artificial Intelligence* 12(3), 1979. <https://doi.org/10.1016/0004-3702(79)90008-0>
+8. J. de Kleer, “An Assumption-based TMS,” *Artificial Intelligence* 28(2), 1986. <https://doi.org/10.1016/0004-3702(86)90080-9>
+9. W3C, “PROV-O: The PROV Ontology,” 2013. <https://www.w3.org/TR/prov-o/>
+10. N. F. Liu et al., “Lost in the Middle,” *TACL* 12, 2024. <https://doi.org/10.1162/tacl_a_00638>
+11. R. Kamoi et al., “When Can LLMs Actually Correct Their Own Mistakes?,” *TACL* 12, 2024. <https://doi.org/10.1162/tacl_a_00713>
+12. S. Farquhar et al., “Detecting Hallucinations in Large Language Models Using Semantic Entropy,” *Nature* 630, 2024. <https://doi.org/10.1038/s41586-024-07421-0>
+13. G. Marra et al., “From Statistical Relational to Neuro-Symbolic Artificial Intelligence,” *Artificial Intelligence* 328, 2024. <https://doi.org/10.1016/j.artint.2023.104062>
+14. A. Jøsang, *Subjective Logic*, Springer, 2016. <https://doi.org/10.1007/978-3-319-42337-1>
+
+---
+
+# 17. Core Maxim
 
 > **Intelligence emerges not from a single model possessing every capability, but from coordinated cognitive processes operating over shared, persistent,
 > verifiable representations of knowledge, goals, evidence, memory, time, and action.**

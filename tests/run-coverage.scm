@@ -3,6 +3,7 @@
 (use-modules (system vm coverage)
              (system vm vm)
              (ice-9 match)
+             (ice-9 popen)
              (ice-9 rdelim)
              (srfi srfi-1))
 
@@ -38,9 +39,23 @@
          "test-traceback.scm"
          "test-curator.scm"
          "test-llm-client.scm"
-         "test-hitl-sync.scm")))
+         "test-hitl-sync.scm"
+         ;; GCAS 0.1: Cognitive Object Model and Cognitive Bus tests
+         "test-com.scm"
+         "test-cognitive-bus.scm"
+         "test-cognitive-session.scm"
+         "test-goal-verifier.scm"
+         "test-production-processors.scm"
+         "test-gcas-eval-corpus.scm"
+         "test-gcas-live-evaluation.scm"
+         "test-cognitive-memory.scm"
+         "test-deliberative-processor.scm"
+         "test-gcas-showcase.scm")))
 
 (define failed-tests '())
+
+(define test-timeout
+  (or (getenv "GAIA_TEST_TIMEOUT") "120"))
 
 (define (run-test-file file)
   (display (format #f "\n========================================\n"))
@@ -55,6 +70,31 @@
           (begin
             (set! failed-tests (cons (cons file status) failed-tests))
             (display (format #f "\n[FAILURE] ~a failed with exit status ~a.\n" file status)))))))
+
+(define (run-test-file-isolated file)
+  "Run FILE in a fresh Guile process so threads, fibers and module mocks from
+one suite cannot leak into the next one.  `timeout' also prevents a broken
+suite from occupying a CI runner indefinitely."
+  (display (format #f "\n========================================\n"))
+  (display (format #f "Running (isolated, timeout ~as): ~a\n" test-timeout file))
+  (display (format #f "========================================\n"))
+  (force-output)
+  (let* ((status (system* "timeout" "--signal=TERM" "--kill-after=10s"
+                          test-timeout
+                          ;; Compile source on first use and share Guile's
+                          ;; cache between isolated suites.  Disabling
+                          ;; compilation makes Goblins fail in the restricted
+                          ;; GitLab container, while forcing a rebuild for
+                          ;; every suite makes CI unnecessarily slow.
+                          "guile" "--auto-compile" "-L" "src" file))
+         (exit-status (status:exit-val status)))
+    (if (and exit-status (zero? exit-status))
+        (display (format #f "\n[SUCCESS] ~a finished successfully.\n" file))
+        (begin
+          (set! failed-tests
+                (cons (cons file (or exit-status "terminated")) failed-tests))
+          (display (format #f "\n[FAILURE] ~a failed or timed out (status ~a).\n"
+                           file (or exit-status "terminated")))))))
 
 (define (filter-lcov input-path output-path)
   "Filters an LCOV file to only retain records matching gaia/ modules, excluding tests and overrides."
@@ -149,8 +189,8 @@
                           failed-tests)
                 (real-exit 1))))))
     (begin
-      (display "[COVERAGE] Running test suite without VM instrumentation (warm-up)...\n")
-      (for-each run-test-file test-files)
+      (display "[TEST] Running suites in isolated processes...\n")
+      (for-each run-test-file-isolated test-files)
       (display "\n========================================\n")
       (if (null? failed-tests)
           (begin

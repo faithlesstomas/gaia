@@ -10,6 +10,16 @@
   #:use-module (gaia core)
   #:use-module (gaia executor)
   #:use-module (gaia utils)
+  #:use-module (gaia com)
+  #:use-module (gaia cognitive-session)
+  #:use-module (gaia cognitive-process)
+  #:use-module (gaia cognitive-control)
+  #:use-module (gaia cognitive-memory)
+  #:use-module (gaia cognitive-state)
+  #:use-module (gaia cognitive-bus)
+  #:use-module (gaia workspace)
+  #:use-module (gaia goal-verifier)
+  #:use-module (gaia production-processors)
   #:export (^session-orchestrator))
 
 (define (clean-history history)
@@ -28,12 +38,102 @@
 (define (new-promise-pair)
   (spawn-promise-and-resolver))
 
+(define (submit-cognitive-object! cognitive-session co priority origin)
+  "Submit a CO to the session's GCAS workspace and require its admission."
+  (session-submit! cognitive-session co #:priority priority #:origin origin)
+  (let ((admitted (session-advance! cognitive-session)))
+    (unless (and admitted (equal? (co-id admitted) (co-id co)))
+      (error "Cognitive Object was not admitted by Control" (co-id co)))
+    co))
+
+(define (cognitive-event-summary cognitive-session)
+  (map (lambda (event)
+         `((id . ,(event-id event))
+           (type . ,(event-type event))
+           (origin . ,(event-origin event))))
+       (state-events (session-state cognitive-session))))
+
+(define (cognitive-object-summary co)
+  `((id . ,(co-id co))
+    (type . ,(co-type co))
+    (content . ,(co-content co))
+    (provenance . ,(co-provenance co))
+    (epistemic-status . ,(co-epistemic-status co))
+    (verification-status . ,(co-verification-status co))
+    (relations . ,(co-relations co))))
+
+(define (trace-preview value)
+  (let* ((text (format #f "~s" value))
+         (single-line
+          (string-map (lambda (char)
+                        (if (or (char=? char #\newline) (char=? char #\return))
+                            #\space char))
+                      text)))
+    (if (> (string-length single-line) 240)
+        (string-append (substring single-line 0 240) "...")
+        single-line)))
+
+(define (make-cognitive-trace-sink session-id)
+  "Return a structured server logger for every durable cognitive event."
+  (lambda (session event)
+    (let* ((payload (event-payload event))
+           (workspace (session-workspace session))
+           (process (session-current-process session))
+           (control (if process (process-control process) (session-control session)))
+           (payload-summary
+            (if (cognitive-object? payload)
+                (format #f
+                        "co={id=~a type=~a provenance=~a epistemic=~a verification=~a relations=~s content=~a}"
+                        (co-id payload) (co-type payload) (co-provenance payload)
+                        (co-epistemic-status payload) (co-verification-status payload)
+                        (co-relations payload) (trace-preview (co-content payload)))
+                (format #f "payload=~a" (trace-preview payload)))))
+      (gaia-log
+       (format #f
+               "[GCAS][~a] event=~a origin=~a ~a process={id=~a active=~a outcome=~a} control={transitions=~a progress=~a failures=~a termination=~a} workspace={pending=~s active=~s}"
+               session-id (event-type event) (event-origin event) payload-summary
+               (and process (process-id process))
+               (and process (process-active? process))
+               (and process (process-outcome process))
+               (control-transition-count control)
+               (control-progress-count control)
+               (control-failure-count control)
+               (control-termination-reason control)
+               (map co-id (workspace-candidates workspace))
+               (map co-id (workspace-active workspace)))))))
+
+(define (cognitive-status-summary cognitive-session)
+  (let* ((process (session-current-process cognitive-session))
+         (control (and process (process-control process)))
+         (workspace (session-workspace cognitive-session)))
+    `((process . ,(and process
+                       `((id . ,(process-id process))
+                         (active . ,(process-active? process))
+                         (outcome . ,(process-outcome process))
+                         (completion-criteria . ,(process-completion-criteria process)))))
+      (goal . ,(and process (cognitive-object-summary (process-goal process))))
+      (control . ,(and control
+                       `((transitions . ,(control-transition-count control))
+                         (max-transitions . ,(control-max-transitions control))
+                         (progress . ,(control-progress-count control))
+                         (failures . ,(control-failure-count control))
+                         (termination-reason . ,(control-termination-reason control)))))
+      (workspace . ((capacity . ,(workspace-capacity workspace))
+                    (pending . ,(map cognitive-object-summary
+                                     (workspace-candidates workspace)))
+                    (active . ,(map cognitive-object-summary
+                                    (workspace-active workspace)))))
+      (objects . ,(map cognitive-object-summary
+                       (state-objects (session-state cognitive-session))))
+      (memory . ,(map cognitive-object-summary
+                      (memory-objects (session-memory cognitive-session)))))))
+
 ;; Session Orchestrator Actor
-(define-actor (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model thinking #:optional (workspace-dir #f))
+(define-actor (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model thinking #:optional (workspace-dir #f) (cognitive-session (make-cognitive-session #:memory-path (string-append "sessions/" session-id ".gcas-memory.scm") #:state-path (string-append "sessions/" session-id ".gcas-state.scm") #:trace-sink (make-cognitive-trace-sink session-id))))
   #:self self
   (methods
    [(update-history new-history)
-    (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client new-history model thinking workspace-dir) 'ok)]
+    (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client new-history model thinking workspace-dir cognitive-session) 'ok)]
 
    [(handle-message msg)
     (match msg
@@ -46,6 +146,7 @@
        (let ((core-mod (resolve-module '(gaia core) #:ensure #f)))
          (when core-mod
            (module-set! core-mod '*interrupted* #f)))
+       (session-request-interrupt! cognitive-session)
        'ok)
 
       (('eval task . retry-args)
@@ -130,87 +231,74 @@
 
       (('solve task)
        (gaia-log (format #f "[SERVER] Received solve task: ~a" task))
-       (let* ((event-sink (lambda (event) (send-event client-socket event)))
-              (chat-promise (<- llm-client 'chat session-id task model
-                                (get-solver-system-prompt)
-                                thinking history event-sink)))
-         (on chat-promise
-             (lambda (response)
-               (let* ((payload (assoc-ref response "payload"))
-                      (err (assoc-ref response "error"))
-                      (response-text (if payload
-                                         (assoc-ref payload "content")
-                                         (string-append "Error from LLM API: " (if (string? err) err (format #f "~a" err))))))
-                 (if (and err (string=? err "user-interrupt"))
-                     (begin
-                       (gaia-log "[SERVER] Solve interrupted by user.")
-                       (send-event client-socket `(error "user-interrupt")))
-                     (let ((action-code (extract-code response-text)))
-                       (if action-code
-                           ;; Spawning agent-actor solver recursively
-                           (begin
-                             (gaia-log "[SERVER] LLM initiated code execution. Spawning agent-actor solver.")
-                             (send-event client-socket `(code ,action-code))
-                             (gaia-log (string-append C-BOLD C-CYAN "\n[GAIA] Executing Scheme Code:\n" C-RESET action-code "\n"))
-                             (let ((eval-promise (<- sandbox-actor 'eval action-code)))
-                               (on eval-promise
-                                   (lambda (eval-res)
-                                     (let* ((result-str (match eval-res
-                                                          (('ok res)
-                                                           (send-event client-socket `(result ,res))
-                                                           (gaia-log (string-append C-GREEN "\n[REPL] Success:\n" C-RESET res "\n"))
-                                                           (string-append "Code executed successfully. Result:\n" res))
-                                                          (('error type msg)
-                                                           (let ((err-msg (string-append "Runtime Error (" (symbol->string type) "): " msg)))
-                                                             (send-event client-socket `(repl-error ,err-msg))
-                                                             (gaia-log (string-append C-RED "\n[REPL] Runtime Error:\n" C-RESET err-msg "\n"))
-                                                             err-msg))))
-                                            (step-history (append history
-                                                                  (list `(("role" . "user") ("content" . ,task))
-                                                                        `(("role" . "assistant") ("content" . ,response-text)))))
-                                            (step-transcript (list (cons "original-task" task)
-                                                                   (cons "assistant" (truncate-for-transcript response-text))
-                                                                   (cons "user" task))))
-                                       (let-values (((solve-promise resolve-solve) (new-promise-pair)))
-                                         (<- agent-actor 'solve-step task 0 history step-history 2 step-transcript result-str resolve-solve model thinking)
-                                         (on solve-promise
-                                             (lambda (res-pair)
-                                               (let ((answer (car res-pair))
-                                                     (updated-history (cdr res-pair)))
-                                                 (if (string=? answer "Interrupted")
-                                                     (begin
-                                                       (gaia-log "[SERVER] Solve-step interrupted by user.")
-                                                       (send-event client-socket `(error "user-interrupt")))
-                                                     (begin
-                                                       (gaia-log (format #f "[SERVER] Solve completed. Saving session ~a." session-id))
-                                                       (save-session session-id updated-history)
-                                                       (with-output-to-file ".last_session" (lambda () (display session-id)))
-                                                       (send-event client-socket `(final ,answer))
-                                                       (<- self 'update-history updated-history)))))
-                                             #:catch (lambda (err)
-                                                       (send-event client-socket `(error ,(format #f "Solver Error: ~a" err))))))))
-                                   #:catch (lambda (err)
-                                             (send-event client-socket `(error ,(format #f "Initial code execution crash: ~a" err)))))))
-                           ;; Conversational reply
-                           (let* ((prose (clean-assistant-content response-text))
-                                  (final-sig (extract-final-signal response-text))
-                                  (final-ans (if final-sig
-                                                 (match final-sig (('final ans) ans) (('final-var var) var) (_ prose))
-                                                 prose))
-                                  (updated-history (append history
-                                                           (list `(("role" . "user") ("content" . ,task))
-                                                                 `(("role" . "assistant") ("content" . ,response-text))))))
-                             (gaia-log "[SERVER] LLM responded conversationally to solve task.")
-                             (send-event client-socket `(final ,final-ans))
-                             (save-session session-id updated-history)
-                             (with-output-to-file ".last_session" (lambda () (display session-id)))
-                             (<- self 'update-history updated-history)))))))
+       (let ((event-sink (lambda (event) (send-event client-socket event))))
+         (start-production-process!
+          cognitive-session task
+          #:generate
+          (lambda (context succeed fail)
+            ;; The Generative Processor receives reconstructed cognitive context,
+            ;; never the transcript. The actor is only an asynchronous adapter.
+            (let ((chat-promise (<- llm-client 'chat session-id context model
+                                     (get-gcas-system-prompt) thinking '() event-sink)))
+              (on chat-promise
+                  (lambda (response)
+                    (let ((payload (assoc-ref response "payload"))
+                          (err (assoc-ref response "error")))
+                      (if (and payload (not err))
+                          (succeed (assoc-ref payload "content"))
+                          (fail (if (string? err) err (format #f "~a" err))))))
+                  #:catch (lambda (err) (fail (format #f "~a" err))))))
+          #:execute
+          (lambda (action-code succeed fail)
+            ;; The Execution Processor owns ActionRequested/Result semantics;
+            ;; this closure only adapts the Goblins sandbox vow.
+            (let ((eval-promise (<- sandbox-actor 'eval action-code)))
+              (on eval-promise
+                  (lambda (eval-res)
+                    (match eval-res
+                      (('ok result) (succeed result))
+                      (('error type message) (fail type message))))
+                  #:catch (lambda (err)
+                            (fail 'runtime (format #f "~a" err))))))
+          #:extract-action extract-gcas-action
+          #:completion-criteria (goal-completion-criteria task)
+          #:verify-goal (select-goal-verifier task)
+          #:on-client-event event-sink
+          #:on-finished
+          (lambda (outcome final-text hypothesis-text)
+            (let ((updated-history
+                   (append history
+                           (list `(("role" . "user") ("content" . ,task))
+                                 `(("role" . "assistant")
+                                   ("content" . ,final-text))))))
+              (save-session session-id updated-history)
+              (with-output-to-file ".last_session" (lambda () (display session-id)))
+              (send-event client-socket `(final ,(if (eq? outcome 'INSUFFICIENT_INFORMATION)
+                                                     (clean-assistant-content final-text)
+                                                     final-text)))
+              (<- self 'update-history updated-history))))))
+
+      ;; Explicit compatibility path for the legacy recursive LLM–REPL loop.
+      ;; It is an investigation processor, not the default cognitive control loop.
+      (('investigate task)
+       (gaia-log (format #f "[SERVER] Received legacy investigation task: ~a" task))
+       (let-values (((investigation-promise resolve-investigation) (new-promise-pair)))
+         (<- agent-actor 'solve task 0 history resolve-investigation model thinking)
+         (on investigation-promise
+             (lambda (result-pair)
+               (let ((answer (car result-pair))
+                     (updated-history (cdr result-pair)))
+                 (save-session session-id updated-history)
+                 (send-event client-socket `(final ,answer))
+                 (<- self 'update-history updated-history)))
              #:catch (lambda (err)
-                       (send-event client-socket `(error ,(format #f "LLM request failed: ~a" err)))))))
+                       (send-event client-socket `(error ,(format #f "Legacy investigation failed: ~a" err)))))))
 
       (('repl code)
        (gaia-log (format #f "[SERVER] Received REPL code execution request."))
-       (let ((before-promise (<- sandbox-actor 'definitions)))
+       (let* ((action-co (make-cognitive-object 'action code #:provenance 'USER))
+              (_ (submit-cognitive-object! cognitive-session action-co 50 'USER))
+              (before-promise (<- sandbox-actor 'definitions)))
          (on before-promise
              (lambda (before-defs)
                (let ((eval-promise (<- sandbox-actor 'eval code)))
@@ -218,6 +306,10 @@
                      (lambda (eval-res)
                        (match eval-res
                          (('ok val-str)
+                          (session-record-result!
+                           cognitive-session (co-id action-co)
+                           (make-cognitive-object 'result val-str #:provenance 'REPL
+                                                  #:relations `((produced-by . ,(co-id action-co)))))
                           (gaia-log (format #f "[SERVER] REPL success. Result: ~a" val-str))
                           (let ((after-promise (<- sandbox-actor 'definitions)))
                             (on after-promise
@@ -234,6 +326,10 @@
                                       (send-event client-socket `(repl-private-result ,val-str)))))))
                          (('error type msg)
                           (let ((err-msg (format #f "REPL Error (~a): ~a" type msg)))
+                            (session-record-failure!
+                             cognitive-session (co-id action-co)
+                             (make-cognitive-object 'result err-msg #:provenance 'REPL
+                                                    #:relations `((produced-by . ,(co-id action-co)))))
                             (gaia-log (format #f "[SERVER] REPL error: ~a" err-msg))
                             (send-event client-socket `(repl-private-result-error ,err-msg))))))
                      #:catch (lambda (err)
@@ -248,6 +344,16 @@
              (lambda (bindings)
                (send-event client-socket `(env-list ,bindings))))))
 
+      ;; Internal protocol endpoint for observability and integration tests.
+      ;; The interactive client does not expose this until it can render CO graphs.
+      (('get-cognitive-events)
+       (send-event client-socket
+                   `(cognitive-events ,(cognitive-event-summary cognitive-session))))
+
+      (('get-cognitive-state)
+       (send-event client-socket
+                   `(cognitive-state ,(cognitive-status-summary cognitive-session))))
+
       (('clear)
        (gaia-log (format #f "[SERVER] Clearing session ~a environment and history." session-id))
        (save-session session-id '())
@@ -255,7 +361,7 @@
               (new-sb-actor (spawn ^repl-sandbox session-id event-sink permission-sink '() workspace-dir))
               (new-agent-actor (spawn ^agent-actor session-id new-sb-actor llm-client event-sink permission-sink)))
          (send-event client-socket '(final "Environment and history cleared."))
-         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client '() model thinking workspace-dir) 'ok)))
+         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client '() model thinking workspace-dir (make-cognitive-session #:memory-path (string-append "sessions/" session-id ".gcas-memory.scm") #:state-path (string-append "sessions/" session-id ".gcas-state.scm") #:restore? #f #:trace-sink (make-cognitive-trace-sink session-id))) 'ok)))
 
       (('get-model)
        (send-event client-socket `(model-info ,model)))
@@ -264,7 +370,7 @@
        (let ((new-model-str (format #f "~a" new-model)))
          (gaia-log (format #f "[SERVER] Hot-swapping model to: ~a" new-model-str))
          (send-event client-socket `(final ,(string-append "Model switched to: " new-model-str)))
-         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history new-model-str thinking) 'ok)))
+         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history new-model-str thinking workspace-dir cognitive-session) 'ok)))
 
       (('list-models)
        (let ((models-promise (<- llm-client 'get-models)))
@@ -284,7 +390,7 @@
        (gaia-log (format #f "[SERVER] Set thinking mode to: ~a" state))
        (let* ((on? (or (eq? state #t) (string=? (format #f "~a" state) "on"))))
          (send-event client-socket `(final ,(string-append "Thinking mode set to: " (if on? "on" "off"))))
-         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model on? workspace-dir) 'ok)))
+         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model on? workspace-dir cognitive-session) 'ok)))
 
       (('get-state-injection)
        (let ((state-str (if (get-config 'state-injection) "on" "off")))
@@ -342,7 +448,7 @@
                       (new-agent-actor (spawn ^agent-actor new-id new-sb-actor llm-client event-sink permission-sink)))
                  (with-output-to-file ".last_session" (lambda () (display new-id)))
                  (send-event client-socket `(final ,(string-append "Session switched to: " new-id)))
-                 (bcom (^session-orchestrator bcom new-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client new-history model thinking new-ws) 'ok))))))
+                 (bcom (^session-orchestrator bcom new-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client new-history model thinking new-ws (make-cognitive-session #:memory-path (string-append "sessions/" new-id ".gcas-memory.scm") #:state-path (string-append "sessions/" new-id ".gcas-state.scm") #:trace-sink (make-cognitive-trace-sink new-id))) 'ok))))))
 
       (('list-sessions)
        (let ((sessions (if (file-exists? "sessions")
@@ -366,6 +472,11 @@
   /clear            - Clear current session history and environment
   /env              - Show variables defined in REPL
   /eval <scheme>    - Execute Scheme code directly in REPL
+  /solve <query>    - Run the GCAS cognitive process (default for normal input)
+  /investigate <q>  - Use the legacy recursive LLM–REPL investigation processor
+  /ask <query>      - Ask the LLM without initiating a GCAS process
+  /cognitive-events - Show the current session's GCAS event trace
+  /cognitive-state  - Show Goal, Control, Workspace, CO, and Memory state
   /ask <query>      - Ask a one-off question to AI (no recursion)
   /model [name]     - Show or change the active LLM model
   /models           - List available models

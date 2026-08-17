@@ -1,0 +1,117 @@
+# GCAS-Core Conformance Audit
+
+This document evaluates GAIA against the eight minimum requirements in
+[GCAS §11.2](../gcas.md#112-minimal-conformance-requirements-gcas-core). It is a
+implementation audit and executable acceptance record.
+
+**Current conclusion:** GAIA satisfies the minimum GCAS-Core requirements on its
+production `solve` path. The conformance gate covers the recurrent processor
+graph, independent Goal verification, answer policy, structured cross-turn
+memory, restoration, budgets, interruption, and inspection from the Rust CLI
+and Emacs client. This is a minimum architecture claim, not a claim of general
+intelligence or broad task verification: the registry currently provides a
+deterministic Fibonacci verifier and fails closed for unsupported task classes.
+
+Status meanings:
+
+- **Implemented:** present in the production path with acceptance evidence.
+- **Implemented at Core minimum:** the normative boundary is present and tested;
+  richer policy or capability remains planned.
+
+| GCAS-Core requirement | Status | Implemented substrate | Remaining conformance gap |
+|---|---|---|---|
+| Explicit COs, 3-axis metadata, provenance | Implemented | `gaia com` defines immutable COs with epistemic status, verification status, confidence, temporal validity, provenance, and relations. Persisted COs are validated again on restoration. | Expand lifecycle versioning as the ontology grows; this is not a current Core blocker. |
+| Hypotheses distinct from beliefs | Implemented | LLM output begins as `HYPOTHESIS`/`UNVERIFIED`; execution success does not establish the user's original claim. | Keep accepted execution observations explicitly scoped so `BeliefUpdated` cannot be mistaken for goal verification. |
+| Bounded Workspace with selective admission/broadcast | Implemented | Control records explicit Workspace rounds, selects one pending candidate by scheduling metadata, broadcasts it, and releases active focus while preserving the CO in State. Terminal boundaries clear active and pending proposals so processes remain isolated. | Improve scheduling policy with novelty, urgency, information gain, and goal-aware attention. |
+| At least Generative and Deliberative processors | Implemented | Memory Retrieval, Generative, Planner, Execution, Deliberative, Goal Verifier, Answer, and Control processors subscribe through the Cognitive Bus. The orchestrator supplies asynchronous LLM, sandbox, and client adapters. | Planner currently maps one Hypothesis to at most one Action; richer planning remains future work. |
+| Memory separate from prompt history | Implemented at Core minimum | Structured CO memory is persisted separately; user testimony remains an unverified Observation, verified Result/Evidence/Claim chains are consolidated, and selected context is reconstructed without appending chat history. | Add semantic retrieval, conflict/supersession policies, and more typed memory roles. |
+| Recurrent cognitive cycle with progress and loop monitoring | Implemented at bounded minimum | Every `solve` has isolated budgets and exactly-once termination. Failed actions and conflicts become Reflection COs, which trigger a bounded revised Hypothesis → Plan → linked subgoal → Action pass; Control monitors transition, failure, stall, and replan limits. A Goal Verifier decides completion from explicit evidence. | Add richer strategy switching and goal-aware progress measures. |
+| Separate execution with auditable Action/Result | Implemented | An admitted Action crosses an explicit sandbox boundary; Result/Failure links to it and receives a reproducibility observation. | Extend the policy gate beyond checking only the `action` type and add richer environment manifests after Core. |
+| Explicit uncertainty, time, and failure | Implemented | COs receive real creation times; expired or invalidated facts are excluded from fact retrieval. Processor failures and inconclusive terminal states are durable. `/cognitive-state` exposes process outcome, completion criteria, Control counters and termination reason, Workspace, State, and Memory. | Add richer calibrated goal-level uncertainty after Core. |
+
+## Production behavior observed in the audit
+
+The current `solve` path:
+
+1. creates Question and Goal COs with identical text;
+2. collects pending candidates into explicit Control-managed Workspace rounds;
+3. reacts to `GoalCreated` with Memory Retrieval and reconstructed context;
+4. lets Generative invoke the LLM with empty chat history and, after failure or conflict, with reconstructed feedback context;
+5. lets Planner create a `Plan`, a linked subgoal `Goal`, then an Action from each Hypothesis;
+6. lets Execution and Deliberative processors produce Result/Failure, Evidence,
+   and a bounded execution Claim;
+7. routes ActionFailed and ConflictDetected through Reflection into bounded replanning;
+8. lets the independent Goal Verifier accept, reject, or leave the execution
+   claim inconclusive; only an accepted verified Claim satisfying the Goal can
+   reach the Answer Processor and emit `GoalCompleted`. Memory retrieval cannot
+   create this acceptance edge: user testimony remains an unverified Observation.
+
+The event trace drives a multi-processor recurrent production process, rather
+than merely recording direct orchestrator calls. A successful sandbox call still
+produces only a verified claim about execution, not proof that the Goal is met.
+An injected independent verifier must accept the evidence before the Answer
+Processor may complete the Goal; the default verifier remains `INCONCLUSIVE`.
+
+## Architectural boundary
+
+The server/IPC/client topology is compatible with GCAS. The server should own
+Cognitive State, Workspace, Bus, Control, Memory, processors, and execution.
+The Rust CLI and Emacs client should remain thin protocol clients. IPC transports
+commands and observations; it is not the Cognitive Bus itself.
+
+## Conformance gate
+
+The `make gcas-conformance` gate demonstrates all of the following on the
+production path:
+
+1. a Goal has explicit completion criteria and a per-process budget;
+2. production processors subscribe and react through the Cognitive Bus;
+3. multiple proposals can coexist and compete before Workspace admission;
+4. Result/Failure/Conflict events return to planning, and failure/conflict
+   feedback can trigger a subsequent generation iteration;
+5. an independent, goal-specific verifier decides whether evidence satisfies
+   the Goal;
+6. an Answer Processor renders only from accepted claims and the terminal goal
+   state, rather than exposing raw LLM output as the answer;
+7. Control terminates on Goal completion, failure budget, no progress, resource
+   budget, or user interruption;
+8. the complete CO/event graph survives restoration and can be inspected from
+   both supported clients.
+
+The first acceptance scenario is a failure-first Fibonacci task: the first
+generated implementation must be rejected, the feedback must re-enter the
+cycle, a revised Action must pass deterministic tests, and only then may Control
+emit `GoalCompleted`.
+
+The gate also reloads the completed CO/event and Memory graph from disk, checks
+budget and interruption behavior including late callbacks, and runs protocol
+mapping tests for both supported clients. Future verifier classes and semantic
+memory improve the range of Goals GAIA can solve; they are not missing pieces of
+the minimum GCAS-Core control architecture.
+
+The gate includes the 22-case deterministic competence corpus exposed separately
+as `make gcas-eval`. See [gcas-evaluation.md](gcas-evaluation.md) for its fixture
+contract, reported metrics, and the distinction between orchestration correctness
+and live-model task competence.
+
+The terminal protocol regression additionally drives three distinct failed
+Actions through the production processors and server adapter. It requires one
+`ProcessTerminated(FAILURE_BUDGET_EXHAUSTED)`, one `on-finished` notification,
+and one terminal `(final ...)` message. Control re-entry and an interrupt after
+termination may not append duplicate or process-less terminal events. This
+turns “exactly once” into an end-to-end client contract rather than only an
+internal process-state property.
+
+## Model context boundary
+
+Production `solve` invokes the Generative Processor with an empty chat-history
+argument. The user message is represented as Goal/Question COs, and the model's
+transient input is reconstructed from typed Cognitive State. Initial generation
+receives the Goal, admitted Workspace projection, selected Memory, and active
+constraints; replanning receives the relevant Reflection and execution error.
+The system prompt is a compact GCAS-specific Action contract; the legacy RLM
+`FINAL/CONFIDENCE` prompt remains isolated behind `investigate`. Initial and
+repair projections are already distinct, while richer structured phase/error,
+budget, and capability projections remain a reliability milestone rather than
+a missing GCAS-Core requirement. See
+[gcas-prompt-projection.md](gcas-prompt-projection.md).

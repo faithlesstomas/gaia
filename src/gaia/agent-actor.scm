@@ -135,6 +135,9 @@
    [(solve task depth current-history resolve-promise . optional-args)
     (define model (if (null? optional-args) (get-config 'model) (car optional-args)))
     (define thinking (if (or (null? optional-args) (null? (cdr optional-args))) (get-config 'thinking) (cadr optional-args)))
+    ;; Legacy LLM–REPL investigation loop.  GCAS-Core process coordination is
+    ;; implemented separately in (gaia cognitive-session) until server sessions
+    ;; are migrated to persistent Cognitive State and Workspace instances.
     (<- self 'solve-step task depth current-history current-history 1 '() task resolve-promise model thinking)
     'ok]
 

@@ -9,6 +9,7 @@
              (fibers)
              (gaia server)
              (gaia core)
+             (gaia config)
              (gaia rlm-env)
              (gaia executor)
              (gaia utils)
@@ -31,6 +32,11 @@
   (test-equal "get-thinking" '(get-thinking) (parse-slash-command "/thinking"))
   (test-equal "set-thinking" '(set-thinking "off") (parse-slash-command "/thinking off"))
   (test-equal "ask" '(ask "explain scheme") (parse-slash-command "/ask explain scheme"))
+  (test-equal "solve" '(solve "verify this claim") (parse-slash-command "/solve verify this claim"))
+  (test-equal "investigate" '(investigate "inspect this repository") (parse-slash-command "/investigate inspect this repository"))
+  (test-equal "cognitive-events" '(get-cognitive-events) (parse-slash-command "/cognitive-events"))
+  (test-equal "cognitive-state" '(get-cognitive-state) (parse-slash-command "/cognitive-state"))
+  (test-equal "cognitive-objects alias" '(get-cognitive-state) (parse-slash-command "/cognitive-objects"))
   (test-equal "eval" '(repl "(+ 1 1)") (parse-slash-command "/eval (+ 1 1)"))
   (test-equal "eval-empty" #f (parse-slash-command "/eval"))
   (test-equal "session" '(session "test-session") (parse-slash-command "/session test-session"))
@@ -344,24 +350,51 @@
 
 ;; --- 6. Test system prompt dynamic formatting & toggles ---
 
-(test-group "get-system-prompt-dynamic"
-  (test-assert "system prompt strips wisp instructions when wisp-mode is off"
-    (begin
-      (set-config! 'wisp-mode #f)
-      (let ((prompt (get-system-prompt)))
-        (and (string-contains prompt "You are GAIA")
-             (not (string-contains prompt "Wisp (SRFI-119)"))))))
-  (test-assert "system prompt includes wisp instructions when wisp-mode is on"
-    (begin
-      (set-config! 'wisp-mode #t)
-      (let ((prompt (get-system-prompt)))
-        (and (string-contains prompt "You are GAIA")
-             (string-contains prompt "Wisp (SRFI-119)")))))
-  (test-assert "get-system-prompt does not contain completion signals section"
-    (let ((prompt (get-system-prompt)))
-      (not (string-contains prompt "# COMPLETION SIGNALS"))))
-  (test-assert "get-solver-system-prompt contains completion signals section"
-    (let ((prompt (get-solver-system-prompt)))
-      (string-contains prompt "# COMPLETION SIGNALS"))))
+(let ((original-system-prompt (get-config 'system-prompt))
+      (original-wisp-mode (get-config 'wisp-mode)))
+  (dynamic-wind
+    (lambda () (set-config! 'system-prompt #f))
+    (lambda ()
+      (test-group "get-system-prompt-dynamic"
+        (test-assert "system prompt strips wisp instructions when wisp-mode is off"
+          (begin
+            (set-config! 'wisp-mode #f)
+            (let ((prompt (get-system-prompt)))
+              (and (string-contains prompt "You are GAIA")
+                   (not (string-contains prompt "Wisp (SRFI-119)"))))))
+        (test-assert "system prompt includes wisp instructions when wisp-mode is on"
+          (begin
+            (set-config! 'wisp-mode #t)
+            (let ((prompt (get-system-prompt)))
+              (and (string-contains prompt "You are GAIA")
+                   (string-contains prompt "Wisp (SRFI-119)")))))
+        (test-assert "get-system-prompt does not contain completion signals section"
+          (let ((prompt (get-system-prompt)))
+            (not (string-contains prompt "# COMPLETION SIGNALS"))))
+        (test-assert "get-solver-system-prompt contains completion signals section"
+          (let ((prompt (get-solver-system-prompt)))
+            (string-contains prompt "# COMPLETION SIGNALS")))
+        (test-assert "get-gcas-system-prompt is a compact Action contract without legacy completion signals"
+          (let ((prompt (get-gcas-system-prompt)))
+            (and (string-contains prompt "# ACTION CONTRACT")
+                 (string-contains prompt "exactly one complete fenced")
+                 (string-contains prompt "independent verifier")
+                 (not (string-contains prompt "# COMPLETION SIGNALS"))
+                 (not (string-contains prompt "FINAL(answer)"))
+                 (not (string-contains prompt "HYBRID RECURSION MODEL")))))
+        (test-assert "get-gcas-system-prompt exposes Wisp only when enabled"
+          (begin
+            (set-config! 'wisp-mode #f)
+            (let ((scheme-prompt (get-gcas-system-prompt)))
+              (set-config! 'wisp-mode #t)
+              (let ((wisp-prompt (get-gcas-system-prompt)))
+                (and (not (string-contains scheme-prompt "# OPTIONAL WISP OUTPUT"))
+                     (string-contains wisp-prompt "# OPTIONAL WISP OUTPUT"))))))))
+    (lambda ()
+      (set-config! 'system-prompt original-system-prompt)
+      (set-config! 'wisp-mode original-wisp-mode))))
 
-(test-end "gaia-server")
+(let* ((runner (test-runner-current))
+       (fail (if runner (test-runner-fail-count runner) 0)))
+  (test-end "gaia-server")
+  (exit (if (> fail 0) 1 0)))

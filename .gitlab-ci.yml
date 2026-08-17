@@ -3,6 +3,25 @@ stages:
   - coverage
   - build
 
+# A push to a branch with an open merge request otherwise creates both a push
+# pipeline and a merge-request pipeline for the same SHA, consuming the hosted
+# runner quota twice. Keep branch pipelines before an MR exists, then prefer the
+# MR pipeline once GitLab exposes CI_OPEN_MERGE_REQUESTS.
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+
+# Guile's regexp/string indices must use the same UTF-8 character semantics.
+# The container otherwise defaults to the byte-oriented C locale, which makes
+# prompt slicing fail on characters such as em dashes and ≥.
+variables:
+  LANG: "C.UTF-8"
+  LC_ALL: "C.UTF-8"
+
 .guix_setup: &guix_setup
   before_script:
     # Restore /etc/services manually to resolve HTTP/HTTPS port names in Guix
@@ -19,19 +38,50 @@ stages:
 test:
   stage: test
   image: registry.gitlab.com/debdistutils/guix/container:latest
+  timeout: 15 minutes
+  interruptible: true
   <<: *guix_setup
   script:
-    # Run the integration test suite and dump build logs on failure for debugging
-    - guix shell -m guix.scm make -- make check || (echo "=== GUIX BUILD LOGS ===" && find /var/log/guix/drvs/ -name "*.gz" -exec zcat {} + && exit 1)
+    # Each suite runs in a fresh process with its own timeout (see run-coverage.scm).
+    # Test logs are uploaded as artifacts, so avoid dumping every Guix build log.
+    - GAIA_TEST_TIMEOUT=120 guix shell -m guix.scm make -- make check
+    # Enforce the Scheme side of the GCAS contract. Client adapters have their
+    # own lightweight jobs below.
+    - guix shell -m guix.scm make -- make gcas-conformance-scheme
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - changes:
+        - .gitlab-ci.yml
+        - Makefile
+        - guix.scm
+        - scripts/**/*.scm
+        - src/gaia/**/*.scm
+        - tests/**/*.scm
   artifacts:
     name: "test-logs-$CI_COMMIT_REF_SLUG"
     paths:
       - "*.log"
     expire_in: 1 week
 
+emacs-client:
+  stage: test
+  image: silex/emacs:30.2-alpine-ci
+  timeout: 5 minutes
+  interruptible: true
+  script:
+    - make test-emacs-client
+  rules:
+    - changes:
+        - .gitlab-ci.yml
+        - Makefile
+        - src/gaia-desktop/emacs/**/*
+        - tests/test-emacs-client.el
+
 coverage:
   stage: coverage
   image: registry.gitlab.com/debdistutils/guix/container:latest
+  timeout: 30 minutes
+  interruptible: true
   <<: *guix_setup
   script:
     # Run coverage report (lcov is included in guix.scm manifest)
@@ -50,9 +100,34 @@ coverage:
 build:
   stage: build
   image: rust:latest
+  timeout: 15 minutes
+  interruptible: true
+  before_script:
+    # The official image provides rustup and Cargo, but its minimal default
+    # toolchain does not guarantee that the formatting component is installed.
+    - rustup component add rustfmt
+  variables:
+    CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
+  cache:
+    key:
+      files:
+        - src/gaia-cli/Cargo.lock
+    paths:
+      - .cargo/registry/
+      - .cargo/git/
+      - src/gaia-cli/target/
+    policy: pull-push
   script:
-    # Build the Rust CLI binary in release mode using official Rust container
+    # Keep the Rust protocol adapter formatted and covered before packaging it.
+    - cargo fmt --manifest-path src/gaia-cli/Cargo.toml -- --check
+    - cargo test --manifest-path src/gaia-cli/Cargo.toml
+    # Build the Rust CLI binary in release mode using official Rust container.
     - cargo build --manifest-path src/gaia-cli/Cargo.toml --release
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - changes:
+        - .gitlab-ci.yml
+        - src/gaia-cli/**/*
   artifacts:
     name: "gaia-cli-$CI_COMMIT_REF_SLUG"
     paths:
