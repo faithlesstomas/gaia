@@ -3,6 +3,18 @@ stages:
   - coverage
   - build
 
+# A push to a branch with an open merge request otherwise creates both a push
+# pipeline and a merge-request pipeline for the same SHA, consuming the hosted
+# runner quota twice. Keep branch pipelines before an MR exists, then prefer the
+# MR pipeline once GitLab exposes CI_OPEN_MERGE_REQUESTS.
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+
 # Guile's regexp/string indices must use the same UTF-8 character semantics.
 # The container otherwise defaults to the byte-oriented C locale, which makes
 # prompt slicing fail on characters such as em dashes and ≥.
