@@ -33,14 +33,37 @@ test:
     # Each suite runs in a fresh process with its own timeout (see run-coverage.scm).
     # Test logs are uploaded as artifacts, so avoid dumping every Guix build log.
     - GAIA_TEST_TIMEOUT=120 guix shell -m guix.scm make -- make check
-    # Enforce the GCAS contract and the Emacs protocol adapter on every branch.
+    # Enforce the Scheme side of the GCAS contract. Client adapters have their
+    # own lightweight jobs below.
     - guix shell -m guix.scm make -- make gcas-conformance-scheme
-    - guix shell -m guix.scm make -- make test-emacs-client
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - changes:
+        - .gitlab-ci.yml
+        - Makefile
+        - guix.scm
+        - scripts/**/*.scm
+        - src/gaia/**/*.scm
+        - tests/**/*.scm
   artifacts:
     name: "test-logs-$CI_COMMIT_REF_SLUG"
     paths:
       - "*.log"
     expire_in: 1 week
+
+emacs-client:
+  stage: test
+  image: silex/emacs:30.2-alpine-ci
+  timeout: 5 minutes
+  interruptible: true
+  script:
+    - make test-emacs-client
+  rules:
+    - changes:
+        - .gitlab-ci.yml
+        - Makefile
+        - src/gaia-desktop/emacs/**/*
+        - tests/test-emacs-client.el
 
 coverage:
   stage: coverage
@@ -67,12 +90,28 @@ build:
   image: rust:latest
   timeout: 15 minutes
   interruptible: true
+  variables:
+    CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
+  cache:
+    key:
+      files:
+        - src/gaia-cli/Cargo.lock
+    paths:
+      - .cargo/registry/
+      - .cargo/git/
+      - src/gaia-cli/target/
+    policy: pull-push
   script:
     # Keep the Rust protocol adapter formatted and covered before packaging it.
     - cargo fmt --manifest-path src/gaia-cli/Cargo.toml -- --check
     - cargo test --manifest-path src/gaia-cli/Cargo.toml
     # Build the Rust CLI binary in release mode using official Rust container.
     - cargo build --manifest-path src/gaia-cli/Cargo.toml --release
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - changes:
+        - .gitlab-ci.yml
+        - src/gaia-cli/**/*
   artifacts:
     name: "gaia-cli-$CI_COMMIT_REF_SLUG"
     paths:

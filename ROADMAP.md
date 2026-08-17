@@ -1,6 +1,6 @@
 # GAIA Roadmap
 
-> *Last updated: 2026-08-14*
+> *Last updated: 2026-08-17*
 >
 > This document tracks the development plan for the GAIA (GNU AI Assistant) project.
 > For an introduction to the project, see [README.md](README.md).
@@ -339,6 +339,46 @@ Each module is an independent project that plugs into the GAIA Kernel. Modules h
 - [ ] **MeTTa FFI to OpenCog Hyperon** — Export complex semantic subgraphs to Distributed AtomSpace (DAS) for high-performance logical reasoning.
 - [ ] **Cognitive State Serialization** — Instead of serializing raw textual history to recursive sub-agents (RLM), serialize the current J-space activation coordinate vector (representing active working memory state) utilizing Guix G-expressions.
 - [ ] **Literate Research Export (Data Provenance)** — Implement automated cryptographic hashing of all hypergraph derivations. Compile successful agent trajectories, proven logical paths, and Guix execution manifests into reproducible Org-mode or LaTeX research reports.
+
+---
+
+## Continuous integration — cross-cutting operations
+
+This workstream is independent of the product and research timeline above. Its
+purpose is to keep deterministic validation affordable and fast without making
+CI tooling part of GAIA's runtime dependency manifest.
+
+- [x] **Split CI by implementation stack** — Run Guile/GCAS, Rust CLI, and Emacs
+  client validation in separate images. Keep `guix.scm` focused on the Scheme
+  runtime and its tests; use a pinned Emacs CI image and the official Rust image
+  for their respective adapters.
+- [x] **Control routine compute usage** — Keep jobs interruptible, run stack jobs
+  only for relevant path changes, cache Cargo downloads and build outputs, and
+  reserve full coverage for `main`. GitLab.com Free currently includes 400
+  hosted-runner compute minutes per namespace per month; reaching the quota
+  blocks new hosted-runner jobs until quota renewal or purchase.
+- [ ] **Versioned `gaia-scheme-ci` image** — Build and publish a pinned image with
+  Guile, Goblins, Fibers, Wisp, certificates, and coverage tooling already
+  prepared. Rebuild it only when its Guix channel lock, manifest, or image recipe
+  changes. Measure cold and warm pipeline duration before making it the default.
+- [ ] **Runner cost decision** — Compare GitLab hosted-runner usage with a small
+  self-managed runner that retains `/gnu/store` and build caches. Jobs on a
+  project-owned runner do not consume the GitLab.com hosted compute-minute
+  quota, but runner maintenance, isolation of untrusted contributions, updates,
+  and availability become project responsibilities.
+- [ ] **CI portability fallback** — Keep validation behind Make targets so the
+  same gates can move to GitHub Actions if GitLab pricing, the project plan, or
+  runner availability changes. GitLab remains the canonical repository and
+  GitHub remains a mirror unless that policy is changed explicitly.
+- [ ] **Periodic cost review** — Track monthly minutes and per-job duration,
+  revisit path rules after major protocol changes, and decide whether to buy
+  additional minutes, apply for an eligible GitLab community program, operate a
+  runner, or move execution to GitHub Actions.
+
+Current limits and runner accounting should be rechecked before implementation:
+[GitLab pricing](https://about.gitlab.com/pricing/),
+[compute-minute guidance](https://about.gitlab.com/pricing/faq-compute-minutes/),
+and [hosted-runner caching](https://docs.gitlab.com/ci/runners/hosted_runners/).
 
 ---
 
