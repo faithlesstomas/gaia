@@ -2,6 +2,8 @@
 
 (use-modules (srfi srfi-1)
              (srfi srfi-9)
+             (json)
+             (ice-9 ftw)
              (gaia com)
              (gaia cognitive-bus)
              (gaia cognitive-session)
@@ -28,6 +30,11 @@
     (unless threw
       (error (format #f "Assertion FAILED: ~a (expected exception but none was raised)" msg)))))
 
+(define (fixture-data filename)
+  (call-with-input-file
+      (string-append (dirname (current-filename)) "/fixtures/ncsi/" filename)
+    json->scm))
+
 (define (run-tests)
   (format #t "\n========================================\n")
   (format #t "Running NCSI & J-space Processor Test Suite\n")
@@ -36,7 +43,7 @@
   ;; ---------------------------------------------------------------------------
   ;; 1. Concept creation & serialization
   ;; ---------------------------------------------------------------------------
-  (format #t "[1/7] Testing <ncsi-concept> records and serialization... ")
+  (format #t "[1/10] Testing <ncsi-concept> records and serialization... ")
   (let* ((c1 (make-ncsi-concept 42 "lambda" 0.95))
          (alist1 (concept->alist c1))
          (c2 (alist->concept alist1)))
@@ -50,7 +57,7 @@
   ;; ---------------------------------------------------------------------------
   ;; 2. Neural Observation creation & serialization
   ;; ---------------------------------------------------------------------------
-  (format #t "[2/7] Testing <ncsi-neural-observation> serialization... ")
+  (format #t "[2/10] Testing <ncsi-neural-observation> serialization... ")
   (let* ((c1 (make-ncsi-concept 101 "define" 0.88))
          (c2 (make-ncsi-concept 102 "syntax-case" 0.72))
          (obs (make-ncsi-neural-observation
@@ -78,7 +85,7 @@
   ;; ---------------------------------------------------------------------------
   ;; 3. Protocol validation & Incompatible version rejection
   ;; ---------------------------------------------------------------------------
-  (format #t "[3/7] Testing NCSI protocol validation and version rejection... ")
+  (format #t "[3/10] Testing NCSI protocol validation and version rejection... ")
   (assert-throws "incompatible schema version"
                  (lambda ()
                    (make-ncsi-neural-observation
@@ -103,7 +110,7 @@
   ;; ---------------------------------------------------------------------------
   ;; 4. Epistemic Invariants: Neural signals cannot directly become ACCEPTED or VERIFIED
   ;; ---------------------------------------------------------------------------
-  (format #t "[4/7] Testing GCAS Epistemic Invariants for NEURAL_J_LENS... ")
+  (format #t "[4/10] Testing GCAS Epistemic Invariants for NEURAL_J_LENS... ")
   (assert-throws "NEURAL_J_LENS cannot initially be ACCEPTED"
                  (lambda ()
                    (make-cognitive-object
@@ -111,13 +118,31 @@
                     #:provenance 'NEURAL_J_LENS
                     #:epistemic-status 'ACCEPTED
                     #:verification-status 'UNVERIFIED)))
-  (assert-throws "NEURAL_J_LENS cannot initially be VERIFIED"
+    (assert-throws "NEURAL_J_LENS cannot initially be VERIFIED"
                  (lambda ()
                    (make-cognitive-object
                     'observation "neural data"
                     #:provenance 'NEURAL_J_LENS
                     #:epistemic-status 'UNKNOWN
                     #:verification-status 'VERIFIED)))
+  (assert-throws "NEURAL_J_LENS cannot be promoted through co-update-epistemic"
+                 (lambda ()
+                   (co-update-epistemic
+                    (make-cognitive-object 'claim "neural proposal"
+                                           #:provenance 'NEURAL_J_LENS)
+                    'ACCEPTED 'VERIFIED)))
+  (assert-throws "persisted neural fact is rejected on restore"
+                 (lambda ()
+                   (alist->co
+                    '(("id" . "co-neural")
+                      ("type" . "claim")
+                      ("content" . "neural data")
+                      ("provenance" . "NEURAL_J_LENS")
+                      ("epistemic-status" . "ACCEPTED")
+                      ("verification-status" . "VERIFIED")
+                      ("confidence" . 1.0)
+                      ("valid-from" . 0)
+                      ("valid-to" . "INF")))))
 
   (let* ((c (make-ncsi-concept 1 "fib" 0.99))
          (obs (make-ncsi-neural-observation
@@ -136,7 +161,7 @@
   ;; ---------------------------------------------------------------------------
   ;; 5. J-space Processor & Proposal Generation
   ;; ---------------------------------------------------------------------------
-  (format #t "[5/7] Testing J-space Processor proposal generation... ")
+  (format #t "[5/10] Testing J-space Processor proposal generation... ")
   (let* ((c (make-ncsi-concept 123 "recursion" 0.92))
          (obs (make-ncsi-neural-observation
                #:request-id "req-rec" #:forward-pass-id "fp-rec"
@@ -154,7 +179,7 @@
   ;; ---------------------------------------------------------------------------
   ;; 6. End-to-end Session, Bus & Global Workspace Integration
   ;; ---------------------------------------------------------------------------
-  (format #t "[6/7] Testing Session, Bus & Workspace admission of J-space observations... ")
+  (format #t "[6/10] Testing Session, Bus & Workspace admission of J-space observations... ")
   (let* ((session (make-cognitive-session))
          (proc (make-jspace-processor #:base-priority 8))
          (adapter (make-ncsi-client-adapter session))
@@ -167,6 +192,9 @@
 
     ;; Attach J-space processor to session
     (attach-processor! session proc)
+
+    ;; An observation belongs to an explicitly started request.
+    (ncsi-dispatch-event! adapter (make-ncsi-generation-started "req-ws" "gemma4"))
 
     ;; Dispatch NCSI NeuralStateObserved event via adapter
     (ncsi-dispatch-event! adapter (make-ncsi-neural-state-observed obs))
@@ -186,9 +214,91 @@
   (format #t "PASS\n")
 
   ;; ---------------------------------------------------------------------------
+  ;; 8. Complete wire validation and transport-independent JSON fixtures
+  ;; ---------------------------------------------------------------------------
+  (format #t "[7/10] Testing NCSI wire fixtures and bounded validation... ")
+  (let ((valid-events (vector->list (fixture-data "gcas.ncsi.v1.valid.json")))
+        (invalid-cases (vector->list (fixture-data "gcas.ncsi.v1.invalid.json"))))
+    ;; Fixtures use JSON strings and arrays; the parser must accept them without
+    ;; a Scheme-specific conversion layer.
+    (for-each (lambda (event) (assert-true "valid JSON fixture parses" (ncsi-event? (parse-ncsi-event event))))
+              valid-events)
+    (for-each (lambda (case)
+                (assert-throws "invalid JSON fixture is rejected"
+                               (lambda () (parse-ncsi-event (cdr (assoc "event" case))))))
+              invalid-cases)
+    (assert-throws "negative layer is rejected"
+                   (lambda ()
+                     (make-ncsi-neural-observation
+                      #:request-id "r" #:forward-pass-id "fp" #:model-id "m"
+                      #:model-revision "v" #:tokenizer-revision "t"
+                      #:lens-id "l" #:lens-revision "v" #:layer -1 #:position 0)))
+    (assert-throws "out-of-range concept score is rejected"
+                   (lambda () (make-ncsi-concept 1 "x" 1.01)))
+    (assert-throws "malformed token span is rejected"
+                   (lambda ()
+                     (make-ncsi-neural-observation
+                      #:request-id "r" #:forward-pass-id "fp" #:model-id "m"
+                      #:model-revision "v" #:tokenizer-revision "t"
+                      #:lens-id "l" #:lens-revision "v" #:layer 0 #:position '(4 2)))))
+  (format #t "PASS\n")
+
+  ;; ---------------------------------------------------------------------------
+  ;; 9. Request lifecycle, durable event trace, and exactly-once terminal state
+  ;; ---------------------------------------------------------------------------
+  (format #t "[8/10] Testing NCSI lifecycle and durable audit trace... ")
+  (let* ((state-path "/tmp/gaia-ncsi-lifecycle-state.scm")
+         (_ (when (file-exists? state-path) (delete-file state-path)))
+         (session (make-cognitive-session #:state-path state-path #:restore? #f))
+         (adapter (make-ncsi-client-adapter session))
+         (events (vector->list (fixture-data "gcas.ncsi.v1.valid.json"))))
+    (assert-true "delta before start is rejected"
+                 (not (ncsi-dispatch-event! adapter (cadr events))))
+    (for-each (lambda (event)
+                (assert-true "valid lifecycle event accepted"
+                             (ncsi-dispatch-event! adapter event)))
+              events)
+    (let ((types (map event-type (state-events (session-state session)))))
+      (assert-true "started is durable" (memq 'GenerationStarted types))
+      (assert-true "delta is durable" (memq 'TokenDelta types))
+      (assert-true "observation is durable" (memq 'NeuralStateObserved types))
+      (assert-true "completion is durable" (memq 'GenerationCompleted types)))
+    (let ((restored-types
+           (map event-type (state-events (load-cognitive-state state-path)))))
+      (assert-true "completion survives session reload"
+                   (memq 'GenerationCompleted restored-types)))
+    (assert-true "duplicate terminal event is rejected"
+                 (not (ncsi-dispatch-event! adapter (last events))))
+    (let ((types (map event-type (state-events (session-state session)))) )
+      (assert-equal "one durable completion" 1
+                    (length (filter (lambda (type) (eq? type 'GenerationCompleted)) types)))
+      (assert-true "typed adapter failure is durable" (memq 'NCSI_AdapterFailed types))
+      (assert-true "fallback need is observable" (memq 'NCSI_FallbackRequired types)))
+    (delete-file state-path))
+  (format #t "PASS\n")
+
+  ;; ---------------------------------------------------------------------------
+  ;; 10. Typed terminal failure is the cancellation/timeout outcome carrier
+  ;; ---------------------------------------------------------------------------
+  (format #t "[9/10] Testing typed terminal failures... ")
+  (let* ((session (make-cognitive-session))
+         (adapter (make-ncsi-client-adapter session)))
+    (assert-true "start accepts request"
+                 (ncsi-dispatch-event! adapter
+                                       (make-ncsi-generation-started "timeout-request" "m")))
+    (assert-true "timeout failure terminates request"
+                 (ncsi-dispatch-event! adapter
+                                       (make-ncsi-generation-failed
+                                        "timeout-request" "TIMEOUT" "sidecar timeout")))
+    (assert-true "post-terminal token is rejected"
+                 (not (ncsi-dispatch-event! adapter
+                                            (make-ncsi-token-delta "timeout-request" 1 "late")))))
+  (format #t "PASS\n")
+
+  ;; ---------------------------------------------------------------------------
   ;; 7. Fault Tolerance & Error Isolation
   ;; ---------------------------------------------------------------------------
-  (format #t "[7/7] Testing Fault Tolerance and Sidecar Error Isolation... ")
+  (format #t "[10/10] Testing Fault Tolerance and Sidecar Error Isolation... ")
   (let* ((session (make-cognitive-session))
          (error-reported #f)
          (adapter (make-ncsi-client-adapter

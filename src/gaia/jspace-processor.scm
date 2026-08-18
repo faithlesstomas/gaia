@@ -54,5 +54,14 @@ Global Workspace."
          (if (eq? (ncsi-event-type payload) 'NeuralStateObserved)
              (list (jspace-observation->proposal (ncsi-event-payload payload) #:base-priority base-priority))
              '()))
+        ;; Session audit events persist the transport-independent wire alist.
+        ;; Re-parse it here so the processor accepts both direct in-process
+        ;; events and durable/replayed events without trusting raw data.
+        ((list? payload)
+         (let ((ncsi-evt (parse-ncsi-event payload)))
+           (if (eq? (ncsi-event-type ncsi-evt) 'NeuralStateObserved)
+               (list (jspace-observation->proposal (ncsi-event-payload ncsi-evt)
+                                                   #:base-priority base-priority))
+               '())))
         (else
          '()))))))

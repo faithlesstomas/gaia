@@ -21,50 +21,98 @@
 (define* (make-ncsi-client-adapter session #:key (on-error #f))
   (unless (cognitive-session? session)
     (error "make-ncsi-client-adapter requires a <cognitive-session>" session))
+  (unless (or (not on-error) (procedure? on-error))
+    (error "on-error must be a procedure or #f" on-error))
   (%make-adapter session (list '()) (or on-error (lambda (err) #f))))
 
+(define (adapter-request-state adapter request-id)
+  (assoc-ref (car (adapter-active-requests-cell adapter)) request-id))
+
+(define (set-adapter-request-state! adapter request-id state)
+  (let ((cell (adapter-active-requests-cell adapter)))
+    (set-car! cell
+              (acons request-id state
+                     (filter (lambda (entry)
+                               (not (equal? (car entry) request-id)))
+                             (car cell)))))
+  state)
+
+(define (next-request-state adapter event)
+  "Accept exactly one started-to-terminal lifecycle per NCSI request.
+Terminal states are intentionally retained, so duplicate or late wire events
+remain rejectable for the lifetime of the adapter."
+  (let* ((request-id (ncsi-event-request-id event))
+         (type (ncsi-event-type event))
+         (state (adapter-request-state adapter request-id)))
+    (case type
+      ((GenerationStarted)
+       (when state
+         (error "NCSI_INVALID_LIFECYCLE: request already started or terminated"
+                request-id state))
+       'ACTIVE)
+      ((TokenDelta NeuralStateObserved)
+       (unless (eq? state 'ACTIVE)
+         (error "NCSI_INVALID_LIFECYCLE: event requires an active request"
+                request-id type state))
+       'ACTIVE)
+      ((GenerationCompleted)
+       (unless (eq? state 'ACTIVE)
+         (error "NCSI_INVALID_LIFECYCLE: completion requires an active request"
+                request-id state))
+       'COMPLETED)
+      ((GenerationFailed)
+       (unless (eq? state 'ACTIVE)
+         (error "NCSI_INVALID_LIFECYCLE: failure requires an active request"
+                request-id state))
+       'FAILED))))
+
+(define (adapter-event-origin event)
+  (if (eq? (ncsi-event-type event) 'NeuralStateObserved)
+      'NEURAL_J_LENS
+      'NEURAL_SIDE_CAR))
+
+(define (record-ncsi-adapter-failure! adapter key args)
+  (let ((session (adapter-session adapter))
+        (details (format #f "~s" args)))
+    ;; Keep the established ProcessorFailed diagnostic for existing Control
+    ;; consumers, while exposing typed NCSI failure and explicit fallback need.
+    (session-emit! session 'ProcessorFailed
+                   `((component . ncsi-adapter)
+                     (error-key . ,key)
+                     (details . ,details))
+                   #:origin 'CONTROL)
+    (session-emit! session 'NCSI_AdapterFailed
+                   `((error-key . ,key) (details . ,details))
+                   #:origin 'NEURAL_SIDE_CAR)
+    (session-emit! session 'NCSI_FallbackRequired
+                   `((adapter . ncsi) (reason . invalid-or-unavailable-stream))
+                   #:origin 'CONTROL)))
+
 (define (ncsi-dispatch-event! adapter event-or-alist)
-  "Parse and publish an incoming NCSI wire event to the session's Cognitive Bus."
-  (let* ((session (adapter-session adapter))
-         (bus (session-bus session)))
+  "Validate, lifecycle-check, durably record, and publish one NCSI event."
+  (let ((session (adapter-session adapter)))
     (catch #t
       (lambda ()
         (let ((ncsi-evt (if (ncsi-event? event-or-alist)
                             event-or-alist
                             (parse-ncsi-event event-or-alist))))
-          (case (ncsi-event-type ncsi-evt)
-            ((NeuralStateObserved)
-             (bus-publish bus (make-cognitive-event
-                               'NeuralStateObserved
-                               (ncsi-event-payload ncsi-evt)
-                               #:origin 'NEURAL_J_LENS)))
-            ((TokenDelta)
-             (bus-publish bus (make-cognitive-event
-                               'TokenDelta
-                               (ncsi-event-payload ncsi-evt)
-                               #:origin 'NEURAL_SIDE_CAR)))
-            ((GenerationStarted)
-             (bus-publish bus (make-cognitive-event
-                               'GenerationStarted
-                               (ncsi-event-payload ncsi-evt)
-                               #:origin 'NEURAL_SIDE_CAR)))
-            ((GenerationCompleted)
-             (bus-publish bus (make-cognitive-event
-                               'GenerationCompleted
-                               (ncsi-event-payload ncsi-evt)
-                               #:origin 'NEURAL_SIDE_CAR)))
-            ((GenerationFailed)
-             (session-emit! session 'NCSI_GenerationFailed
-                            (ncsi-event-payload ncsi-evt)
-                            #:origin 'NEURAL_SIDE_CAR))
-            (else #f))
+          ;; NCSI records supplied by in-process callers must obey the same
+          ;; payload rules as wire alists before they can mutate session state.
+          (validate-ncsi-event (ncsi-event->alist ncsi-evt))
+          (let ((next-state (next-request-state adapter ncsi-evt)))
+          ;; Store the transport-independent alist, not an opaque SRFI record,
+          ;; so state persistence and later audit/replay remain valid.
+            (session-emit! session (ncsi-event-type ncsi-evt)
+                           (ncsi-event->alist ncsi-evt)
+                           #:origin (adapter-event-origin ncsi-evt))
+            ;; Advance the lifecycle only after its corresponding event is
+            ;; durable.  A persistence failure therefore cannot manufacture a
+            ;; terminal state with no audit record.
+            (set-adapter-request-state! adapter (ncsi-event-request-id ncsi-evt)
+                                        next-state))
           ncsi-evt))
       (lambda (key . args)
-        (session-emit! session 'ProcessorFailed
-                       `((component . ncsi-adapter)
-                         (error-key . ,key)
-                         (details . ,(format #f "~s" args)))
-                       #:origin 'CONTROL)
+        (record-ncsi-adapter-failure! adapter key args)
         ((adapter-on-error adapter) (cons key args))
         #f))))
 

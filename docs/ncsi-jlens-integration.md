@@ -155,6 +155,43 @@ optional reconstruction error / calibration metadata
 timestamp
 ```
 
+`gcas.ncsi.v1` uses a compact, JSON-compatible value domain.  Event and
+observation timestamps are required numeric producer timestamps; required
+identifiers and text fields are non-empty strings.  `layer` and positions are
+non-negative; a token span is an ordered two-element pair.  Concept scores and
+reconstruction error are in `[0, 1]`; an observation contains at most 64
+concepts, each display string is at most 512 characters, and parameter metadata
+is an alist of at most 32 scalar values.  This preserves the boundary against
+raw tensors, arbitrary Python/Scheme objects, paths, and unbounded payloads.
+
+The outer `request-id` of a `NeuralStateObserved` is required to equal the
+observation's `request-id`.  Implementations reject mismatches instead of
+silently choosing either identifier.
+
+### 5.1 Request lifecycle and failure taxonomy
+
+For each request ID the accepted event state machine is:
+
+```text
+GenerationStarted -> ACTIVE
+ACTIVE -> TokenDelta | NeuralStateObserved | GenerationCompleted | GenerationFailed
+GenerationCompleted | GenerationFailed -> terminal
+```
+
+`GenerationStarted` is accepted once; non-start events require `ACTIVE`; a
+terminal event is accepted once and every later event for that ID is rejected.
+Cancellation and timeout are represented by the terminal `GenerationFailed`
+event with `error-code` `CANCELLED` or `TIMEOUT`, respectively.  Schema or
+lifecycle rejection is surfaced by GAIA as durable `NCSI_AdapterFailed` and
+`NCSI_FallbackRequired` events (and does not become a successful NCSI run).
+The fallback policy may select the existing textual adapter, but must record
+that choice; it may not silently alter the advertised execution mode.
+
+The language-neutral conformance corpus lives in
+[`tests/fixtures/ncsi/`](../tests/fixtures/ncsi/): valid and invalid JSON files
+are the artifact to mirror into the RAI repository and validate in both
+implementations.
+
 The initial protocol does not expose arbitrary tensors, Python objects, model
 hooks, filesystem paths, or an unrestricted steering vector.
 
@@ -234,14 +271,18 @@ report is not sufficient evidence of causal utility.
 ### M0 — contract and conformance fixtures
 
 - [x] Freeze the `gcas.ncsi.v1` event schema and error taxonomy.
-- [x] Add transport-independent schema fixtures shared by both repositories.
+- [/] Add transport-independent JSON fixtures. GAIA validates the canonical
+      corpus; mirroring and validating it in RAI remains required for the
+      cross-repository acceptance gate.
 - [x] Add GAIA tests proving that neural signals cannot directly create an
       accepted or verified Claim.
 - [x] Define cancellation, timeout, incompatibility, and fallback outcomes.
 
 **Acceptance gate:** both projects validate the same valid and invalid fixtures,
 and GAIA deterministically preserves its epistemic and terminal-delivery
-invariants without a real model.
+invariants without a real model. The GAIA half is covered by `make test-ncsi`;
+the cross-repository gate remains open until RAI consumes this same fixture
+corpus.
 
 ### M1 — RAI Transformers engine
 

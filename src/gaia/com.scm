@@ -55,6 +55,15 @@
     (error (format #f "Invalid temporal validity interval: [~s, ~s]"
                    valid-from valid-to))))
 
+(define (enforce-neural-epistemic-invariant! provenance epistemic verification)
+  "Neural evidence may support a separately created claim, but a CO retaining
+neural provenance is never itself accepted or verified evidence."
+  (when (and (memq provenance '(NEURAL NEURAL_J_LENS))
+             (or (eq? epistemic 'ACCEPTED)
+                 (memq verification '(VERIFIED FORMALLY_VERIFIED))))
+    (error "Neural signals cannot be ACCEPTED or VERIFIED"
+           provenance epistemic verification)))
+
 ;; Definition of Cognitive Object Record
 (define-record-type <cognitive-object>
   (%make-co id type content provenance epistemic-status verification-status confidence valid-from valid-to invalidated-by relations)
@@ -116,10 +125,8 @@
                    (not (eq? actual-verification 'UNVERIFIED))))
       (error "LLM output must initially be HYPOTHESIS and UNVERIFIED"))
     ;; A neural signal enters GAIA as an observation or proposal, never as an accepted or verified fact.
-    (when (and (memq provenance '(NEURAL NEURAL_J_LENS))
-               (or (eq? actual-epistemic 'ACCEPTED)
-                   (memq actual-verification '(VERIFIED FORMALLY_VERIFIED))))
-      (error "Neural signals cannot initially be ACCEPTED or VERIFIED"))
+    (enforce-neural-epistemic-invariant!
+     provenance actual-epistemic actual-verification)
     (%make-co actual-id type content provenance actual-epistemic actual-verification confidence actual-valid-from valid-to invalidated-by relations)))
 
 (define (fact? co)
@@ -138,6 +145,12 @@
   "Immutably creates a new Cognitive Object with updated epistemic/verification status and optional new confidence & invalidated-by tag."
   (valid-member? new-epistemic VALID-EPISTEMIC-STATUSES 'epistemic-status)
   (valid-member? new-verification VALID-VERIFICATION-STATUSES 'verification-status)
+  ;; Neural readouts may inform an independently verified claim, but the
+  ;; readout itself must never be promoted into such a claim.  Keeping this
+  ;; guard here as well as in make-cognitive-object closes the public update
+  ;; path around the ingestion invariant.
+  (enforce-neural-epistemic-invariant!
+   (co-provenance co) new-epistemic new-verification)
   (let ((new-confidence (if (null? optional-args) (co-confidence co) (car optional-args)))
         (new-invalidated (if (or (null? optional-args) (null? (cdr optional-args))) (co-invalidated-by co) (cadr optional-args))))
     (valid-confidence? new-confidence)
@@ -212,5 +225,6 @@ confidence, or temporal metadata to enter Cognitive State."
       (valid-member? verif VALID-VERIFICATION-STATUSES 'verification-status)
       (valid-confidence? conf)
       (valid-temporal-interval? valid-from valid-to)
+      (enforce-neural-epistemic-invariant! prov epistemic verif)
       (%make-co id type content prov epistemic verif conf valid-from valid-to
                 invalidated-by relations))))
