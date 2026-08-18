@@ -233,11 +233,11 @@ report is not sufficient evidence of causal utility.
 
 ### M0 — contract and conformance fixtures
 
-- [ ] Freeze the `gcas.ncsi.v1` event schema and error taxonomy.
-- [ ] Add transport-independent schema fixtures shared by both repositories.
-- [ ] Add GAIA tests proving that neural signals cannot directly create an
+- [x] Freeze the `gcas.ncsi.v1` event schema and error taxonomy.
+- [x] Add transport-independent schema fixtures shared by both repositories.
+- [x] Add GAIA tests proving that neural signals cannot directly create an
       accepted or verified Claim.
-- [ ] Define cancellation, timeout, incompatibility, and fallback outcomes.
+- [x] Define cancellation, timeout, incompatibility, and fallback outcomes.
 
 **Acceptance gate:** both projects validate the same valid and invalid fixtures,
 and GAIA deterministically preserves its epistemic and terminal-delivery

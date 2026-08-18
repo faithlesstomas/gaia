@@ -32,7 +32,7 @@
   '(claim hypothesis observation evidence goal plan action result question conflict reflection rule procedure))
 
 (define VALID-PROVENANCES
-  '(USER LLM REPL SENSOR MEMORY EXTERNAL_SOURCE SYMBOLIC_INFERENCE FORMAL_PROOF EXECUTION))
+  '(USER LLM REPL SENSOR MEMORY EXTERNAL_SOURCE SYMBOLIC_INFERENCE FORMAL_PROOF EXECUTION NEURAL NEURAL_J_LENS))
 
 (define VALID-EPISTEMIC-STATUSES
   '(UNKNOWN HYPOTHESIS ASSUMPTION BELIEF ACCEPTED REFUTED DISPUTED))
@@ -115,6 +115,11 @@
                (or (not (eq? actual-epistemic 'HYPOTHESIS))
                    (not (eq? actual-verification 'UNVERIFIED))))
       (error "LLM output must initially be HYPOTHESIS and UNVERIFIED"))
+    ;; A neural signal enters GAIA as an observation or proposal, never as an accepted or verified fact.
+    (when (and (memq provenance '(NEURAL NEURAL_J_LENS))
+               (or (eq? actual-epistemic 'ACCEPTED)
+                   (memq actual-verification '(VERIFIED FORMALLY_VERIFIED))))
+      (error "Neural signals cannot initially be ACCEPTED or VERIFIED"))
     (%make-co actual-id type content provenance actual-epistemic actual-verification confidence actual-valid-from valid-to invalidated-by relations)))
 
 (define (fact? co)

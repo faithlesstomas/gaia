@@ -46,9 +46,14 @@ gcas-conformance-scheme:
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-cognitive-memory.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-cognitive-session.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-production-processors.scm
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-ncsi.scm
 	$(MAKE) gcas-eval
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-server.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-actors.scm
+
+test-ncsi:
+	@echo "Running NCSI and J-space processor unit tests..."
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-ncsi.scm
 
 gcas-conformance: gcas-conformance-scheme
 	$(MAKE) test-clients
