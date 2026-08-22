@@ -167,13 +167,36 @@
                #:request-id "req-rec" #:forward-pass-id "fp-rec"
                #:model-id "m" #:model-revision "r" #:tokenizer-revision "t"
                #:lens-id "l" #:lens-revision "r" #:layer 10 #:position 8
-               #:concepts (list c) #:reconstruction-error 0.05))
+               #:concepts (list c)
+               #:parameters '((reconstruction-error-calibrated . #t))
+               #:reconstruction-error 0.05))
          (prop (jspace-observation->proposal obs #:base-priority 7)))
     (assert-true "is processor-proposal?" (processor-proposal? prop))
     (assert-equal "proposal priority" 7 (proposal-priority prop))
     (assert-equal "proposal relevance" 0.92 (proposal-relevance prop))
     (assert-equal "proposal uncertainty" 0.05 (proposal-uncertainty prop))
     (assert-equal "proposal risk is zero" 0.0 (proposal-risk prop)))
+  (format #t "PASS\n")
+
+  (format #t "[5b] Testing uncalibrated uncertainty and proposal bounds... ")
+  (let* ((session (make-cognitive-session))
+         (proc (make-jspace-processor #:max-proposals 1))
+         (adapter (make-ncsi-client-adapter session))
+         (obs (make-ncsi-neural-observation
+               #:request-id "req-bounded" #:forward-pass-id "fp-bounded"
+               #:model-id "m" #:model-revision "r" #:tokenizer-revision "t"
+               #:lens-id "l" #:lens-revision "r" #:layer 1 #:position 1
+               #:concepts (list (make-ncsi-concept 1 "x" 0.7)))))
+    (assert-equal "uncalibrated readout is maximally uncertain" 1.0
+                  (proposal-uncertainty (jspace-observation->proposal obs)))
+    (attach-processor! session proc)
+    (ncsi-dispatch-event! adapter (make-ncsi-generation-started "req-bounded" "m"))
+    (ncsi-dispatch-event! adapter (make-ncsi-neural-state-observed obs))
+    ;; A duplicate layer/forward-pass is suppressed and the per-request bound
+    ;; prevents an unbounded Workspace candidate queue.
+    (ncsi-dispatch-event! adapter (make-ncsi-neural-state-observed obs))
+    (assert-equal "one bounded proposal" 1
+                  (length (workspace-candidates (session-workspace session)))))
   (format #t "PASS\n")
 
   ;; ---------------------------------------------------------------------------

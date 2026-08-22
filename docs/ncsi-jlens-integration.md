@@ -1,6 +1,7 @@
 # NCSI/J-lens integration plan
 
-**Status:** accepted architecture; implementation not started
+**Status:** end-to-end read-only path implemented; M0 complete, M1–M3 partial,
+M4 complete, M5 experimental decision recorded
 
 **Canonical checklist:** this document
 
@@ -271,25 +272,23 @@ report is not sufficient evidence of causal utility.
 ### M0 — contract and conformance fixtures
 
 - [x] Freeze the `gcas.ncsi.v1` event schema and error taxonomy.
-- [/] Add transport-independent JSON fixtures. GAIA validates the canonical
-      corpus; mirroring and validating it in RAI remains required for the
-      cross-repository acceptance gate.
+- [x] Add transport-independent JSON fixtures and validate the same byte-for-byte
+      corpus in GAIA and RAI.
 - [x] Add GAIA tests proving that neural signals cannot directly create an
       accepted or verified Claim.
 - [x] Define cancellation, timeout, incompatibility, and fallback outcomes.
 
-**Acceptance gate:** both projects validate the same valid and invalid fixtures,
-and GAIA deterministically preserves its epistemic and terminal-delivery
-invariants without a real model. The GAIA half is covered by `make test-ncsi`;
-the cross-repository gate remains open until RAI consumes this same fixture
-corpus.
+**Acceptance gate:** complete. Both projects validate the same valid and invalid
+fixtures, and GAIA deterministically preserves its epistemic and
+terminal-delivery invariants without a real model.
 
 ### M1 — RAI Transformers engine
 
-- [ ] Add the optional Transformers execution path without J-lens.
-- [ ] Keep model ownership in a long-lived, separately startable process.
-- [ ] Implement bounded concurrency, cancellation, unload, and typed failures.
-- [ ] Record latency, token counts, model load time, and accelerator memory.
+- [x] Add the optional Transformers execution path without J-lens.
+- [x] Keep model ownership in a long-lived, separately startable process.
+- [/] Implement bounded concurrency, cancellation, unload, typed failures, and
+      terminal request-ID replay protection.
+- [x] Record latency, token counts, model load time, and accelerator memory.
 
 **Acceptance gate:** a pinned small model completes and cancels deterministic
 test requests through the sidecar while the ordinary RAI runtime remains usable
@@ -297,44 +296,87 @@ when neural dependencies or an accelerator are absent.
 
 ### M2 — offline J-lens replication and artifacts
 
-- [ ] Pin or vendor a reviewed revision of the reference J-lens code.
-- [ ] Reproduce fit, save, load, and readout on the selected pilot model.
-- [ ] Implement and validate the artifact manifest and mismatch rejection.
+- [x] Pin a reviewed revision of the reference J-lens code.
+- [/] Reproduce fit, save, load, and readout on the selected pilot model. Local
+      SmolLM2 artifacts exist; a versioned, recorded acceptance run remains.
+- [/] Implement and validate the artifact manifest, unique identity, caching,
+      and mismatch rejection.
 - [ ] Establish fitting and inference resource baselines.
+
+Calibration metadata records the number of prompts actually accepted by the
+reference fitter. A calibration corpus may therefore contain more source
+prompts than the artifact's `n-prompts`; rejected prompts and their reasons must
+be reported in the fitting audit before M2 is closed.
 
 **Acceptance gate:** a clean environment can recreate or obtain a checksummed
 lens and reproduce the documented readout within declared tolerances.
 
 ### M3 — read-only neural sidecar
 
-- [ ] Expose capability discovery and bounded generation streaming.
-- [ ] Emit compact `NeuralStateObserved` events without raw tensors.
-- [ ] Add authentication, request limits, health, and audit telemetry.
-- [ ] Test disconnect, malformed artifact, OOM, timeout, and cancellation paths.
+- [x] Expose capability discovery and bounded NDJSON generation streaming.
+- [x] Emit compact `NeuralStateObserved` events without raw tensors.
+- [/] Add authentication, request limits, health, and audit telemetry.
+- [/] Test disconnect, malformed artifact, OOM, timeout, cancellation, and
+      terminal request-ID replay paths.
 
 **Acceptance gate:** one generation produces a versioned token stream and linked
 neural observations; every failure reaches the client as a typed terminal event.
 
 ### M4 — GAIA NCSI adapter and JSPACE processor
 
-- [ ] Add the RAI NCSI transport adapter without changing execution or verifier
-      semantics.
-- [ ] Represent neural outputs as observation COs with durable provenance.
-- [ ] Submit bounded Workspace proposals with explicit uncertainty.
-- [ ] Implement observable fallback to the current textual projection.
+- [x] Add the production RAI NCSI HTTP/NDJSON-over-UDS transport adapter without
+      changing execution or verifier semantics.
+- [x] Represent neural outputs as observation COs with durable provenance.
+- [x] Submit bounded Workspace proposals with explicit, non-fabricated
+      uncertainty.
+- [x] Implement observable and executable fallback to the current textual
+      projection.
 
 **Acceptance gate:** mocked and live sidecars drive the production Cognitive Bus
 without bypassing Workspace, Control, Action, Evidence, or Goal Verification.
 
 ### M5 — comparative evaluation and readiness decision
 
-- [ ] Run text-only and text-plus-read-only-NCSI modes on the same corpus.
-- [ ] Measure stability, calibration, overhead, failure modes, and task utility.
-- [ ] Document per-model and per-task thresholds and unsupported claims.
-- [ ] Decide whether read-only NCSI is ready for an opt-in experimental profile.
+- [x] Run text-only and text-plus-read-only-NCSI modes on the same corpus.
+- [x] Measure stability, overhead, fallback, terminal behavior, and task utility;
+      semantic score calibration remains explicitly unavailable.
+- [x] Document the pilot model/task gate and unsupported claims in
+      [`evaluations/ncsi-smollm2-m5.md`](evaluations/ncsi-smollm2-m5.md).
+- [x] Decide that read-only NCSI is ready for an opt-in experimental profile,
+      without making causal or epistemic claims.
+- [ ] **Optional — J-space Observatory:** visualize layer × generation-position
+      traces, raw token readouts, derived semantic clusters, workspace-band
+      persistence, lens-to-lens stability, and assurance class. This is an
+      interpretability aid, not an M5 acceptance dependency; derived labels
+      retain separate provenance and never become epistemic facts.
 
 **Acceptance gate:** the evaluation report supports an explicit ship, revise, or
 reject decision and reports all hangs, false completions, fallbacks, and costs.
+
+The reference harness runs all three modes against one immutable sidecar model:
+
+- `TEXT_ONLY` — RAI Transformers generation without `lens-id`;
+- `OBSERVATION_ONLY` — the same generation with read-only observations recorded
+  but no Workspace proposals;
+- `NCSI_POLICY` — the same generation with the bounded JSPACE proposal policy.
+
+Run it after starting the sidecar:
+
+```bash
+GAIA_NCSI_SOCKET="$XDG_RUNTIME_DIR/rai/neural.sock" \
+GAIA_NCSI_MODEL="HuggingFaceTB/SmolLM2-135M" \
+GAIA_NCSI_LENS="smollm2-jlens-v2" \
+GAIA_NCSI_REPEATS=2 \
+make ncsi-eval
+```
+
+The JSON report includes per-case terminal status, output correctness, token and
+observation counts, Workspace proposal counts, latency, fallback use and
+concept sets, plus per-mode rates and cross-repeat Jaccard stability. The
+technical readiness decision is `SHIP_EXPERIMENTAL` only when every mode is
+terminal, observation mode has no fallback and emits observations, and enabling
+the read-only lens leaves deterministic text output unchanged. Task utility and
+causal claims remain separate research gates.
 
 ### M6 — controlled write-side intervention
 

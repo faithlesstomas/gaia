@@ -34,6 +34,9 @@ gcas-eval:
 gcas-live-eval:
 	GUILE_AUTO_COMPILE=0 guile -L src scripts/run-gcas-live-eval.scm
 
+ncsi-eval:
+	GUILE_AUTO_COMPILE=0 guile -L src scripts/run-ncsi-evaluation.scm
+
 test-clients:
 	cargo test --manifest-path src/gaia-cli/Cargo.toml
 	$(MAKE) test-emacs-client
@@ -54,6 +57,8 @@ gcas-conformance-scheme:
 test-ncsi:
 	@echo "Running NCSI and J-space processor unit tests..."
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-ncsi.scm
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-ncsi-evaluation.scm
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-rai-ncsi-adapter.scm
 
 gcas-conformance: gcas-conformance-scheme
 	$(MAKE) test-clients

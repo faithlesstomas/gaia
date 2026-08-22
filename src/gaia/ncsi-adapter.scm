@@ -9,7 +9,9 @@
             make-ncsi-client-adapter
             ncsi-client-adapter?
             ncsi-dispatch-event!
-            ncsi-simulate-stream!))
+            ncsi-simulate-stream!
+            ncsi-report-adapter-failure!
+            ncsi-record-fallback-required!))
 
 (define-record-type <ncsi-client-adapter>
   (%make-adapter session active-requests-cell on-error)
@@ -71,6 +73,11 @@ remain rejectable for the lifetime of the adapter."
       'NEURAL_J_LENS
       'NEURAL_SIDE_CAR))
 
+(define (ncsi-record-fallback-required! adapter reason)
+  (session-emit! (adapter-session adapter) 'NCSI_FallbackRequired
+                 `((adapter . ncsi) (reason . ,reason))
+                 #:origin 'CONTROL))
+
 (define (record-ncsi-adapter-failure! adapter key args)
   (let ((session (adapter-session adapter))
         (details (format #f "~s" args)))
@@ -84,9 +91,13 @@ remain rejectable for the lifetime of the adapter."
     (session-emit! session 'NCSI_AdapterFailed
                    `((error-key . ,key) (details . ,details))
                    #:origin 'NEURAL_SIDE_CAR)
-    (session-emit! session 'NCSI_FallbackRequired
-                   `((adapter . ncsi) (reason . invalid-or-unavailable-stream))
-                   #:origin 'CONTROL)))
+    (ncsi-record-fallback-required! adapter 'invalid-or-unavailable-stream)))
+
+(define (ncsi-report-adapter-failure! adapter key details)
+  "Durably expose a transport or protocol failure and request explicit fallback."
+  (record-ncsi-adapter-failure! adapter key (list details))
+  ((adapter-on-error adapter) (list key details))
+  #f)
 
 (define (ncsi-dispatch-event! adapter event-or-alist)
   "Validate, lifecycle-check, durably record, and publish one NCSI event."
