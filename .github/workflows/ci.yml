@@ -23,6 +23,7 @@ jobs:
         shell: bash
         run: |
           docker run --rm \
+            --security-opt seccomp=unconfined \
             --env LANG=C.UTF-8 \
             --env LC_ALL=C.UTF-8 \
             --env GAIA_TEST_TIMEOUT=120 \
