@@ -1,5 +1,7 @@
 # GNU AI Assistant (GAIA)
 
+[![GitHub CI](https://github.com/faithlesstomas/gaia/actions/workflows/ci.yml/badge.svg)](https://github.com/faithlesstomas/gaia/actions/workflows/ci.yml)
+
 
 ### A Work-in-Progress Reference Implementation of the General Cognitive Architecture Specification
 
@@ -20,7 +22,24 @@ Thanks to the Guile language, GAIA treats code as data (homoiconicity), enabling
 sandboxed evaluation, and white-box auditability. These mechanisms constrain generated code; they do not eliminate LLM errors.
 
 GAIA aims to bridge probabilistic Large Language Models (LLMs) and deterministic symbolic reasoning.
-J-space integration, a Goblins-based AtomSpace, and Lean 4 integration are roadmap directions, not current production capabilities.
+The read-only NCSI/J-space path is implemented as an opt-in experimental
+profile. A Goblins-based AtomSpace, Lean 4 integration, and write-side neural
+intervention remain roadmap work.
+
+## Evidence and implementation status
+
+| Area | Status | Evidence and boundary |
+|---|---|---|
+| GCAS-Core lifecycle | **Implemented** | The model-free corpus passes 22/22 cases with zero hangs and false completions, including 4/4 repair paths. |
+| Structured memory and Goal Verification | **Implemented at Core minimum** | Verified evidence chains persist across sessions; unsupported task classes fail closed as `INCONCLUSIVE`. Retrieval remains lexical and this is not yet evidence of cross-task learning. |
+| NCSI/J-space observation path | **Experimental** | The versioned protocol, RAI UDS adapter, neural Observation COs, bounded Workspace proposals, fallback, and matched M5 harness are implemented. The 18-run SmolLM2 pilot supports `SHIP_EXPERIMENTAL`, not a causal or epistemic claim. |
+| NCSI sidecar hardening and artifact replication | **In progress in RAI** | The clean-environment artifact reproduction/resource baseline and several operational M1–M3 gates remain open. |
+| Steering, AtomSpace, formal proving, cross-task benchmark | **Roadmap** | These capabilities are not part of the current production claim. |
+
+See the [deterministic evaluation report](docs/gcas-evaluation.md), the
+[M5 evaluation](docs/evaluations/ncsi-smollm2-m5.md), its
+[machine-readable summary](docs/evaluations/ncsi-smollm2-m5-summary.json), and
+the [canonical NCSI milestone checklist](docs/ncsi-jlens-integration.md).
 
 
 ## Core Architecture & Why GNU Guile?
@@ -107,7 +126,7 @@ GAIA is designed with a **Kernel + Pluggable Modules** architecture, built on to
 * **Thinking Mode:** Native reasoning support for models with `<|think|>` tags (Gemma 4).
 * **Self-Improvement Infrastructure:** Trajectory logging and dataset curation foundations; governed closed-loop deployment remains roadmap work.
 * **Live Monitoring:** Real-time trajectory viewer for debugging agent reasoning.
-* **Neuro-Symbolic Roadmap:** Planned J-space, symbolic actor, and formal prover integrations.
+* **Neuro-Symbolic Integration:** Experimental read-only NCSI/J-space observations; symbolic actors, formal provers, and neural intervention remain roadmap work.
 
 The default `gemma4:e2b` backend is a relatively small, tool-oriented model. Its
 Guile syntax failures are a known competence limitation that predates the GCAS
@@ -201,7 +220,31 @@ make gcas-live-eval
 
 # Run the production GCAS-Core conformance gate, including CLI and Emacs protocol tests
 make gcas-conformance
+
+# Run all NCSI protocol, policy, evaluation, and real HTTP-over-UDS adapter tests
+make test-ncsi
 ```
+
+The deterministic commands above require no model server and are the public
+reproducibility floor. The live GCAS and NCSI evaluations are opt-in because
+they require pinned model endpoints and, for NCSI, the separately installed RAI
+neural dependencies and a checksummed lens artifact. To reproduce the published
+M5 pilot, start the RAI sidecar at `$XDG_RUNTIME_DIR/rai/neural.sock`, then run:
+
+```bash
+GAIA_NCSI_SOCKET="$XDG_RUNTIME_DIR/rai/neural.sock" \
+GAIA_NCSI_MODEL="HuggingFaceTB/SmolLM2-135M" \
+GAIA_NCSI_LENS="smollm2-jlens-v1" \
+GAIA_NCSI_REPEATS=2 \
+GAIA_NCSI_LAYERS=12 \
+GAIA_NCSI_MAX_NEW_TOKENS=12 \
+GAIA_NCSI_EVAL_OUTPUT=/tmp/ncsi-m5.json \
+make ncsi-eval
+```
+
+The exact revisions, artifact checksum, aggregate results, acceptance rule, and
+limitations are recorded with the M5 report. Run-specific request IDs and
+timings are intentionally not treated as stable golden values.
 
 In the interactive CLI, plain text starts the recurrent GCAS-Core `solve` path. Use
 `/ask <query>` for one-shot chat, `/investigate <query>` for the legacy

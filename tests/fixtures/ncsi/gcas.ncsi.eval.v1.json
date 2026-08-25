@@ -1,0 +1,17 @@
+[
+  {
+    "id": "capital-france",
+    "prompt": "The capital of France is",
+    "expected-contains": "Paris"
+  },
+  {
+    "id": "simple-addition",
+    "prompt": "Complete with only the number: 2 + 3 =",
+    "expected-contains": "5"
+  },
+  {
+    "id": "freezing-water",
+    "prompt": "At standard atmospheric pressure, water freezes at",
+    "expected-contains": "0"
+  }
+]

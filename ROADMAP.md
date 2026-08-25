@@ -1,6 +1,6 @@
 # GAIA Roadmap
 
-> *Last updated: 2026-08-17*
+> *Last updated: 2026-08-25*
 >
 > This document tracks the development plan for the GAIA (GNU AI Assistant) project.
 > For an introduction to the project, see [README.md](README.md).
@@ -129,12 +129,12 @@ architectural conformance alone is not evidence of task competence.
 The prompting design is documented in
 [docs/gcas-prompt-projection.md](docs/gcas-prompt-projection.md), and the corpus
 scope and extension rules in [docs/gcas-evaluation.md](docs/gcas-evaluation.md).
-NCSI/J-space
-remains a planned neural adapter and research direction, not a blocker for this
-milestone: textual prompt projection is the currently available
-cognitive-to-neural control channel and should first be made correct and
-measurable. The cross-project architecture, ownership boundaries, acceptance
-gates, and canonical milestone checklist are maintained in
+The read-only NCSI/J-space adapter is now implemented as an opt-in experimental
+profile and is not a blocker for this milestone. Its M5 pilot establishes
+transport, epistemic, fallback, stability, and overhead behavior; it does not
+establish task benefit or causal utility. Textual prompt projection remains the
+production baseline and fallback. The cross-project architecture, ownership
+boundaries, acceptance gates, and canonical milestone checklist are maintained in
 [docs/ncsi-jlens-integration.md](docs/ncsi-jlens-integration.md).
 
 ### Legacy RLM status
@@ -200,7 +200,7 @@ Hardening the agentic loop to handle syntax constraints of smaller local models 
 
 - [/] **Atoms as Goblins Actors** — Leverage the `guile-goblins` library to create a lightweight, local AtomSpace *specifically for cognitive working memory (active relevance context, up to ~1000 nodes)*. Each semantic node and relation becomes an autonomous actor, leveraging Goblins' transactional vats (for automatic state rollback on execution errors) and asynchronous message passing (for spreading activation). *(Partially completed: Goblins is used for session REPLs, but not semantic mapping).* | *→ gaia-sci: Hyperon FFI, gaia-proof: Goal Caching*
 - [ ] **STI/LTI Memory** — Implement Short-Term Importance (STI) and Long-Term Importance (LTI) weights for memory candidates. Decimate STI asynchronously after cognitive process transitions. | *→ gaia-sci: Cognitive State Serialization*
-- [ ] **NCSI/J-space Integration Program** — Add a versioned NCSI contract, an optional RAI-hosted neural sidecar, a GAIA transport adapter and JSPACE processor, and evaluation against the existing textual projection. Read-only neural observations precede any steering capability; signals remain observations and cannot directly confer `VERIFIED` or `ACCEPTED`. Detailed status is tracked only in the [canonical integration plan](docs/ncsi-jlens-integration.md).
+- [/] **NCSI/J-space Integration Program** — The versioned contract (M0), GAIA production HTTP/NDJSON-over-UDS adapter and bounded JSPACE policy (M4), and comparative pilot with an explicit `SHIP_EXPERIMENTAL` decision (M5) are complete. RAI's M1–M3 lifecycle, artifact-reproduction, resource-baseline, authentication, and failure-path gates remain partially open. Read-only neural observations precede any steering capability; signals remain observations and cannot directly confer `VERIFIED` or `ACCEPTED`. Detailed status is tracked only in the [canonical integration plan](docs/ncsi-jlens-integration.md), and the published evidence is in [the M5 report](docs/evaluations/ncsi-smollm2-m5.md).
   - **J-space to AtomSpace Mapping (M7)** — After AtomSpace and STI/LTI exist, evaluate whether J-lens activations can improve symbolic-node importance over simpler textual or symbolic controls. | *→ gaia-proof: J-space Guided Theorem Proving*
   - **J-lens Activation Injection (M6)** — After the read-only adapter passes comparative evaluation, evaluate bounded steering/patching of symbolic states and REPL errors with explicit Control policy, causal controls, audit, and fallback. | *→ K3: CRT, gaia-proof: J-space Guided Theorem Proving*
 - [/] **Context Reconstruction** — Production `solve` reconstructs a prompt from the current goal, admitted Workspace COs, lexically selected structured memories, and active constraints without appending the transcript. Richer retrieval and evidence/claim consolidation remain.

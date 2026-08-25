@@ -50,7 +50,10 @@
          "test-gcas-live-evaluation.scm"
          "test-cognitive-memory.scm"
          "test-deliberative-processor.scm"
-         "test-gcas-showcase.scm")))
+         "test-gcas-showcase.scm"
+         "test-ncsi.scm"
+         "test-ncsi-evaluation.scm"
+         "test-rai-ncsi-adapter.scm")))
 
 (define failed-tests '())
 
