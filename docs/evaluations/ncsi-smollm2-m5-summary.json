@@ -1,0 +1,69 @@
+{
+  "schema-version": "gaia.ncsi-m5-summary.v1",
+  "decision": "SHIP_EXPERIMENTAL",
+  "scope": "opt-in read-only NCSI profile",
+  "source-revisions": {
+    "gaia": "52aa814546485062d7b8cfb73023ddac07ec13ff",
+    "rai": "29baaa53b262bdd280ae9549696751f37c2c3f36"
+  },
+  "model": {
+    "id": "HuggingFaceTB/SmolLM2-135M",
+    "revision": "93efa2f097d58c2a74874c7e644dbc9b0cee75a2",
+    "tokenizer-revision": "93efa2f097d58c2a74874c7e644dbc9b0cee75a2"
+  },
+  "lens": {
+    "requested-id": "smollm2-jlens-v1",
+    "artifact-id": "smollm2-jlens-v1",
+    "revision": "fit-001",
+    "artifact-sha256": "5f444d3fd89aeda442dc449634034bc0d1cbf792b5d981f807ab0b37378ffd29",
+    "observed-layers": [12]
+  },
+  "configuration": {
+    "tasks": ["capital-france", "simple-addition", "freezing-water"],
+    "modes": ["TEXT_ONLY", "OBSERVATION_ONLY", "NCSI_POLICY"],
+    "repetitions-per-task-mode": 2,
+    "total-runs": 18,
+    "max-new-tokens": 12
+  },
+  "results": {
+    "TEXT_ONLY": {
+      "terminal-rate": 1.0,
+      "task-success-rate": 0.6666666667,
+      "fallback-rate": 0.0,
+      "mean-latency-seconds": 0.350,
+      "observations-per-run": 0,
+      "workspace-proposals-per-run": 0,
+      "repeat-jaccard-stability": 1.0
+    },
+    "OBSERVATION_ONLY": {
+      "terminal-rate": 1.0,
+      "task-success-rate": 0.6666666667,
+      "fallback-rate": 0.0,
+      "mean-latency-seconds": 0.532,
+      "observations-per-run": 12,
+      "workspace-proposals-per-run": 0,
+      "repeat-jaccard-stability": 1.0
+    },
+    "NCSI_POLICY": {
+      "terminal-rate": 1.0,
+      "task-success-rate": 0.6666666667,
+      "fallback-rate": 0.0,
+      "mean-latency-seconds": 0.478,
+      "observations-per-run": 12,
+      "workspace-proposals-per-run": 12,
+      "repeat-jaccard-stability": 1.0
+    }
+  },
+  "readiness-inputs": {
+    "all-modes-terminal": true,
+    "observation-mode-emitted-observations": true,
+    "observation-mode-fallback-count": 0,
+    "read-only-text-output-unchanged": true
+  },
+  "unsupported-claims": [
+    "causal task utility",
+    "semantic score calibration",
+    "neural readouts as epistemic facts",
+    "clean-environment lens artifact reproduction"
+  ]
+}

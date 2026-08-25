@@ -342,6 +342,9 @@ without bypassing Workspace, Control, Action, Evidence, or Goal Verification.
       semantic score calibration remains explicitly unavailable.
 - [x] Document the pilot model/task gate and unsupported claims in
       [`evaluations/ncsi-smollm2-m5.md`](evaluations/ncsi-smollm2-m5.md).
+- [x] Publish the stable configuration, aggregate metrics, artifact checksum,
+      acceptance inputs, and unsupported claims as
+      [`evaluations/ncsi-smollm2-m5-summary.json`](evaluations/ncsi-smollm2-m5-summary.json).
 - [x] Decide that read-only NCSI is ready for an opt-in experimental profile,
       without making causal or epistemic claims.
 - [ ] **Optional — J-space Observatory:** visualize layer × generation-position

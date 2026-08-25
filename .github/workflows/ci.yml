@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scheme:
+    name: Scheme and GCAS conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: registry.gitlab.com/debdistutils/guix/container:latest
+    env:
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      GAIA_TEST_TIMEOUT: "120"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start Guix and authorize substitute keys
+        shell: bash
+        run: |
+          mkdir -p /etc
+          echo "http 80/tcp" > /etc/services
+          echo "https 443/tcp" >> /etc/services
+          for key in ci.guix.gnu.org.pub bordeaux.guix.gnu.org.pub; do
+            key_path=$(find / -name "$key" -print -quit 2>/dev/null)
+            if [ -n "$key_path" ]; then
+              mkdir -p /etc/guix
+              guix archive --authorize < "$key_path"
+            fi
+          done
+          if [ ! -S /var/guix/daemon-socket/socket ]; then
+            guix-daemon --disable-chroot &
+            for _ in $(seq 1 30); do
+              [ -S /var/guix/daemon-socket/socket ] && break
+              sleep 1
+            done
+          fi
+          test -S /var/guix/daemon-socket/socket
+      - name: Run complete Scheme suite
+        run: guix shell -m guix.scm make -- make check
+      - name: Run GCAS conformance gate
+        run: guix shell -m guix.scm make -- make gcas-conformance-scheme
+
+  rust-client:
+    name: Rust client
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install rustfmt
+        run: rustup component add rustfmt
+      - name: Check formatting
+        run: cargo fmt --manifest-path src/gaia-cli/Cargo.toml -- --check
+      - name: Test
+        run: cargo test --manifest-path src/gaia-cli/Cargo.toml --locked
+      - name: Build release client
+        run: cargo build --manifest-path src/gaia-cli/Cargo.toml --release --locked
+
+  emacs-client:
+    name: Emacs client
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Emacs
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes emacs-nox
+      - name: Test
+        run: make test-emacs-client

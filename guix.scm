@@ -9,6 +9,7 @@
              (gnu packages version-control)
              (gnu packages base)
              (gnu packages perl)
+             (gnu packages python)
              (gnu packages code))
 
 (packages->manifest
@@ -24,4 +25,5 @@
        git
        texinfo
        gzip
+       python
        lcov))
