@@ -49,6 +49,7 @@
          "test-gcas-eval-corpus.scm"
          "test-gcas-live-evaluation.scm"
          "test-cognitive-memory.scm"
+         "test-cognitive-memory-graph.scm"
          "test-deliberative-processor.scm"
          "test-gcas-showcase.scm"
          "test-ncsi.scm"

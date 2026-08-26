@@ -134,7 +134,10 @@ neural provenance is never itself accepted or verified evidence."
   (and (cognitive-object? co)
        (eq? (co-type co) 'claim)
        (eq? (co-epistemic-status co) 'ACCEPTED)
-       (memq (co-verification-status co) '(VERIFIED FORMALLY_VERIFIED))))
+       (memq (co-verification-status co) '(VERIFIED FORMALLY_VERIFIED))
+       ;; Historical acceptance remains auditable, but an invalidated Claim is
+       ;; no longer eligible for use as a current fact.
+       (not (co-invalidated-by co))))
 
 (define (hypothesis? co)
   "Predicate: Returns #t if Cognitive Object is a HYPOTHESIS."

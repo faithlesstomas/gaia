@@ -204,8 +204,6 @@ during a broadcast set the flag for a subsequent round."
                         (cognitive-object? event-goal)
                         (equal? (co-id event-goal) (co-id goal)))
                    (let* ((selected (memory-retrieve (session-memory session) task))
-                          (remembered-facts
-                           (memory-retrieve-facts (session-memory session) task))
                           (context (reconstruct-context
                                     goal '() selected
                                     #:constraints
@@ -218,22 +216,13 @@ during a broadcast set the flag for a subsequent round."
                             #:relations `((process . ,process-id*)
                                           (context-for . ,(co-id goal))))))
                      (session-emit! session 'MemoryRetrieved context-co #:origin 'MEMORY)
-                     (append
-                      (map (lambda (remembered)
-                             (make-processor-proposal
-                              (make-cognitive-object
-                               'claim (co-content remembered)
-                               #:provenance 'MEMORY
-                               #:epistemic-status 'ACCEPTED
-                               #:verification-status (co-verification-status remembered)
-                               #:relations `((process . ,process-id*)
-                                             (satisfies . ,(co-id goal))
-                                             (supported-by . ,(co-id remembered))
-                                             (verdict-rationale . "Retrieved accepted user memory.")))
-                              #:priority 100 #:relevance 1))
-                           remembered-facts)
-                      (list (make-processor-proposal context-co
-                                                     #:priority 80 #:relevance 1))))
+                     ;; Retrieval is epistemically neutral. A remembered fact
+                     ;; may inform generation and planning through this context,
+                     ;; but Memory must never manufacture a fresh `satisfies'
+                     ;; edge for the active Goal. Goal completion still requires
+                     ;; the declared Action/Evidence/Goal-Verifier boundary.
+                     (list (make-processor-proposal context-co
+                                                    #:priority 80 #:relevance 1)))
                    '())))))
 
          (generative-processor

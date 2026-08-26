@@ -1,6 +1,6 @@
 # GAIA Roadmap
 
-> *Last updated: 2026-08-25*
+> *Last updated: 2026-08-26*
 >
 > This document tracks the development plan for the GAIA (GNU AI Assistant) project.
 > For an introduction to the project, see [README.md](README.md).
@@ -17,9 +17,10 @@ Workspace rounds, bounded replanning after failed actions or conflicts, and an i
 GCAS-Core conformance gate now covers failure-first replanning, persistence, budgets, interruption, and both supported clients.
 This establishes the architecture, not broad task competence: the production verifier registry currently contains a deterministic
 Fibonacci contract, while unknown natural-language task classes fail closed as `INCONCLUSIVE`.
-The immediate product milestone is now a **reliable vertical slice**: every `solve` must terminate at the client boundary,
-repair behavior must be measurable, and a small set of task classes must have executable acceptance contracts before the
-architecture is expanded further.
+The immediate product milestone is now the **GAIA MVP — Persistent Verified Assistant**: every `solve` must terminate at the
+client boundary, verified memory and its justification graph must survive restarts without transcript replay, contradictions
+must remain explicit, repair behavior must be measurable, and a small set of task classes must have executable acceptance
+contracts. The normative MVP contract and acceptance scenarios are maintained in [docs/gaia-mvp.md](docs/gaia-mvp.md).
 
 **Architecture:** Rust Client - GAIA Server (Guile REPL) - LiteLLM Proxy - LLM backends (Ollama, Lemonade, external LLM API etc.)
 
@@ -107,15 +108,22 @@ the reference Fibonacci capability, adds semantic/conflict-aware memory, and
 strengthens capability policy. These improve competence and robustness without
 changing the completed GCAS-Core architectural boundary.
 
-## Reliable vertical slice — current product priority
+## GAIA MVP — Persistent Verified Assistant
 
-Full GCAS expansion is not a prerequisite for a useful GAIA. The next milestone
-is a narrow but dependable `solve` path whose behavior can be measured with the
-small local model currently used by default (`gemma4:e2b`). That model is tuned
-primarily for tool use rather than sustained Guile REPL programming, and similar
-Scheme-generation failures were already present in the legacy RLM loop. GCAS
-must therefore expose model limitations honestly and compensate with structure;
-architectural conformance alone is not evidence of task competence.
+Full GCAS expansion is not a prerequisite for a useful GAIA, but persistent
+cognitive memory is part of the MVP rather than a later product extension. The
+milestone combines a narrow dependable `solve` path with durable graph memory,
+guarded retrieval, contradiction preservation, and multi-session evaluation.
+The small local model currently used by default (`gemma4:e2b`) is tuned primarily
+for tool use rather than sustained Guile REPL programming. GCAS must expose model
+limitations honestly and compensate with structure; architectural conformance
+alone is not evidence of task competence or cognitive continuity.
+
+- [x] **MVP definition and acceptance contract (P0)** — `docs/gaia-mvp.md` defines the product claim, required invariants, six longitudinal acceptance scenarios, delivery milestones, and explicit post-MVP scope.
+- [/] **Cognitive Memory Graph v1 (P0)** — The local durable store now exposes typed duplicate-safe links, graph traversal, dependency discovery, transitive invalidation, and versioned supersession. Invalidated Claims are ineligible as current facts. Remaining work: explicit memory-role schema, STI/LTI activation, bounded graph-driven retrieval, and the Goblins/AtomSpace adapter implementation.
+- [x] **Verified cross-session graph-memory gate (P0)** — A deterministic test stores a verified Evidence/Claim chain, creates a fresh session, resolves its justification edge, retrieves the Claim for a new Goal, and reconstructs context without transcript replay. The same gate covers transitive dependency invalidation and auditable supersession.
+- [ ] **Consolidation and guarded graph retrieval (P0)** — Attach governed consolidation to terminal process events; record retention and revalidation conditions; retrieve by Goal, relations, time, provenance, contradictions, and activation rather than lexical overlap alone.
+- [ ] **Longitudinal memory corpus (P0)** — Extend the deterministic and live gates with user testimony, contradiction-driven replanning, procedural reuse, stale-memory rejection, and metacognitive capability revision across session restarts.
 
 - [x] **Terminal delivery invariant (P0)** — Every active production process reaches one durable terminal event and invokes `on-finished` exactly once. Failure-budget, transition-budget, no-progress, and user-interrupt outcomes all reach the client. An interrupt with no active process does not create an orphan `ProcessTerminated` event.
 - [x] **Three-failure regression (P0)** — Deterministic processor and server-adapter tests execute three distinct failing Actions, assert `FAILURE_BUDGET_EXHAUSTED`, one `ProcessTerminated`, one completion callback, and a terminal `(final ...)` protocol message.
@@ -129,6 +137,8 @@ architectural conformance alone is not evidence of task competence.
 The prompting design is documented in
 [docs/gcas-prompt-projection.md](docs/gcas-prompt-projection.md), and the corpus
 scope and extension rules in [docs/gcas-evaluation.md](docs/gcas-evaluation.md).
+The complete MVP product and memory contract is documented in
+[docs/gaia-mvp.md](docs/gaia-mvp.md).
 The read-only NCSI/J-space adapter is now implemented as an opt-in experimental
 profile and is not a blocker for this milestone. Its M5 pilot establishes
 transport, epistemic, fallback, stability, and overhead behavior; it does not
@@ -198,7 +208,7 @@ Hardening the agentic loop to handle syntax constraints of smaller local models 
 
 *Moved from former Phase 7 to address context rot and context window clogging.*
 
-- [/] **Atoms as Goblins Actors** — Leverage the `guile-goblins` library to create a lightweight, local AtomSpace *specifically for cognitive working memory (active relevance context, up to ~1000 nodes)*. Each semantic node and relation becomes an autonomous actor, leveraging Goblins' transactional vats (for automatic state rollback on execution errors) and asynchronous message passing (for spreading activation). *(Partially completed: Goblins is used for session REPLs, but not semantic mapping).* | *→ gaia-sci: Hyperon FFI, gaia-proof: Goal Caching*
+- [/] **Atoms as Goblins Actors** — The GAIA MVP now treats AtomSpace semantics as a product requirement: durable CO nodes, typed graph edges, traversal, dependency invalidation, and supersession are implemented over the transparent local store. Remaining work is the Goblins actor backend, transactional graph updates, spreading activation, and bounded active relevance context (up to ~1000 nodes). Storage remains replaceable and MUST preserve the contracts in [docs/gaia-mvp.md](docs/gaia-mvp.md). | *→ gaia-sci: Hyperon FFI, gaia-proof: Goal Caching*
 - [ ] **STI/LTI Memory** — Implement Short-Term Importance (STI) and Long-Term Importance (LTI) weights for memory candidates. Decimate STI asynchronously after cognitive process transitions. | *→ gaia-sci: Cognitive State Serialization*
 - [/] **NCSI/J-space Integration Program** — The versioned contract (M0), GAIA production HTTP/NDJSON-over-UDS adapter and bounded JSPACE policy (M4), and comparative pilot with an explicit `SHIP_EXPERIMENTAL` decision (M5) are complete. RAI's M1–M3 lifecycle, artifact-reproduction, resource-baseline, authentication, and failure-path gates remain partially open. Read-only neural observations precede any steering capability; signals remain observations and cannot directly confer `VERIFIED` or `ACCEPTED`. Detailed status is tracked only in the [canonical integration plan](docs/ncsi-jlens-integration.md), and the published evidence is in [the M5 report](docs/evaluations/ncsi-smollm2-m5.md).
   - **J-space to AtomSpace Mapping (M7)** — After AtomSpace and STI/LTI exist, evaluate whether J-lens activations can improve symbolic-node importance over simpler textual or symbolic controls. | *→ gaia-proof: J-space Guided Theorem Proving*

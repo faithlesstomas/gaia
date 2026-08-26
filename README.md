@@ -15,28 +15,33 @@ Claim. The minimum GCAS-Core conformance gate covers failure-first repair, persi
 clients. This is architectural conformance, not general task competence: Fibonacci is the first registered production verifier,
 while unsupported task classes deliberately terminate as `INCONCLUSIVE`.
 Control-driven budget exhaustion now also reaches the client as a terminal response, including the three-failed-Action case that
-previously left the CLI waiting. The current product milestone is a reliable, measurable vertical slice rather than immediate
-implementation of every GCAS extension.
+previously left the CLI waiting. The current product milestone is the
+[GAIA MVP — Persistent Verified Assistant](docs/gaia-mvp.md): a measurable
+vertical slice combined with durable graph memory and longitudinal acceptance
+tests, rather than immediate implementation of every GCAS extension.
 
 Thanks to the Guile language, GAIA treats code as data (homoiconicity), enabling structural validation,
 sandboxed evaluation, and white-box auditability. These mechanisms constrain generated code; they do not eliminate LLM errors.
 
 GAIA aims to bridge probabilistic Large Language Models (LLMs) and deterministic symbolic reasoning.
 The read-only NCSI/J-space path is implemented as an opt-in experimental
-profile. A Goblins-based AtomSpace, Lean 4 integration, and write-side neural
-intervention remain roadmap work.
+profile. Initial AtomSpace semantics—durable CO nodes, typed edges, traversal,
+dependency invalidation, and supersession—are implemented over the transparent
+local store. A Goblins actor backend, STI/LTI, Lean 4 integration, and write-side
+neural intervention remain roadmap work.
 
 ## Evidence and implementation status
 
 | Area | Status | Evidence and boundary |
 |---|---|---|
 | GCAS-Core lifecycle | **Implemented** | The model-free corpus passes 22/22 cases with zero hangs and false completions, including 4/4 repair paths. |
-| Structured memory and Goal Verification | **Implemented at Core minimum** | Verified evidence chains persist across sessions; unsupported task classes fail closed as `INCONCLUSIVE`. Retrieval remains lexical and this is not yet evidence of cross-task learning. |
+| Structured memory and Goal Verification | **MVP in progress** | Verified evidence chains and typed graph relations persist across sessions; invalidation propagates through justification dependencies and supersession preserves history. Retrieval remains lexical and this is not yet evidence of cross-task learning. |
 | NCSI/J-space observation path | **Experimental** | The versioned protocol, RAI UDS adapter, neural Observation COs, bounded Workspace proposals, fallback, and matched M5 harness are implemented. The 18-run SmolLM2 pilot supports `SHIP_EXPERIMENTAL`, not a causal or epistemic claim. |
 | NCSI sidecar hardening and artifact replication | **In progress in RAI** | The clean-environment artifact reproduction/resource baseline and several operational M1–M3 gates remain open. |
-| Steering, AtomSpace, formal proving, cross-task benchmark | **Roadmap** | These capabilities are not part of the current production claim. |
+| Goblins AtomSpace backend, STI/LTI, steering, formal proving, cross-task benchmark | **Roadmap** | These capabilities are not part of the current production claim. |
 
-See the [deterministic evaluation report](docs/gcas-evaluation.md), the
+See the [GAIA MVP contract](docs/gaia-mvp.md), the
+[deterministic evaluation report](docs/gcas-evaluation.md), the
 [M5 evaluation](docs/evaluations/ncsi-smollm2-m5.md), its
 [machine-readable summary](docs/evaluations/ncsi-smollm2-m5-summary.json), and
 the [canonical NCSI milestone checklist](docs/ncsi-jlens-integration.md).
