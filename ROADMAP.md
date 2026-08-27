@@ -106,9 +106,9 @@ as scheduling or legacy compatibility metadata until migrated.
   exercise §14.2 without weakening the existing exactly-once, provenance, verification, and fail-closed guarantees.
 
 The implementation order and acceptance criteria are defined as U0–U4 in
-[the GAIA MVP contract](docs/gaia-mvp.md#gcas-03-implementation-plan). MR !5
-remains the graph-memory foundation and documentation-alignment change; it does
-not itself claim GCAS 0.3 uncertainty conformance.
+[the GAIA MVP contract](docs/gaia-mvp.md#gcas-03-implementation-plan). The first
+implementation slice remains the graph-memory foundation and documentation
+alignment; it does not itself claim GCAS 0.3 uncertainty conformance.
 
 ### Operational completion sequence
 

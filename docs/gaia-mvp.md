@@ -65,18 +65,19 @@ transitive invalidation, and supersession in
 `tests/test-cognitive-memory-graph.scm`. The remaining scenarios are milestone
 requirements, not claims of current completion.
 
-## Current MR boundary
+## Current implementation-slice boundary
 
-MR !5 delivers the first part of M1: durable typed memory edges, traversal,
-dependency invalidation, auditable supersession, and a cross-session graph
-test. It also aligns the documentation and conformance language with GCAS 0.3.
-It does **not** claim `GCAS-Core 0.3`, `GCAS-Uncertainty 0.3`, or
+The first MVP implementation slice delivers part of M1: durable typed memory
+edges, traversal, dependency invalidation, auditable supersession, and a
+cross-session graph test. It also aligns the documentation and conformance
+language with GCAS 0.3. It does **not** claim `GCAS-Core 0.3`,
+`GCAS-Uncertainty 0.3`, or
 `GCAS-Bayesian 0.3` conformance and does not yet implement an uncertainty
 calculus.
 
-The implementation following MR !5 is intentionally split into reviewable
-vertical slices. Each slice must preserve the existing exactly-once,
-fail-closed, provenance, restoration, and client-protocol gates.
+The subsequent implementation is intentionally split into reviewable vertical
+slices. Each slice must preserve the existing exactly-once, fail-closed,
+provenance, restoration, and client-protocol gates.
 
 ## GCAS 0.3 implementation plan
 
