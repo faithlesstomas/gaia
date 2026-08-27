@@ -1,9 +1,9 @@
 # GCAS — General Cognitive Architecture Specification
 
-## GCAS 0.2 — Cognitive Process & Operational Semantics (Draft)
+## GCAS 0.3 — Cognitive Process, Operational Semantics & Uncertainty Framework (Draft)
 
 **Status:** Draft / Specification Proposal
-**Version:** 0.2
+**Version:** 0.3
 **Scope:** Language- and implementation-independent cognitive architecture for persistent, hybrid neuro-symbolic intelligent systems.
 
 ---
@@ -42,8 +42,9 @@ The architecture synthesizes core insights from:
 * and Reproducible computation.
 
 GCAS specifies cognitive objects, interfaces, state transitions, information flows, invariants, and behavioral requirements rather than programming languages,
-storage engines, neural architectures, or proprietary frameworks. Version 0.2 extends the architectural foundations of GCAS 0.1 with normative
-operational semantics for epistemic change, Workspace rounds, Goals, Actions, Memory, metacognition, and process termination.
+storage engines, neural architectures, or proprietary frameworks. Version 0.3 extends the operational semantics of GCAS 0.2 with a normative
+uncertainty framework: Bayesian belief update and prediction, typed sources of uncertainty, calibration, uncertainty-aware decisions, and an
+explicit separation between correctness, verification, and confidence.
 
 ---
 
@@ -61,7 +62,8 @@ Systems conforming to GCAS SHOULD pursue the following design goals:
 * **G5. Hybrid Neuro-Symbolic Reasoning:** Integrate heterogeneous reasoning mechanisms (generative, deliberative, symbolic, probabilistic, algorithmic, formal verification).
 * **G6. Reproducibility:** Record execution and derivation state sufficiently to enable exact or probabilistic reproduction.
 * **G7. Provenance Tracking:** Maintain audit trails identifying the origin, derivation, and supporting evidence for persistent claims.
-* **G8. Explicit Uncertainty & Time:** Represent uncertainty, confidence, contradiction, and temporal validity intervals explicitly.
+* **G8. Explicit Uncertainty & Time:** Represent, update, propagate, calibrate, and communicate typed uncertainty, confidence, contradiction,
+  and temporal validity intervals explicitly.
 * **G9. Metacognition:** Support reasoning about system performance, resource usage, progress, and failure modes.
 * **G10. Evolvability:** Enable modular replacement and upgrade of cognitive processors without architecture redesign.
 
@@ -165,7 +167,33 @@ GCAS organizes cognitive computation into four primary abstractions:
 * **Cognitive Event:** State-change notifications distributed via the Cognitive Bus.
 * **Cognitive Process:** Operational transitions transforming Cognitive State in response to Cognitive Events.
 
-## 2.7 Design Maxim
+## 2.7 Correctness, Verification & Confidence Are Distinct
+
+For any output, Claim, prediction, Plan, or Action outcome $y$, GCAS requires a declared **correctness target** $C_y$: the property and scope
+against which $y$ would be judged correct. Correctness is a property of $y$ relative to that target. It may be true, false, partially satisfied
+under a declared scoring rule, or presently unknown.
+
+**Verification** is an evidence-producing process that tests a declared target with bounded scope and coverage. **Confidence** is an epistemic
+quantity: the system's uncertainty-aware degree of belief that the correctness target is satisfied, conditional on stated evidence, assumptions,
+model, scope, and time. For a binary target, a probabilistic confidence MAY be expressed as:
+
+$$
+q_y = P(C_y = 1 \mid E, M, S, t).
+$$
+
+Therefore:
+
+```text
+correctness != confidence
+verification != correctness
+confidence != verification status
+```
+
+A correct result MAY have low confidence, and an incorrect result MAY have high confidence. High confidence MUST NOT promote a Claim to
+`VERIFIED` or `ACCEPTED`; only evidence evaluated under the applicable verification and acceptance contracts can do so. The unqualified word
+"accuracy" SHOULD be reserved for empirical performance over evaluated cases, not used as a synonym for confidence on one unevaluated case.
+
+## 2.8 Design Maxim
 
 A compliant system MUST make the following distinctions explicit at every level:
 ```
@@ -175,6 +203,7 @@ what the system observed
 what the system can prove
 what the system can reproduce
 what the system believes to be valid at time T
+how uncertain the system is, about which target, and why
 what the system does not know
 ```
 
@@ -195,8 +224,9 @@ Every Cognitive Object SHOULD carry metadata including:
 * **Verification Status:** Level of validation (`UNVERIFIED`, `PARTIALLY_VERIFIED`, `VERIFIED`, `FORMALLY_VERIFIED`).
 * **Verification Target:** The property actually checked (`DERIVATION_VALIDITY`, `EXECUTION_RESULT`, `SOURCE_ATTESTATION`,
   `EMPIRICAL_CLAIM`, `GOAL_SATISFACTION`, or a domain-specific extension).
-* **Confidence Profile:** One or more typed reliability measures such as model uncertainty, source reliability, evidential support,
-  verifier coverage, or derivation soundness. A scalar $[0.0, 1.0]$ MAY be used only when its semantics and calibration domain are declared.
+* **Uncertainty Assessments:** References to versioned `UncertaintyAssessment` COs. Each assessment identifies its target quantity, semantics,
+  conditioning evidence, representation, scope, calibration domain, and update method. A scalar confidence $[0.0, 1.0]$ MAY be used only for a
+  declared event such as correctness of a binary target; heterogeneous reliability measures MUST NOT be collapsed into one unlabeled score.
 * **Timestamp & Temporal Validity:** Creation time and temporal validity interval (`valid_from`, `valid_to`, `invalidated_by`).
 * **Relations / Dependencies:** Graph links to supporting, parent, or contradicting COs.
 * **Scope:** The entities, environment, task, time, and assumptions within which the content is asserted to hold.
@@ -235,7 +265,10 @@ provenance:          EXTERNAL_SOURCE ("paper-doi-10.1038/s41586")
 epistemic-status:    BELIEF
 verification-status: PARTIALLY_VERIFIED
 verification-target: EMPIRICAL_CLAIM
-confidence-profile:  {source-reliability: 0.90, evidential-support: 0.82}
+uncertainty-assessments:
+  - {target: correctness(EMPIRICAL_CLAIM), representation: bernoulli(p=0.82),
+     calibration-support: {n: 220, empirical-95%-interval: [0.76, 0.87]}, calibration-domain: assay-A4-v2,
+     conditioned-on: [evidence-91, evidence-103], method: bayes-model-7}
 temporal-validity:   [2026-01-15, INF]
 scope:               {compound-batch: X-17, assay: A4}
 ```
@@ -265,7 +298,7 @@ Systems MUST NOT treat historical beliefs as timeless truths.
 
 1. **Observation:** Information received directly from environment, sensors, user input, or execution runtimes. Observation does not imply interpretation or truth.
 2. **Claim:** A proposition whose truth value requires evaluation.
-3. **Belief:** A Claim currently accepted by the system with explicit confidence and provenance. Contradictory beliefs MAY temporarily coexist.
+3. **Belief:** A Claim currently accepted by the system with explicit uncertainty assessments and provenance. Contradictory beliefs MAY temporarily coexist.
 4. **Hypothesis:** Candidate explanation or solution requiring verification.
 5. **Evidence:** Information supporting or opposing a Claim, Hypothesis, or Belief. Must carry provenance.
 6. **Goal:** Desired state or unresolved query. May contain subgoals and completion criteria.
@@ -276,6 +309,8 @@ Systems MUST NOT treat historical beliefs as timeless truths.
 11. **Conflict:** Explicit representation of mutually incompatible Cognitive Objects. MUST NOT be resolved by silent deletion.
 12. **Reflection:** Metacognitive assessment of a cognitive process, progress, or resource state.
 13. **Rule / Procedure:** Reusable strategy or operational guidance stored in procedural memory.
+14. **Uncertainty Assessment:** A versioned, scoped representation of uncertainty about a Claim, prediction, model, observation, process,
+    Action outcome, or correctness target. It is evidence-conditioned metadata, not a truth label.
 
 ## 3.5 Cognitive Object Identity and Versioning
 
@@ -295,6 +330,9 @@ Persistent epistemic Claims MUST participate in an explicit justification graph.
 * `derived-from(Claim, Premise-or-Observation)`,
 * `assumes(Claim, Assumption)`,
 * `verified-by(Claim, Verification)`,
+* `quantified-by(Target, UncertaintyAssessment)`,
+* `conditioned-on(UncertaintyAssessment, Evidence-or-Assumption)`,
+* `updates(NewAssessment, PriorAssessment)`,
 * `contradicts(Claim, Claim)`,
 * `supersedes(New, Old)`,
 * `invalidates(Evidence, Claim)`.
@@ -302,6 +340,112 @@ Persistent epistemic Claims MUST participate in an explicit justification graph.
 A Claim MUST NOT gain support merely because multiple retrieved objects repeat it. Systems SHOULD track source lineage and common
 ancestry so that copied or mutually dependent sources are not treated as independent evidence. Invalidating a premise MUST make every
 dependent Claim discoverable for re-evaluation; GCAS does not require one particular truth-maintenance algorithm.
+
+## 3.7 Uncertainty Framework
+
+Uncertainty in GCAS is a persistent, compositional part of Cognitive State. It is not merely a verbal hedge, token probability, raw neural
+signal, or confidence number attached at rendering time. An `UncertaintyAssessment` SHOULD contain at least:
+
+```text
+assessment-id | target-id and target quantity | uncertainty type
+representation and parameters/samples/bounds | semantics and units
+conditioning evidence and assumptions | source lineage/dependence
+prior and previous-assessment ids | update/inference method
+approximation diagnostics | calibration model/domain/version
+scope and temporal validity | producer and timestamp
+```
+
+### 3.7.1 Typed Sources of Uncertainty
+
+Implementations MUST distinguish sources when they require different updates or interventions:
+
+* **Aleatoric / observational:** irreducible variability, measurement noise, ambiguous observations, or stochastic outcomes;
+* **Parametric epistemic:** uncertainty about model parameters due to limited or unrepresentative evidence;
+* **Structural epistemic:** uncertainty about model class, causal structure, hypotheses, assumptions, or ontology;
+* **Distributional:** uncertainty that the current case is outside the data or calibration domain, including temporal drift;
+* **Computational:** error or variance introduced by finite search, sampling, numerical approximation, truncation, or an unfinished computation;
+* **Outcome / decision:** uncertainty about consequences of Actions after predictive and environment uncertainty have been propagated.
+
+These types MAY be represented jointly, but MUST remain recoverable when they imply different actions. For example, more observations may
+reduce epistemic uncertainty but not irreducible outcome noise; more computation may reduce approximation error but not missing evidence.
+
+### 3.7.2 Bayesian Belief State and Update
+
+Bayesian probability is the normative default for quantified degrees of belief in GCAS 0.3. Given model or hypothesis $m$, latent parameters
+$\theta$, existing evidence $D$, and new evidence $e$, a conforming Bayesian update records the versioned transition:
+
+$$
+p(\theta, m \mid D, e) =
+\frac{p(e \mid \theta, m, D)\,p(\theta, m \mid D)}
+     {p(e \mid D)},
+\qquad
+p(e \mid D) = \sum_m \int p(e \mid \theta, m, D)\,p(\theta, m \mid D)\,d\theta.
+$$
+
+The previous posterior becomes the next prior only within compatible scope and assumptions. Priors MUST be explicit, versioned, and
+inspectable; likelihoods MUST identify the observation model and source-dependence assumptions. Evidence with common ancestry or correlated
+failure modes MUST NOT be multiplied as conditionally independent without justification.
+
+Predictions MUST propagate material parameter and model uncertainty through the posterior predictive distribution rather than silently use
+only a point estimate:
+
+$$
+p(y_* \mid x_*, D) = \sum_m \int p(y_* \mid x_*, \theta, m)\,p(\theta, m \mid D)\,d\theta.
+$$
+
+Exact inference is not required. Approximate inference (including variational inference, MCMC, ensembles, Laplace methods, probabilistic
+programming, or domain-specific approximations) MUST declare its method, resource budget, convergence or fit diagnostics where available,
+and any known approximation uncertainty. A failure to compute a reliable posterior is itself a computational uncertainty outcome and MUST
+NOT be rendered as sharp confidence.
+
+Non-probabilistic representations such as intervals, possibility measures, Dempster-Shafer masses, subjective logic opinions, proof bounds,
+or paraconsistent states MAY be used where appropriate. Their semantics and combination rules MUST be declared. They MUST NOT be converted
+to or combined with probabilities without a documented, validated mapping.
+
+### 3.7.3 Calibration and Empirical Correctness
+
+Confidence is **calibrated** over an evaluation population when cases assigned probability $p$ satisfy the declared correctness target at an
+empirical rate near $p$. Calibration is always conditional on target, population, model and policy version, time period, and distributional
+scope. It is not a timeless property of a processor.
+
+Systems that expose confidence SHOULD evaluate it on held-out or forward-in-time outcomes using proper scoring rules such as log loss or the
+Brier score, calibration curves, interval coverage, and risk-coverage/selective-prediction metrics. Calibration error summaries MAY supplement
+but MUST NOT replace the underlying curves and sample counts. Evaluation data MUST remain separate from the evidence used to produce the
+assessed posterior unless the evaluation protocol explicitly models that reuse.
+
+When a correctness target later becomes observable, the system SHOULD create a `CorrectnessObserved` Verification or Result linked to the
+original assessment, then update a separate calibration record. The later observation evaluates the earlier confidence; it MUST NOT rewrite
+what the system knew or believed at the earlier time.
+
+Observed distribution shift, material model change, or insufficient evaluation support MUST invalidate, widen, or qualify the applicable
+calibration Claim. Verbalized model confidence, token likelihood, entropy, verifier score, source reliability, evidential support, and posterior
+probability of correctness are distinct quantities. A mapping between them MAY be learned, but MUST be validated for the declared domain.
+
+### 3.7.4 Uncertainty-Aware Decision Semantics
+
+Decisions MUST use predictive uncertainty together with consequences, not confidence alone. Where utilities and probabilities are available,
+an Action policy SHOULD evaluate posterior expected utility and declared risk constraints:
+
+$$
+a^* \in \arg\max_a\; \mathbb{E}_{p(o \mid a,D)}[U(o,a)]
+$$
+
+subject to applicable safety, authorization, and tail-risk constraints. Acceptance, abstention, escalation, evidence acquisition, and Action
+thresholds MUST be scoped to the cost of error and the Goal contract; a universal confidence threshold is non-conforming. The Controller
+SHOULD compare the expected value of information with the cost of additional observation, verification, or computation when deciding whether
+to continue inquiry. High-impact irreversible Actions SHOULD require stronger evidence, broader verifier coverage, and more conservative
+uncertainty bounds than low-impact reversible Actions.
+
+### 3.7.5 Propagation and Communication
+
+Processors that transform uncertain inputs MUST either propagate the material uncertainty into their outputs or explicitly state why the
+output does not depend on it. Derived assessments MUST retain dependency links, so later invalidation or recalibration can trigger revision.
+Conflicting probability assignments MUST remain separate until their scopes, priors, evidence lineage, and model assumptions are reconciled;
+blind averaging is prohibited.
+
+User-facing answers and inter-processor messages SHOULD communicate the decision-relevant uncertainty at an appropriate resolution: the
+target, estimate or bound, major uncertainty sources, scope, verification status, and what evidence could materially change the assessment.
+They MUST NOT present confidence as observed correctness or hide an `INCONCLUSIVE` state behind fluent language.
 
 ---
 
@@ -376,6 +520,7 @@ Key responsibilities:
 * Scheduling cognitive processors,
 * Managing active goals and priorities,
 * Resource budget enforcement (tokens, time, memory, tool costs),
+* Uncertainty-aware acceptance, abstention, escalation, and value-of-information decisions,
 * Interruption and strategy switching,
 * Action inhibition and safety gate checks,
 * Loop and cycle detection,
@@ -424,7 +569,10 @@ HypothesisProposed     ActionCompleted
 EvidenceFound          ActionFailed
 ConflictDetected       ProofSucceeded / ProofFailed
 MemoryRetrieved        ReflectionRaised
-WorkspaceBroadcast     GoalCompleted
+UncertaintyEstimated   BeliefUpdated
+CorrectnessObserved    CalibrationUpdated
+CalibrationDrift       WorkspaceBroadcast
+GoalCompleted
 ```
 
 ---
@@ -474,7 +622,8 @@ Global Workspace and its coordinates do not replace Cognitive Objects or explici
 NCSI signals are observations about a neural processor, not evidence for the truth of generated content. Attention, activation,
 entropy, concept directions, verbalized confidence, or steering coordinates MAY influence scheduling or trigger verification, but
 MUST NOT directly promote a Claim to `VERIFIED` or `ACCEPTED`. Implementations SHOULD empirically validate signal stability,
-calibration, and causal relevance for each model and task domain.
+calibration, and causal relevance for each model and task domain. A raw NCSI signal MUST NOT be labeled as posterior probability of
+correctness unless a versioned mapping from that signal has been trained and calibrated against the same declared correctness target.
 
 ## 7.4 Bidirectional Neural Steering
 
@@ -511,7 +660,7 @@ Transcripts record *what was said*; memory stores *what was learned, verified, a
 * **Selective Retrieval:** Memory retrieval MUST be driven by current goals, workspace state, entity relations,
   and uncertainty signals—not blanket context window expansion.
 * **Memory Consolidation:** Asynchronous transformation of raw episodic records into validated semantic and procedural knowledge.
-* **Controlled Forgetting:** Retention MUST be governed by relevance, confidence, utility, and decay policies. Forgetting, compression,
+* **Controlled Forgetting:** Retention MUST be governed by relevance, typed uncertainty, utility, and decay policies. Forgetting, compression,
   summarization, supersession, and archival are essential system features.
 
 Retrieval is an epistemically neutral operation: retrieving a CO MUST NOT increase its epistemic or verification status. Retrieved
@@ -559,7 +708,7 @@ input payload | code executed | environment hash | dependencies | parameters | o
 
 GCAS natively supports explicit scientific reasoning:
 ```
-Question ──> Hypothesis ──> Prediction ──> Experiment ──> Observation ──> Evidence ──> Evaluation ──> Belief Update
+Question ──> Hypothesis ──> Prior ──> Prediction ──> Experiment ──> Observation ──> Evidence ──> Evaluation ──> Posterior / Belief Update
 ```
 
 ## 9.4 Metacognition, Loop Detection & Failure States
@@ -598,13 +747,13 @@ Proposal ──> Static Analysis ──> Sandbox Trial ──> Verification ─�
 
 # 11. Normative Cognitive Invariants & Conformance
 
-## 11.1 Cognitive Invariants (I1–I10)
+## 11.1 Cognitive Invariants (I1–I12)
 
 A compliant GCAS implementation MUST satisfy the following invariants:
 
 * **I1:** Generated content is candidate cognition (`HYPOTHESIS`), NOT automatic knowledge.
 * **I2:** Persistent knowledge MUST carry provenance and verification metadata.
-* **I3:** Uncertainty, confidence, and temporal validity MUST remain explicitly representable.
+* **I3:** Typed uncertainty, its conditioning evidence, update history, calibration scope, and temporal validity MUST remain explicitly representable.
 * **I4:** Contradictory claims MUST NOT silently overwrite one another.
 * **I5:** External state MUST be observed from the environment when accessible, not inferred purely from internal memory.
 * **I6:** Actions MUST produce observable, auditable results.
@@ -612,18 +761,21 @@ A compliant GCAS implementation MUST satisfy the following invariants:
 * **I8:** Failure (`UNKNOWN`, `FAILED`) MUST remain an acceptable and preferred outcome over fabricated certainty.
 * **I9:** Persistent memory MUST NOT depend solely on LLM context windows.
 * **I10:** No individual cognitive processor is assumed infallible.
+* **I11:** Correctness, verification status, and confidence MUST remain distinct; no confidence value establishes correctness or verification.
+* **I12:** Material uncertainty MUST be propagated into predictions and decisions or its omission MUST be declared and justified.
 
 ## 11.2 Minimal Conformance Requirements (GCAS-Core)
 
 To claim **GCAS-Core** compliance, a system MUST implement at minimum:
-1. Explicit Cognitive Objects with metadata, 3-axis epistemic model, and provenance,
+1. Explicit Cognitive Objects with metadata, 3-axis epistemic model, provenance, and versioned Uncertainty Assessments,
 2. Epistemic distinction between generated hypotheses and verified beliefs,
 3. Bounded Global Workspace process with selective admission/broadcast,
 4. At least two distinct specialized cognitive processors (Generative + Deliberative),
 5. Explicit memory architecture separate from conversation prompt history,
 6. Recurrent cognitive cycle with progress and loop monitoring,
 7. Separated execution runtime with auditable Action/Result semantics,
-8. Explicit representation of uncertainty, temporal validity, and failure states.
+8. Explicit representation of typed uncertainty, correctness targets, calibration scope, temporal validity, and failure states,
+9. Uncertainty-aware acceptance and abstention rules that do not equate confidence with correctness.
 
 A system does NOT require a specific neural model, J-space, Scheme, Lean, or Guix to achieve GCAS-Core conformance.
 
@@ -671,6 +823,27 @@ A system does NOT require a specific neural model, J-space, Scheme, Lean, or Gui
                               ENVIRONMENT
 ```
 
+Uncertainty is a cross-cutting state and feedback process rather than a standalone oracle:
+
+```text
+Observations / Evidence / Model Assumptions
+                    │
+                    ▼
+        Bayesian or Declared Updater
+                    │
+                    ▼
+       Versioned Uncertainty State (U)
+          │          │           │
+          ▼          ▼           ▼
+     Prediction   Cognitive   Rendering /
+     & Planning    Control     Abstention
+          │          │           │
+          └──────────┴───────────┘
+                    │
+        Correctness Outcomes & Calibration
+                    └─────────── feedback ──> Updater
+```
+
 ## 12.2 GAIA Reference Implementation Mapping (Non-Normative)
 
 GAIA may implement GCAS using the following stack. These mappings are non-normative; altering any technology choice MUST NOT alter GCAS semantics.
@@ -686,12 +859,13 @@ GAIA may implement GCAS using the following stack. These mappings are non-normat
 | **Execution Runtime** | GNU Guile REPL |
 | **Reproducible Environment** | GNU Guix |
 | **Persistent Memory** | AtomSpace + persistent disk database |
+| **Uncertainty State** | Versioned Cognitive Objects plus a declared probabilistic/statistical inference backend |
 
 ---
 
-# 13. GCAS 0.2 Operational Semantics
+# 13. GCAS 0.3 Operational Semantics
 
-GCAS 0.2 defines cognition as a recurrent, event-driven transition system over explicit Cognitive State. These semantics describe
+GCAS 0.3 defines cognition as a recurrent, event-driven transition system over explicit Cognitive State. These semantics describe
 observable architectural behavior, not a required scheduler, programming language, database, or physical transport.
 
 ## 13.1 Abstract Machine
@@ -699,13 +873,14 @@ observable architectural behavior, not a required scheduler, programming languag
 At logical time $t$, a GCAS process is represented by:
 
 ```text
-S_t = <O_t, J_t, W_t, G_t, P_t, M_t, B_t, X_t>
+S_t = <O_t, J_t, U_t, W_t, G_t, P_t, M_t, B_t, X_t>
 ```
 
 where:
 
 * `O` is the durable set of versioned Cognitive Objects,
 * `J` is the justification, provenance, contradiction, and supersession graph,
+* `U` is the versioned uncertainty state, including priors, posteriors, predictive assessments, calibration records, and dependencies,
 * `W` is the bounded Workspace state, including pending and active candidates,
 * `G` is the set of Goals and their operational states,
 * `P` is the set of active Cognitive Processes and processor capabilities,
@@ -809,20 +984,25 @@ Epistemic transitions MUST be justified by new CO versions and graph relations. 
 8. Opposing evidence or incompatible scoped Claims create a `Conflict` CO. Conflict MUST NOT be resolved by silent deletion or scalar averaging.
 9. Refutation, expiration, or invalidation of a supporting premise makes dependent Claims eligible for re-evaluation. Historical acceptance remains auditable.
 10. `UNKNOWN`, `INCONCLUSIVE`, and `CONFLICTING_EVIDENCE` are valid outcomes and require no fabricated balancing Claim.
+11. A probabilistic update creates a new `UncertaintyAssessment` linked to its prior assessment, evidence, likelihood/model, inference method,
+    and affected target; it does not overwrite the earlier belief state.
+12. Confidence MUST NOT change verification or epistemic status without the evidence and policy transition independently required for that change.
 
-GCAS does not mandate AGM, Bayesian, Dempster-Shafer, Subjective Logic, paraconsistent logic, NARS, or an ATMS. An implementation MUST,
-however, declare the belief-change and evidence-combination semantics used in each domain and MUST NOT combine heterogeneous confidence
-values as if they shared an undeclared scale.
+GCAS 0.3 adopts Bayesian probability as the normative default for quantified belief update and prediction under §3.7. An implementation
+claiming `GCAS-Uncertainty 0.3` conformance MUST implement a traceable Bayesian path for at least one declared class of empirical Claims.
+Other belief-change systems (including AGM, Dempster-Shafer, Subjective Logic, paraconsistent logic, NARS, or an ATMS) MAY coexist when
+their domains and semantics are declared. Implementations MUST NOT combine heterogeneous uncertainty values as if they shared an undeclared scale.
 
 ## 13.7 Goal and Process Semantics
 
 Every executable Goal MUST declare:
 
 * its scope and parent Goal, if any,
-* observable completion criteria or a named acceptance contract,
+* observable completion criteria or a named acceptance contract, including its correctness target,
 * admissible evidence and required verification target,
 * resource and failure budgets,
-* terminal outcomes available when the criteria cannot be established.
+* terminal outcomes available when the criteria cannot be established,
+* uncertainty-sensitive acceptance, abstention, and escalation rules appropriate to error cost and Action reversibility.
 
 Goal operational states are:
 
@@ -912,12 +1092,12 @@ Physical implementations MAY interleave or repeat stages but MUST preserve their
 | 7. Evidence acquisition | Hypothesis broadcast | Source Observations and Evidence with resolvable provenance and temporal scope. |
 | 8. Competition | Multiple candidates pending | Recorded eligibility, scoring, and admission; selection is not verification. |
 | 9. Deliberation | Evidence/hypothesis admitted | Derivations, tests, counterexamples, or verification requests with declared targets. |
-| 10. Evaluation | Result/evidence available | Typed Verification records stating scope, coverage, outcome, and failure dependencies. |
+| 10. Evaluation | Result/evidence available | Typed Verification records stating scope, coverage, outcome, and failure dependencies; evaluated correctness remains distinct from estimated confidence. |
 | 11. Conflict handling | Incompatible Claims detected | Explicit Conflict CO; preserve both claims and their justification graphs. |
-| 12. Belief revision | Acceptance policy evaluated | New versioned Claim status or an explicit inconclusive outcome. |
+| 12. Belief revision | Acceptance policy evaluated | Versioned prior-to-posterior Uncertainty Assessment and new Claim status, or an explicit inconclusive outcome; correlated evidence is not double-counted. |
 | 13. Reflection | Progress or failure event | Trace-grounded assessment and, when useful, revised strategy under remaining budget. |
 | 14. Goal verification | Candidate answer available | Independent or dependency-declared verification of `GOAL_SATISFACTION`. |
-| 15. Rendering | Goal terminal | Answer derived from terminal state, including uncertainty, conflicts, and sources. |
+| 15. Rendering | Goal terminal | Answer derived from terminal state, including verification status, calibrated confidence or bounds where supported, major uncertainty sources, conflicts, and sources. |
 | 16. Consolidation | Process terminal | Governed episodic record and optional semantic/procedural proposals; no automatic truth promotion. |
 
 The minimum correct result may be `INCONCLUSIVE`. A fluent answer unsupported by the recorded trace is non-conforming.
@@ -939,11 +1119,11 @@ are independent and their evidence is relevant to the same scoped Claim.
 
 ---
 
-# 14. GCAS 0.2 Conformance and Empirical Evaluation
+# 14. GCAS 0.3 Conformance and Empirical Evaluation
 
 ## 14.1 GCAS-Process Conformance
 
-In addition to GCAS-Core requirements, a claim of **GCAS-Process 0.2** conformance MUST demonstrate:
+In addition to GCAS-Core requirements, a claim of **GCAS-Process 0.3** conformance MUST demonstrate:
 
 1. versioned CO lifecycle separate from epistemic status;
 2. durable causal transition records and duplicate-safe terminal behavior;
@@ -954,22 +1134,42 @@ In addition to GCAS-Core requirements, a claim of **GCAS-Process 0.2** conforman
 7. governed Action transactions in which execution success is distinct from Goal satisfaction;
 8. epistemically neutral retrieval and guarded memory merge;
 9. trace-grounded Reflection and bounded non-progress handling;
-10. at least one complete implementation-independent inquiry trace conforming to §13.12.
+10. versioned uncertainty state and `UncertaintyAssessment` dependencies across relevant transitions;
+11. uncertainty-aware Goal contracts that distinguish correctness, verification, confidence, acceptance, and abstention;
+12. at least one complete implementation-independent inquiry trace conforming to §13.12.
 
 Architectural conformance establishes that these boundaries exist and behave according to the specification. It does not establish broad
 competence, calibrated factuality, safety, general intelligence, consciousness, or superiority over a simpler system.
 
-## 14.2 Required Evaluation Separation
+## 14.2 GCAS-Uncertainty Conformance
 
-Implementations SHOULD maintain three distinct evaluation layers:
+A claim of **GCAS-Uncertainty 0.3** conformance MUST demonstrate, for each covered domain:
+
+1. declared correctness targets and uncertainty quantities with scope, units, and semantics;
+2. versioned priors, likelihood or observation models, posteriors, and posterior predictive assessments for at least one empirical Claim class;
+3. explicit conditioning evidence, assumptions, provenance lineage, and dependence handling that prevents unjustified evidence multiplication;
+4. typed aleatoric, epistemic, distributional, and computational uncertainty where material;
+5. declared exact or approximate inference methods, budgets, diagnostics, and known failure modes;
+6. a calibration protocol tied to evaluated correctness outcomes, with sample counts, proper scoring rules, and distribution-shift handling;
+7. uncertainty propagation across a multi-stage derivation, prediction, or Plan;
+8. decision policies that combine predictive uncertainty with error costs, utility or risk constraints, and valid abstention/escalation outcomes;
+9. rendering that never labels estimated confidence as correctness or verification.
+
+Conformance is scoped. A system conforming for code-test outcomes does not thereby conform for medical Claims, physical-world predictions,
+open-ended factual answers, or the reliability of its own metacognitive reports.
+
+## 14.3 Required Evaluation Separation
+
+Implementations SHOULD maintain four distinct evaluation layers:
 
 * **Invariant tests:** deterministic checks of transition, lifecycle, authorization, persistence, and terminal semantics;
-* **Competence tests:** task-specific executable or human-validated success criteria;
+* **Competence tests:** task-specific executable or human-validated correctness criteria;
+* **Uncertainty tests:** calibration, sharpness, proper scores, interval coverage, abstention quality, and decision loss under distribution shift;
 * **Architectural evidence:** controlled comparisons showing whether GCAS mechanisms improve reliability, cost, or long-horizon behavior.
 
 These layers MUST NOT be reported as interchangeable. A scripted good proposal tests orchestration, not whether a live model will produce it.
 
-## 14.3 Recommended Baselines, Ablations, and Metrics
+## 14.4 Recommended Baselines, Ablations, and Metrics
 
 Empirical claims for GCAS SHOULD compare, where feasible:
 
@@ -977,19 +1177,23 @@ Empirical claims for GCAS SHOULD compare, where feasible:
 2. transcript or maximum-context accumulation;
 3. retrieval-augmented generation without epistemic control;
 4. tiered memory without GCAS verification semantics;
-5. full GCAS and ablations removing Workspace competition, guarded merge, provenance, external verification, or Reflection.
+5. full GCAS and ablations removing Workspace competition, guarded merge, provenance, external verification, Bayesian update,
+   calibration, uncertainty propagation, uncertainty-aware abstention, or Reflection.
 
 Primary reliability metrics SHOULD include false acceptance rate, correct abstention, risk-coverage behavior, provenance and citation
-fidelity, contradiction retention, stale-memory use, terminal-response rate, repeated non-progressing Actions, task success, model and tool
-calls, tokens, latency, and cost. Long-context evaluations SHOULD vary evidence position and irrelevant context. Long-horizon evaluations
-SHOULD report success as a function of task length rather than only aggregate pass rate.
+fidelity, contradiction retention, stale-memory use, terminal-response rate, repeated non-progressing Actions, task success, log loss,
+Brier score, calibration curves with sample counts, interval coverage, posterior predictive checks, realized decision loss, model and tool
+calls, tokens, latency, and cost. Metrics MUST name the correctness target used as ground truth. Long-context evaluations SHOULD vary
+evidence position and irrelevant context. Long-horizon evaluations SHOULD report success as a function of task length rather than only
+aggregate pass rate.
 
-# 15. Open Research Questions (GCAS 0.3 Candidate Topics)
+# 15. Open Research Questions Beyond GCAS 0.3
 
 1. **Workspace Capacity:** How should workspace capacity bounds be mathematically or empirically defined?
 2. **Competition Policy:** Which competition and broadcast policies produce measurable gains over simpler routing mechanisms?
 3. **Semantic Identity:** How should implementations deduplicate equivalent content while retaining distinct assertions, sources, and histories?
-4. **Evidence Combination:** Which calibrated belief models combine heterogeneous evidence without collapsing it into a misleading scalar?
+4. **Evidence Combination:** Which likelihood models and dependence structures combine heterogeneous evidence without double-counting or
+   collapsing it into a misleading scalar, and when should non-Bayesian representations be preferred?
 5. **Belief Revision:** When should GCAS use truth-maintenance, assumption-based, probabilistic, or paraconsistent semantics?
 6. **Source Independence:** How should shared ancestry, model dependence, and citation copying reduce the effective weight of corroboration?
 7. **Retention and Revalidation:** What governed forgetting, decay, and revalidation policies minimize both stale-memory use and catastrophic loss?
@@ -1003,6 +1207,8 @@ SHOULD report success as a function of task length rather than only aggregate pa
 15. **Resource-Aware Scheduling:** How should risk, information value, monetary cost, tokens, time, and hardware jointly affect attention?
 16. **Runtime Governance Limits:** Which unsafe traces cannot be prevented by runtime policy enforcement alone and require upstream guarantees?
 17. **Transfer and Generalization:** Which GCAS mechanisms improve reliability across models, domains, and task horizons rather than on one benchmark?
+18. **Uncertainty Under Open Worlds:** How should priors, model expansion, unknown unknowns, and calibration failure be represented when the
+    current hypothesis space is itself inadequate?
 
 ---
 
@@ -1017,8 +1223,11 @@ comparison points that implementations SHOULD address when making scientific cla
   must be established by ablation rather than inferred from terminology.
 * **Truth-maintenance and assumption-based reasoning:** motivate versioned justification graphs, dependency invalidation, and preservation of
   conflicting claims.
-* **Subjective logic and calibrated uncertainty:** motivate typed uncertainty and source dependence; GCAS intentionally does not mandate a
-  universal scalar confidence value.
+* **Probabilistic machine learning and Bayesian inference:** motivate representing uncertainty over observations, parameters, model structure,
+  predictions, and Action outcomes; learning is operationalized as a versioned prior-to-posterior transition and prediction as posterior
+  marginalization rather than a point estimate.
+* **Subjective logic and calibrated uncertainty:** motivate typed uncertainty and source dependence where a single probability distribution
+  is unavailable or inappropriate; GCAS does not mandate a universal scalar confidence value.
 * **Executable world models and scientific workflows:** motivate separating proposal, execution, derivation checking, empirical observation,
   and Goal satisfaction.
 * **Long-context and memory research:** motivates dynamic context projection and guarded merge instead of treating a growing transcript or
@@ -1044,10 +1253,12 @@ Selected references:
 12. S. Farquhar et al., “Detecting Hallucinations in Large Language Models Using Semantic Entropy,” *Nature* 630, 2024. <https://doi.org/10.1038/s41586-024-07421-0>
 13. G. Marra et al., “From Statistical Relational to Neuro-Symbolic Artificial Intelligence,” *Artificial Intelligence* 328, 2024. <https://doi.org/10.1016/j.artint.2023.104062>
 14. A. Jøsang, *Subjective Logic*, Springer, 2016. <https://doi.org/10.1007/978-3-319-42337-1>
+15. Z. Ghahramani, “Probabilistic Machine Learning and Artificial Intelligence,” *Nature* 521, 2015, pp. 452–459.
+    <https://doi.org/10.1038/nature14541>
 
 ---
 
 # 17. Core Maxim
 
 > **Intelligence emerges not from a single model possessing every capability, but from coordinated cognitive processes operating over shared, persistent,
-> verifiable representations of knowledge, goals, evidence, memory, time, and action.**
+> verifiable and uncertainty-aware representations of knowledge, goals, evidence, memory, time, and action.**
