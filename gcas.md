@@ -43,8 +43,8 @@ The architecture synthesizes core insights from:
 
 GCAS specifies cognitive objects, interfaces, state transitions, information flows, invariants, and behavioral requirements rather than programming languages,
 storage engines, neural architectures, or proprietary frameworks. Version 0.3 extends the operational semantics of GCAS 0.2 with a normative
-uncertainty framework: Bayesian belief update and prediction, typed sources of uncertainty, calibration, uncertainty-aware decisions, and an
-explicit separation between correctness, verification, and confidence.
+uncertainty framework: Bayesian reference semantics for belief update and prediction, typed plural uncertainty representations, calibration,
+uncertainty-aware decisions, and an explicit separation between correctness, verification, and confidence.
 
 ---
 
@@ -1190,7 +1190,66 @@ Physical implementations MAY interleave or repeat stages but MUST preserve their
 
 The minimum correct result may be `INCONCLUSIVE`. A fluent answer unsupported by the recorded trace is non-conforming.
 
-## 13.13 Assurance and Verifier Independence
+## 13.13 Worked Uncertainty Trace
+
+This implementation-independent example demonstrates the minimum separation among belief update, Workspace handling, Action policy,
+correctness observation, and calibration. Numeric values are illustrative but reproducible.
+
+**Goal.** Decide whether to authorize a reversible canary deployment of sensor pipeline `v7`. Let $\theta$ be its failure probability under
+declared environment `E7`. The persistent Claim is:
+
+```text
+H1: theta < 0.10 for pipeline v7 in environment E7 during validity interval T
+```
+
+The canary's separately observable correctness target is:
+
+```text
+C1: the next batch of 10 independent trials contains at most one failure
+```
+
+The Goal policy permits a canary, but not full deployment, only if all of the following hold:
+
+```text
+P(theta < 0.10 | D) >= 0.95
+P(C1 = true | D) >= 0.94
+no material posterior-predictive mismatch
+sensitivity analysis leaves the decision unchanged
+authorization and rollback checks pass
+```
+
+The thresholds are properties of this reversible, bounded Action contract; they are not universal GCAS confidence thresholds.
+
+| Step | State transition and numeric result | Required interpretation |
+| :--- | :--- | :--- |
+| 1. Initial assessment | Create `UA0` for $\theta$ with `calculus_id=bayesian-probability`, prior $\theta\sim Beta(1,9)$, mean `0.10`, and explicit Bernoulli independence and stationarity assumptions. | A prior is an assessment, not evidence that `H1` is correct. Its scope is only pipeline `v7`, environment `E7`, and interval `T`. |
+| 2. Prior predictive check | For 20 trials, the Beta-binomial prior predictive gives $P(K\leq4)=0.8694$. The check records its discrepancy and acceptance bounds. | The prior permits plausible failure counts; passing this bounded check does not validate the model. |
+| 3. First evidence | `E1` records 1 failure in 20 controlled trials with provenance and environment hash. If trial dependence cannot be justified, the update stops as `INCONCLUSIVE`. | Observation is evidence under an observation model, not correctness of `H1`. |
+| 4. First update | Create `UA1`, linked to `UA0` and `E1`: $\theta\mid E1\sim Beta(2,28)$, $E[\theta]=0.0667$, $P(\theta<0.10)=0.8011$, and $P(C1)=0.8441$. | Neither Goal threshold is met. `0.8011` is confidence in the scoped target under the model, not verification status. |
+| 5. Workspace round | Submit `H1`, `UA1`, and a verification proposal. The low confidence plus decision relevance and expected information gain gives the proposal high scheduling priority. Workspace broadcasts a summary referencing `UA1`. | Priority is not confidence. Admission and broadcast change availability only; `H1` remains unverified and its assessment remains `0.8011`. |
+| 6. Information decision | The Controller compares the expected value of 30 further controlled trials with their cost and selects evidence acquisition rather than acceptance or rejection. | An uncertainty-aware system may act to reduce uncertainty; it need not force a binary answer. |
+| 7. Additional evidence | `E2` records 0 failures in 30 additional trials under the same declared conditions and links the shared experimental lineage. | The total is 1 failure in 50 trials. The evidence is not counted as independent of itself or duplicated by retrieval. |
+| 8. Second update | Create `UA2`: $\theta\mid E1,E2\sim Beta(2,58)$, $E[\theta]=0.0333$, $P(\theta<0.10)=0.9849$, and posterior predictive $P(C1)=0.9470$. | Both numeric thresholds are met, but `H1.correctness=unknown` and `H1.verification=empirically-supported`, not proven. |
+| 9. Criticism and sensitivity | Posterior-predictive discrepancies show no material mismatch under the declared check. Replacing the prior with $Beta(1,1)$ yields $Beta(2,50)$ and $P(\theta<0.10)=0.9691`; the canary decision is unchanged. Diagnostics, alternative prior, and check coverage are retained. | A finite check cannot establish that the Bernoulli/stationarity model is correct. Unchecked distribution shift remains structural/distributional uncertainty. |
+| 10. Decision and Action | Expected utility and rollback constraints authorize only the 10-trial canary. Create an Action record linked to `UA2`, the Goal policy, authorization, and risk bounds. | Confidence informs but does not authorize the Action by itself. Full deployment remains outside the approved scope. |
+| 11. Correctness outcome | The canary observes 0 failures. `CorrectnessObserved` records `C1=true` with `EXECUTION_RESULT` verification and links the exact prediction made by `UA2`. | `C1` is now observed correct for this batch. This does not prove `H1`, future batches, or operation outside `E7/T`. |
+| 12. Calibration and learning | Add forecast/outcome pair `(0.9470, true)` to the applicable calibration record; this case's Brier contribution is $(0.9470-1)^2=0.0028`. Separately create `UA3=Beta(2,68)` for future prediction. | One outcome updates the calibration dataset but cannot establish calibration. `UA2` is not overwritten, and using the outcome for future learning is distinct from evaluating the earlier forecast. |
+
+At the end of the trace, all of the following statements coexist without contradiction:
+
+```text
+C1.correctness = true for the observed canary batch
+C1.verification = EXECUTION_RESULT with recorded scope
+UA2.confidence(C1) = 0.9470 at prediction time
+H1.correctness = unknown
+H1.verification = empirically-supported, not formally or universally verified
+calibration status = one additional evaluated case; insufficient alone
+```
+
+A trace that replaces these records with `H1 = VERIFIED (confidence 98.49%)` is non-conforming because it collapses a posterior degree of
+belief, a bounded empirical outcome, and correctness outside the observed sample.
+
+## 13.14 Assurance and Verifier Independence
 
 Verification records SHOULD declare an assurance class:
 
@@ -1211,7 +1270,7 @@ are independent and their evidence is relevant to the same scoped Claim.
 
 ## 14.1 GCAS-Process Conformance
 
-In addition to GCAS-Core requirements, a claim of **GCAS-Process 0.3** conformance MUST demonstrate:
+In addition to GCAS-Core 0.3 requirements, a claim of **GCAS-Process 0.3** conformance MUST demonstrate:
 
 1. versioned CO lifecycle separate from epistemic status;
 2. durable causal transition records and duplicate-safe terminal behavior;
@@ -1229,24 +1288,52 @@ In addition to GCAS-Core requirements, a claim of **GCAS-Process 0.3** conforman
 Architectural conformance establishes that these boundaries exist and behave according to the specification. It does not establish broad
 competence, calibrated factuality, safety, general intelligence, consciousness, or superiority over a simpler system.
 
-## 14.2 GCAS-Uncertainty Conformance
+## 14.2 GCAS-Uncertainty 0.3 Conformance
 
-A claim of **GCAS-Uncertainty 0.3** conformance MUST demonstrate, for each covered domain:
+`GCAS-Uncertainty 0.3` is calculus-neutral. A conformance claim MUST demonstrate, for each covered domain:
 
-1. declared correctness targets and uncertainty quantities with scope, units, and semantics;
-2. versioned priors, likelihood or observation models, posteriors, and posterior predictive assessments for at least one empirical Claim class;
-3. explicit conditioning evidence, assumptions, provenance lineage, and dependence handling that prevents unjustified evidence multiplication;
-4. typed aleatoric, epistemic, distributional, and computational uncertainty where material;
-5. declared exact or approximate inference methods, budgets, diagnostics, and known failure modes;
-6. a calibration protocol tied to evaluated correctness outcomes, with sample counts, proper scoring rules, and distribution-shift handling;
-7. uncertainty propagation across a multi-stage derivation, prediction, or Plan;
-8. decision policies that combine predictive uncertainty with error costs, utility or risk constraints, and valid abstention/escalation outcomes;
-9. rendering that never labels estimated confidence as correctness or verification.
+1. well-formed, versioned `UncertaintyAssessment` COs satisfying the minimum schema in §3.7;
+2. declared correctness targets and uncertainty quantities with outcome space, scope, units, temporal validity, and semantics;
+3. a resolvable, versioned calculus declaration satisfying §3.7.3, including supported operations, assumptions, diagnostics, and limitations;
+4. explicit conditioning evidence, provenance lineage, dependence, and update or revision history that prevents unjustified evidence multiplication;
+5. typed aleatoric, epistemic, distributional, and computational uncertainty where material, or a recorded reason a decomposition is unavailable;
+6. uncertainty propagation across a multi-stage derivation, prediction, or Plan, with declared approximations and information loss;
+7. valid cross-calculus mapping records for every conversion, and rejection or deliberation when no validated mapping exists;
+8. a calibration protocol for user-facing probabilistic confidence, tied to evaluated correctness outcomes, sample counts, proper scoring rules,
+   sharpness or concentration, coverage where applicable, and distribution-shift handling;
+9. Workspace candidates and broadcasts that carry or reference decision-relevant uncertainty as required by §4 without treating confidence
+   as scheduling priority, evidential weight, correctness, or verification;
+10. decision policies that combine the declared uncertainty representation with error costs, utility or risk constraints, and valid
+    evidence-acquisition, abstention, and escalation outcomes;
+11. rendering that never labels estimated confidence, interval coverage, evidence mass, possibility, or scheduling priority as correctness
+    or verification;
+12. one complete numeric trace covering assessment creation, update or revision, Workspace handling, decision, outcome observation, and
+    calibration or an explicit `not-applicable` rationale. The Bayesian trace in §13.13 is the reference example, not a Core calculus mandate.
 
 Conformance is scoped. A system conforming for code-test outcomes does not thereby conform for medical Claims, physical-world predictions,
-open-ended factual answers, or the reliability of its own metacognitive reports.
+open-ended factual answers, or the reliability of its own metacognitive reports. The conformance statement MUST identify the covered calculus
+versions, target classes, model and policy versions, environments, and evaluation interval.
 
-## 14.3 Required Evaluation Separation
+## 14.3 GCAS-Bayesian 0.3 Conformance
+
+`GCAS-Bayesian 0.3` is an additive profile over `GCAS-Uncertainty 0.3`. A conformance claim MUST demonstrate, for each covered Bayesian domain:
+
+1. versioned priors, likelihood or observation models, posteriors, and posterior predictive distributions for at least one empirical Claim class;
+2. prior predictive checks tied to declared discrepancies and acceptance criteria, or a scoped, recorded justification when they are infeasible;
+3. traceable conditioning on non-duplicated evidence with explicit independence or dependence assumptions;
+4. exact-inference evidence or approximate-inference budgets, diagnostics, convergence or fit results, and computational uncertainty;
+5. posterior predictive checks relevant to the correctness and decision targets, plus explicit responses to material model mismatch;
+6. sensitivity analysis over material priors, likelihoods, dependence assumptions, model classes, and inference approximations;
+7. propagation of parameter and model uncertainty through prediction and decision, using model averaging, robust bounds, or an explicit
+   information-loss record when one model or point estimate is substituted;
+8. posterior expected utility or another declared Bayesian decision rule combined with applicable authorization, safety, and tail-risk constraints;
+9. a numeric prior-to-posterior-to-outcome trace equivalent in coverage to §13.13, including preserved historical assessments and separate
+   correctness, verification, confidence, and calibration records.
+
+A Bayesian profile claim does not imply that its model class is correct, its posterior is calibrated outside the evaluated scope, or its
+decisions are safe. It establishes that the declared probabilistic semantics and workflow are present and auditable.
+
+## 14.4 Required Evaluation Separation
 
 Implementations SHOULD maintain four distinct evaluation layers:
 
@@ -1257,7 +1344,7 @@ Implementations SHOULD maintain four distinct evaluation layers:
 
 These layers MUST NOT be reported as interchangeable. A scripted good proposal tests orchestration, not whether a live model will produce it.
 
-## 14.4 Recommended Baselines, Ablations, and Metrics
+## 14.5 Recommended Baselines, Ablations, and Metrics
 
 Empirical claims for GCAS SHOULD compare, where feasible:
 
