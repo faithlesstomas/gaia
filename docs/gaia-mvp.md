@@ -2,7 +2,7 @@
 
 ## Product claim
 
-The GAIA MVP is a local-first, persistent GCAS assistant that can remember
+The GAIA MVP is a local-first, persistent GCAS 0.3 assistant that can remember
 verified facts and procedures across sessions, use selected memories to pursue
 new Goals, preserve provenance and contradictions, act only through a governed
 execution boundary, and return either verified completion or an explicit
@@ -15,7 +15,8 @@ and server restarts without replaying a conversation transcript as memory.
 
 ## Required invariants
 
-Every MVP capability must preserve the GCAS-Core gate and additionally show:
+Every MVP capability must preserve the GCAS-Core 0.2 regression gate and
+additionally satisfy the applicable GCAS 0.3 requirements:
 
 1. **Memory is not transcript history.** The model receives a transient context
    reconstructed from the active Goal, Workspace, selected Cognitive Objects,
@@ -32,6 +33,16 @@ Every MVP capability must preserve the GCAS-Core gate and additionally show:
 6. **Failure remains a valid result.** Unsupported, inconclusive, interrupted,
    and budget-exhausted processes terminate exactly once and never masquerade
    as completion.
+7. **Correctness, verification, and confidence remain distinct.** A verifier
+   outcome may observe a declared correctness target; neither verification nor
+   confidence silently substitutes for that observation.
+8. **Uncertainty is typed and auditable.** Decision-relevant uncertainty names
+   its target, calculus, scope, evidence, update method, and validity. Missing
+   uncertainty remains explicit instead of being replaced by a fabricated
+   scalar.
+9. **Attention is not confidence.** Workspace admission may prioritize an
+   uncertain candidate because of risk, conflict, surprise, or expected
+   information gain. Admission and broadcast never increase evidential weight.
 
 ## MVP acceptance scenarios
 
@@ -45,11 +56,100 @@ The MVP readiness gate must exercise these scenarios end to end:
 | Procedural reuse | A verified successful procedure is consolidated with provenance and reused in a later related Goal. |
 | Failure-first task repair | A failed Action produces Reflection, a distinct replacement Action, independent verification, and one terminal response. |
 | Safe abstention | A task without sufficient evidence or verifier coverage ends as `INCONCLUSIVE` rather than false `COMPLETED`. |
+| Bayesian correctness trace | A narrow verifier-backed target records a declared prior, evidence, posterior, posterior prediction, later correctness outcome, and a separate calibration update without rewriting the original assessment. |
+| Uncertainty-driven attention | A high-risk or high-information candidate can outrank a more confident routine candidate, while both retain their original epistemic and verification state. |
+| Distribution shift | An assessment outside its calibration scope is marked out of domain and triggers a declared widen, revalidate, abstain, or escalate policy. |
 
 The first implementation gate covers verified cross-session graph memory,
 transitive invalidation, and supersession in
 `tests/test-cognitive-memory-graph.scm`. The remaining scenarios are milestone
 requirements, not claims of current completion.
+
+## Current MR boundary
+
+MR !5 delivers the first part of M1: durable typed memory edges, traversal,
+dependency invalidation, auditable supersession, and a cross-session graph
+test. It also aligns the documentation and conformance language with GCAS 0.3.
+It does **not** claim `GCAS-Core 0.3`, `GCAS-Uncertainty 0.3`, or
+`GCAS-Bayesian 0.3` conformance and does not yet implement an uncertainty
+calculus.
+
+The implementation following MR !5 is intentionally split into reviewable
+vertical slices. Each slice must preserve the existing exactly-once,
+fail-closed, provenance, restoration, and client-protocol gates.
+
+## GCAS 0.3 implementation plan
+
+### U0 — Vocabulary and compatibility boundary
+
+- Add `UncertaintyAssessment`, `CalculusDeclaration`, `CalibrationRecord`, and
+  `CorrectnessObserved` Cognitive Object contracts.
+- Make the assessment target, correctness event, uncertainty type, calculus,
+  scope, conditioning evidence, representation, provenance, temporal validity,
+  and diagnostics machine-validatable.
+- Label the existing scalar CO `confidence`, Workspace `uncertainty`, neural
+  readout strength, and legacy `FINAL/CONFIDENCE` values as distinct legacy or
+  scheduling signals; do not reinterpret historical values as probabilities.
+
+**Acceptance:** invalid or semantically incomplete assessments fail closed;
+persisted legacy sessions still restore without acquiring invented semantics.
+
+### U1 — Persistent uncertainty graph and projection
+
+- Store assessments and declarations in the ordinary immutable CO graph with
+  typed links to targets, evidence, priors, updates, mappings, and outcomes.
+- Build `U` as a deterministic, rebuildable projection over those COs and graph
+  relations, never as a second source of epistemic truth.
+- Propagate invalidation and supersession through uncertainty dependencies while
+  retaining the original assessment and decision trace.
+
+**Acceptance:** an assessment/update chain survives restart, can be rebuilt
+from `O` and `J`, and reacts auditably to invalidated evidence without rewriting
+history.
+
+### U2 — First Bayesian vertical slice
+
+- Implement the closed-form Beta–Bernoulli trace from GCAS §13.13 for one
+  narrow verifier-backed correctness target.
+- Record prior and posterior predictive checks, likelihood assumptions,
+  sensitivity, outcome observation, Brier contribution, and calibration sample
+  count. Approximate-inference diagnostics are required only when an
+  approximate method is introduced.
+- Keep the Bayesian implementation behind the additive `GCAS-Bayesian 0.3`
+  profile; the core storage and interfaces remain calculus-neutral.
+
+**Acceptance:** deterministic tests reproduce the specification values and
+prove that posterior confidence neither changes verification status nor
+retroactively changes observed correctness.
+
+### U3 — Workspace and Control integration
+
+- Replace the monotonic uncertainty penalty with an inspectable policy whose
+  features include urgency, risk, conflict, out-of-domain state, expected
+  information gain, and cost while keeping scheduling priority separate from
+  epistemic quantities.
+- Add Goal-scoped acceptance, abstention, escalation, and value-of-information
+  rules; avoid a universal confidence threshold.
+- Require processors either to propagate material uncertainty or to record why
+  it is irrelevant to an output.
+
+**Acceptance:** deterministic competition tests cover both routine confident
+content and uncertain high-impact content; Workspace activity alone never
+changes confidence, correctness, or verification.
+
+### U4 — Calibration, shift, and conformance gate
+
+- Accumulate forecast/outcome pairs against immutable original assessments and
+  report sample counts, proper scores, calibration curves, sharpness or set
+  size, coverage, and decision loss where applicable.
+- Detect calibration-scope violations and exercise declared out-of-domain and
+  distribution-shift responses.
+- Add an end-to-end `GCAS-Uncertainty 0.3` gate and report Bayesian-profile
+  conformance separately for the covered Beta–Bernoulli domain.
+
+**Acceptance:** the gate covers restart, invalidation, abstention, shift, and
+cross-calculus non-combinability without weakening the existing GCAS 0.2
+regression floor.
 
 ## Delivery milestones
 
@@ -59,6 +159,8 @@ requirements, not claims of current completion.
 - Keep GCAS-Core conformance, the deterministic competence corpus, Rust CLI,
   and Emacs protocol tests green.
 - Add every implemented MVP scenario to an offline deterministic gate.
+- Treat U0–U4 above as the GCAS 0.3 migration path; no milestone may claim
+  conformance from schema presence alone.
 
 ### M1 — Cognitive Memory Graph v1
 

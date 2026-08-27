@@ -11,7 +11,7 @@ The current codebase provides persistent cognitive state, explicit epistemic pro
 processor contracts, and an auditable execution environment built in **GNU Guile**. Production `solve` is now assembled from
 processors reacting through the Cognitive Bus. Production `solve` uses explicit Workspace competition rounds and bounded
 feedback-driven replanning after failed actions or conflicts. A Goal may complete only through an independent verifier and a verified
-Claim. The minimum GCAS-Core conformance gate covers failure-first repair, persistence, budgets, interruption, and both supported
+Claim. The GCAS-Core 0.2 baseline conformance gate covers failure-first repair, persistence, budgets, interruption, and both supported
 clients. This is architectural conformance, not general task competence: Fibonacci is the first registered production verifier,
 while unsupported task classes deliberately terminate as `INCONCLUSIVE`.
 Control-driven budget exhaustion now also reaches the client as a terminal response, including the three-failed-Action case that
@@ -34,7 +34,7 @@ neural intervention remain roadmap work.
 
 | Area | Status | Evidence and boundary |
 |---|---|---|
-| GCAS-Core lifecycle | **Implemented** | The model-free corpus passes 22/22 cases with zero hangs and false completions, including 4/4 repair paths. |
+| GCAS-Core 0.2 lifecycle | **Implemented baseline** | The model-free corpus passes 22/22 cases with zero hangs and false completions, including 4/4 repair paths; GCAS 0.3 uncertainty conformance is roadmap work. |
 | Structured memory and Goal Verification | **MVP in progress** | Verified evidence chains and typed graph relations persist across sessions; invalidation propagates through justification dependencies and supersession preserves history. Retrieval remains lexical and this is not yet evidence of cross-task learning. |
 | NCSI/J-space observation path | **Experimental** | The versioned protocol, RAI UDS adapter, neural Observation COs, bounded Workspace proposals, fallback, and matched M5 harness are implemented. The 18-run SmolLM2 pilot supports `SHIP_EXPERIMENTAL`, not a causal or epistemic claim. |
 | NCSI sidecar hardening and artifact replication | **In progress in RAI** | The clean-environment artifact reproduction/resource baseline and several operational M1–M3 gates remain open. |
@@ -75,7 +75,7 @@ Question / Environment → Cognitive Objects → Workspace competition
                               Result / Failure / Reflection
 ```
 
-In the current GCAS-Core `solve` path, LLM output begins as a hypothesis and sandbox execution crosses an explicit
+In the current GCAS-Core 0.2 baseline `solve` path, LLM output begins as a hypothesis and sandbox execution crosses an explicit
 Action/Result boundary. State and event traces are durable, and Memory, Generative, Planner, Execution, Deliberative, Answer,
 Goal Verifier, and Control processors react through the Cognitive Bus. Control runs explicit Workspace rounds and
 failure/conflict feedback can produce a revised hypothesis, Plan, and Action under bounded budgets. Successful execution remains
@@ -85,6 +85,11 @@ testimony are stored separately from chat transcripts and can be retrieved acros
 [the prompt projection design](docs/gcas-prompt-projection.md) for what the model
 currently receives, [the GCAS 0.2 research synthesis](docs/gcas-0.2-research-synthesis.md)
 for the consolidated rationale, and [gcas.md](gcas.md) for the normative specification.
+
+The normative specification is now GCAS 0.3. GAIA does not yet claim `GCAS-Uncertainty 0.3` conformance: its existing scalar CO
+confidence and Workspace uncertainty fields are scheduling metadata, not calibrated posterior probabilities. The migration is tracked
+in [ROADMAP.md](ROADMAP.md), with reviewable implementation slices and acceptance
+criteria in [the GAIA MVP contract](docs/gaia-mvp.md#gcas-03-implementation-plan).
 
 Production `solve` does **not** replay chat history to the model. It currently
 sends a compact GCAS-specific Action contract plus a transient projection reconstructed

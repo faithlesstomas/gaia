@@ -1,6 +1,6 @@
 # GAIA Roadmap
 
-> *Last updated: 2026-08-26*
+> *Last updated: 2026-08-27*
 >
 > This document tracks the development plan for the GAIA (GNU AI Assistant) project.
 > For an introduction to the project, see [README.md](README.md).
@@ -14,7 +14,7 @@ trajectory logging, and LiteLLM integration. It also has a substantial GCAS subs
 state and events, a bounded Workspace implementation, Control primitives, structured memory, and auditable
 Action/Result execution. Production `solve` is assembled from Bus-attached processors with a per-Goal lifecycle, explicit
 Workspace rounds, bounded replanning after failed actions or conflicts, and an independent Goal-verification boundary. The minimal
-GCAS-Core conformance gate now covers failure-first replanning, persistence, budgets, interruption, and both supported clients.
+GCAS-Core 0.2 conformance gate now covers failure-first replanning, persistence, budgets, interruption, and both supported clients.
 This establishes the architecture, not broad task competence: the production verifier registry currently contains a deterministic
 Fibonacci contract, while unknown natural-language task classes fail closed as `INCONCLUSIVE`.
 The immediate product milestone is now the **GAIA MVP — Persistent Verified Assistant**: every `solve` must terminate at the
@@ -66,7 +66,7 @@ GCAS is GAIA's normative architectural source of truth. The goal is a **working,
 that coordinates specialized processors through explicit state, workspace competition, control, memory, and auditable execution.
 The legacy RLM loop is retained only as a compatibility and long-context investigation capability.
 
-## GCAS-Core — Immediate Priority
+## GCAS-Core 0.2 Baseline — Completed
 
 - [x] **Cognitive Object Model** — Validated COs carry provenance, epistemic and verification statuses, temporal validity, confidence, and relations.
 - [x] **Session Cognitive State** — Each server session owns durable CO state and an event log. Action outcomes receive linked reproducibility observations.
@@ -81,6 +81,34 @@ The legacy RLM loop is retained only as a compatibility and long-context investi
 - [x] **Client observability and conformance gate** — CLI and Emacs expose the event trace and Cognitive State view. Automated tests cover accepted-answer policy, restoration, Control budgets, interruption/late callbacks, failure-first repair, and both clients. Control-driven termination now invokes the client completion callback exactly once; three failed REPL Actions regress through the server adapter to a terminal `(final ...)` response instead of leaving the CLI waiting.
 
 The detailed gap analysis and conformance gate are maintained in [docs/gcas-core-conformance.md](docs/gcas-core-conformance.md).
+
+## GCAS 0.3 Uncertainty Framework — Migration Priority
+
+The GCAS 0.3 specification makes uncertainty a versioned cognitive state and distinguishes correctness, verification, and confidence.
+The existing scalar CO `confidence` and Workspace `uncertainty` fields are not calibrated posterior probabilities and MUST remain labeled
+as scheduling or legacy compatibility metadata until migrated.
+
+- [ ] **UncertaintyAssessment CO and graph schema (P0)** — Add correctness target, uncertainty type, distribution/bounds, conditioning evidence,
+  prior/update links, inference method, calibration scope, provenance, and temporal validity without rewriting historical assessments.
+- [ ] **Rebuildable uncertainty projection `U` and Bayesian updater (P0)** — Store uncertainty state authoritatively as COs and graph relations,
+  rebuild `U` as their deterministic projection, and implement explicit prior, likelihood/observation model, posterior, and
+  posterior-predictive transitions for the first narrow verifier-backed Claim class. Record diagnostics and computational failure states
+  whenever approximate inference is used.
+- [ ] **Correctness feedback and calibration records (P0)** — Link later verifier outcomes to the original probability assessments and report
+  sample counts, log loss, Brier score, calibration curves, interval coverage, and distribution-shift invalidation.
+- [ ] **Uncertainty propagation and dependence control (P1)** — Propagate material uncertainty across Evidence → Claim → Plan → Action outcomes,
+  track common source/model ancestry, and prohibit conditionally-independent updates when dependence is undeclared.
+- [ ] **Uncertainty-aware Control policy (P1)** — Replace universal confidence cutoffs with Goal-scoped acceptance, abstention, escalation,
+  value-of-information, utility/error-cost, reversibility, and tail-risk rules.
+- [ ] **Legacy scalar migration (P1)** — Rename or type the current `confidence` fields, isolate the legacy `FINAL/CONFIDENCE` loop, and prevent
+  neural readout strength, entropy, source reliability, verifier coverage, and posterior correctness probability from sharing one scale.
+- [ ] **GCAS-Uncertainty 0.3 conformance gate (P1)** — Add an end-to-end deterministic probabilistic scenario and distribution-shift case that
+  exercise §14.2 without weakening the existing exactly-once, provenance, verification, and fail-closed guarantees.
+
+The implementation order and acceptance criteria are defined as U0–U4 in
+[the GAIA MVP contract](docs/gaia-mvp.md#gcas-03-implementation-plan). MR !5
+remains the graph-memory foundation and documentation-alignment change; it does
+not itself claim GCAS 0.3 uncertainty conformance.
 
 ### Operational completion sequence
 
@@ -101,12 +129,12 @@ The detailed gap analysis and conformance gate are maintained in [docs/gcas-core
 7. **[Completed at Core minimum] Memory consolidation** — Store verified evidence and claims,
    preserve their provenance graph, persist explicit user testimony, and retrieve structured facts across turns.
 8. **[Completed] Conformance acceptance** — Pass the failure-first vertical test plus restart,
-   budget, interruption, and both-client protocol tests before claiming GCAS-Core.
+   budget, interruption, and both-client protocol tests before claiming the GCAS-Core 0.2 baseline.
 
 The next implementation phase expands the verifier registry and planner beyond
 the reference Fibonacci capability, adds semantic/conflict-aware memory, and
-strengthens capability policy. These improve competence and robustness without
-changing the completed GCAS-Core architectural boundary.
+strengthens capability policy. GCAS 0.3 additionally changes the architectural
+boundary through the uncertainty-state migration defined above.
 
 ## GAIA MVP — Persistent Verified Assistant
 
@@ -137,7 +165,7 @@ alone is not evidence of task competence or cognitive continuity.
 The prompting design is documented in
 [docs/gcas-prompt-projection.md](docs/gcas-prompt-projection.md), and the corpus
 scope and extension rules in [docs/gcas-evaluation.md](docs/gcas-evaluation.md).
-The complete MVP product and memory contract is documented in
+The complete MVP product, memory contract, and GCAS 0.3 implementation plan are documented in
 [docs/gaia-mvp.md](docs/gaia-mvp.md).
 The read-only NCSI/J-space adapter is now implemented as an opt-in experimental
 profile and is not a blocker for this milestone. Its M5 pilot establishes
