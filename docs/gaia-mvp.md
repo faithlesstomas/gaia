@@ -60,17 +60,26 @@ The MVP readiness gate must exercise these scenarios end to end:
 | Uncertainty-driven attention | A high-risk or high-information candidate can outrank a more confident routine candidate, while both retain their original epistemic and verification state. |
 | Distribution shift | An assessment outside its calibration scope is marked out of domain and triggers a declared widen, revalidate, abstain, or escalate policy. |
 
-The first implementation gate covers verified cross-session graph memory,
-transitive invalidation, and supersession in
-`tests/test-cognitive-memory-graph.scm`. The remaining scenarios are milestone
-requirements, not claims of current completion.
+The deterministic memory gates now cover user testimony across restart,
+verified cross-session graph memory, transitive invalidation, contradiction
+revision, auditable supersession, stale-memory rejection, and verified
+procedural reuse in `tests/test-cognitive-memory.scm`,
+`tests/test-cognitive-memory-graph.scm`, and
+`tests/test-production-processors.scm`. Failure-first repair and safe abstention
+remain covered by the production and evaluation gates. Bayesian correctness,
+uncertainty-driven attention, distribution shift, metacognitive capability
+revision, and repeated live-model readiness remain milestone requirements, not
+claims of current completion.
 
 ## Current implementation-slice boundary
 
-The first MVP implementation slice delivers part of M1: durable typed memory
-edges, traversal, dependency invalidation, auditable supersession, and a
-cross-session graph test. It also aligns the documentation and conformance
-language with GCAS 0.3. It does **not** claim `GCAS-Core 0.3`,
+The first two MVP implementation slices deliver M1 and M2 over the transparent
+local store: durable typed memory edges and roles, bounded traversal, lazy STI,
+governed terminal consolidation, guarded retrieval, dependency invalidation,
+auditable contradiction revision and supersession, and cross-session memory
+tests. The public memory interface preserves the backend adapter boundary. The
+slices also align the documentation and conformance language with GCAS 0.3.
+They do **not** claim `GCAS-Core 0.3`,
 `GCAS-Uncertainty 0.3`, or
 `GCAS-Bayesian 0.3` conformance and does not yet implement an uncertainty
 calculus.

@@ -224,7 +224,24 @@
            (restored-state (session-state restored))
            (event-types (map event-type (state-events restored-state)))
            (facts (filter fact? (state-objects restored-state)))
-           (memories (memory-objects (session-memory restored))))
+           (memories (memory-objects (session-memory restored)))
+           (procedures
+            (filter (lambda (co)
+                      (and (eq? (co-type co) 'procedure)
+                           (eq? (memory-role co) 'PROCEDURAL)))
+                    memories))
+           (reused-prompt-cell (list #f))
+           (reuse-process
+            (start-production-process!
+             restored "Reuse the verified first ten Fibonacci terms procedure."
+             #:generate
+             (lambda (prompt succeed fail)
+               (set-car! reused-prompt-cell prompt)
+               (succeed "No new Action is available for this test."))
+             #:extract-action (lambda (response) #f)
+             #:execute
+             (lambda args
+               (error "procedural retrieval must not execute by itself")))))
       (for-each (lambda (path)
                   (when (file-exists? path) (delete-file path)))
                 (list state-path memory-path))
@@ -233,7 +250,13 @@
            (any (lambda (claim) (assoc-ref (co-relations claim) 'satisfies)) facts)
            (any fact? memories)
            (any (lambda (co) (eq? (co-type co) 'evidence)) memories)
-           (any (lambda (co) (eq? (co-type co) 'result)) memories)))))
+           (any (lambda (co) (eq? (co-type co) 'result)) memories)
+           (= (length procedures) 1)
+           (assoc-ref (co-relations (car procedures)) 'derived-from)
+           (assoc-ref (co-relations (car procedures)) 'supported-by)
+           (eq? (process-outcome reuse-process) 'INSUFFICIENT_INFORMATION)
+           (string-contains (car reused-prompt-cell)
+                            "Verified procedure for Goal")))))
 
 (test-assert "a Conflict is reflected and routed to Generative replanning"
   (let ((session (make-cognitive-session #:workspace-capacity 2))

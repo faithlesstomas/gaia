@@ -35,7 +35,7 @@ neural intervention remain roadmap work.
 | Area | Status | Evidence and boundary |
 |---|---|---|
 | GCAS-Core 0.2 lifecycle | **Implemented baseline** | The model-free corpus passes 22/22 cases with zero hangs and false completions, including 4/4 repair paths; GCAS 0.3 uncertainty conformance is roadmap work. |
-| Structured memory and Goal Verification | **MVP in progress** | Verified evidence chains and typed graph relations persist across sessions; invalidation propagates through justification dependencies and supersession preserves history. Retrieval remains lexical and this is not yet evidence of cross-task learning. |
+| Structured memory and Goal Verification | **MVP in progress** | Verified evidence chains, typed memory roles, guarded graph retrieval, lazy STI activation, terminal consolidation, contradiction revision, and verified procedures persist across sessions. The deterministic gates demonstrate controlled reuse, not general cross-task learning. |
 | NCSI/J-space observation path | **Experimental** | The versioned protocol, RAI UDS adapter, neural Observation COs, bounded Workspace proposals, fallback, and matched M5 harness are implemented. The 18-run SmolLM2 pilot supports `SHIP_EXPERIMENTAL`, not a causal or epistemic claim. |
 | NCSI sidecar hardening and artifact replication | **In progress in RAI** | The clean-environment artifact reproduction/resource baseline and several operational M1–M3 gates remain open. |
 | Goblins AtomSpace backend, STI/LTI, steering, formal proving, cross-task benchmark | **Roadmap** | These capabilities are not part of the current production claim. |

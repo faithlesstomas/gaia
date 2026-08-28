@@ -188,4 +188,61 @@
               (= (length predecessors) 1)
               (equal? (co-id (car predecessors)) (co-id retired))))))))
 
+(test-assert "fresh contradiction invalidates dependents and installs an auditable successor"
+  (with-clean-memory
+   "/tmp/gaia-memory-graph-revision.scm"
+   (lambda ()
+     (let* ((path "/tmp/gaia-memory-graph-revision.scm")
+            (memory (make-cognitive-memory #:path path))
+            (prior
+             (make-cognitive-object
+              'claim "GAIA deployment region is eu-central"
+              #:provenance 'SYMBOLIC_INFERENCE
+              #:epistemic-status 'ACCEPTED
+              #:verification-status 'VERIFIED
+              #:relations '((memory-role . SEMANTIC))))
+            (dependent
+             (make-cognitive-object
+              'claim "GAIA latency policy assumes the eu-central region"
+              #:provenance 'SYMBOLIC_INFERENCE
+              #:epistemic-status 'ACCEPTED
+              #:verification-status 'VERIFIED
+              #:relations `((derived-from . ,(co-id prior))
+                            (memory-role . SEMANTIC))))
+            (fresh-evidence
+             (make-cognitive-object
+              'evidence "Deployment API now reports GAIA region eu-west"
+              #:provenance 'EXECUTION))
+            (successor
+             (make-cognitive-object
+              'claim "GAIA deployment region is eu-west"
+              #:provenance 'SYMBOLIC_INFERENCE
+              #:epistemic-status 'ACCEPTED
+              #:verification-status 'VERIFIED))
+            (_ (for-each (lambda (co) (memory-store! memory co))
+                         (list prior dependent)))
+            (revision (memory-revise! memory (co-id prior)
+                                      fresh-evidence successor))
+            (conflict (car revision))
+            (reloaded (make-cognitive-memory #:path path))
+            (old (memory-object-by-id reloaded (co-id prior)))
+            (old-dependent
+             (memory-object-by-id reloaded (co-id dependent)))
+            (current (memory-object-by-id reloaded (co-id successor)))
+            (retrieved
+             (memory-retrieve-facts reloaded "GAIA deployment region"
+                                    #:minimum-overlap 2)))
+       (and (equal? (co-invalidated-by old) (co-id conflict))
+            (equal? (co-invalidated-by old-dependent) (co-id conflict))
+            (equal? (assoc-ref (co-relations old) 'superseded-by)
+                    (co-id successor))
+            (equal? (assoc-ref (co-relations current) 'supersedes)
+                    (co-id prior))
+            (equal? (assoc-ref (co-relations current) 'supported-by)
+                    (co-id fresh-evidence))
+            (memory-object-by-id reloaded (co-id conflict))
+            (memory-object-by-id reloaded (co-id fresh-evidence))
+            (= (length retrieved) 1)
+            (equal? (co-id (car retrieved)) (co-id successor)))))))
+
 (test-end "gaia-cognitive-memory-graph")

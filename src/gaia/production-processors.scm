@@ -106,9 +106,25 @@ from Goblins actors and a particular LLM/runtime."
          (string-append "FAILED: the cognitive process terminated with outcome "
                         (format #f "~a" outcome) "."))))
 
+    (define (consolidate-terminal-process! outcome)
+      "Retain governed episodic and metacognitive records at every terminal
+boundary. Successful semantic/procedural memory is added by the Goal verifier
+path; failures remain reusable evidence without becoming accepted facts."
+      (memory-consolidate!
+       (session-memory session)
+       (filter (lambda (co) (belongs-to-process? co process))
+               (state-objects (session-state session)))
+       #:reason (if (eq? outcome 'COMPLETED)
+                    'VERIFIED_GOAL
+                    'TERMINAL_NON_SUCCESS)
+       #:revalidation (if (eq? outcome 'COMPLETED)
+                          'ON_CONTRADICTION_OR_EXPIRY
+                          'ON_RELATED_GOAL)))
+
     (define (notify-finished! outcome final-text hypothesis-text)
       (unless (car client-finished-cell)
         (set-car! client-finished-cell #t)
+        (consolidate-terminal-process! outcome)
         (on-finished outcome final-text hypothesis-text)))
 
     (define* (emit-answer! outcome final-text hypothesis-text #:key (verified-claim #f))
@@ -165,10 +181,35 @@ during a broadcast set the flag for a subsequent round."
                                         (relation-ref execution-claim 'supported-by))))
              (result (and evidence
                           (state-find (session-state session)
-                                      (relation-ref evidence 'observes)))))
+                                      (relation-ref evidence 'observes))))
+             (action (and evidence
+                          (state-find (session-state session)
+                                      (relation-ref evidence 'produced-by))))
+             (retained-action
+              (and action
+                   (co-add-relation action 'memory-role 'EPISODIC)))
+             (procedure
+              (and action evidence
+                   (make-cognitive-object
+                    'procedure
+                    (string-append "Verified procedure for Goal: " task
+                                   "\nAction:\n" (co-content action))
+                    #:provenance 'SYMBOLIC_INFERENCE
+                    #:epistemic-status 'ACCEPTED
+                    #:verification-status 'VERIFIED
+                    #:relations `((process . ,process-id*)
+                                  (memory-role . PROCEDURAL)
+                                  (derived-from . ,(co-id action))
+                                  (supported-by . ,(co-id evidence))
+                                  (validated-by . ,(co-id claim))
+                                  (reusable-for . ,task))))))
         (memory-consolidate!
          (session-memory session)
-         (filter cognitive-object? (list result evidence claim)))))
+         (filter cognitive-object?
+                 (list result retained-action evidence execution-claim
+                       claim procedure))
+         #:reason 'VERIFIED_GOAL
+         #:revalidation 'ON_ENVIRONMENT_CHANGE)))
 
     (define (generate-hypothesis! prompt replanning?)
       (generate
