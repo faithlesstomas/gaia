@@ -166,16 +166,37 @@ satisfies it.  This is the sole production path to GoalCompleted."
                          (risk 0)
                          (cost 0)
                          (uncertainty 0)
+                         (urgency 0)
+                         (conflict 0)
+                         (out-of-domain 0)
+                         (information-gain 0)
                          (origin 'KERNEL))
-  (state-store! (session-state session) co)
-  (workspace-propose! (session-workspace session) co
+  (let ((submitted
+         (if (and (memq (co-type co)
+                        '(hypothesis evidence plan action result claim conflict
+                                     reflection rule procedure))
+                  (not (assoc-ref (co-relations co) 'quantified-by))
+                  (not (assoc-ref (co-relations co) 'uncertainty-treatment)))
+             ;; Explicitly record the processor's uncertainty disposition.  A
+             ;; later processor may replace this with QUANTIFIED-BY links, but
+             ;; absence of an assessment is never silently rendered as a
+             ;; probability.
+             (co-add-relation co 'uncertainty-treatment
+                              'NO_APPLICABLE_ASSESSMENT)
+             co)))
+  (state-store! (session-state session) submitted)
+  (workspace-propose! (session-workspace session) submitted
                       #:priority priority
                       #:relevance relevance
                       #:risk risk
                       #:cost cost
-                      #:uncertainty uncertainty)
-  (emit! session (make-cognitive-event 'CandidateSubmitted co #:origin origin))
-  co)
+                      #:uncertainty uncertainty
+                      #:urgency urgency
+                      #:conflict conflict
+                      #:out-of-domain out-of-domain
+                      #:information-gain information-gain)
+  (emit! session (make-cognitive-event 'CandidateSubmitted submitted #:origin origin))
+  submitted))
 
 (define (session-advance! session)
   (let ((reason (control-termination-reason (session-control session))))

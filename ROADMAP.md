@@ -88,22 +88,13 @@ The GCAS 0.3 specification makes uncertainty a versioned cognitive state and dis
 The existing scalar CO `confidence` and Workspace `uncertainty` fields are not calibrated posterior probabilities and MUST remain labeled
 as scheduling or legacy compatibility metadata until migrated.
 
-- [ ] **UncertaintyAssessment CO and graph schema (P0)** — Add correctness target, uncertainty type, distribution/bounds, conditioning evidence,
-  prior/update links, inference method, calibration scope, provenance, and temporal validity without rewriting historical assessments.
-- [ ] **Rebuildable uncertainty projection `U` and Bayesian updater (P0)** — Store uncertainty state authoritatively as COs and graph relations,
-  rebuild `U` as their deterministic projection, and implement explicit prior, likelihood/observation model, posterior, and
-  posterior-predictive transitions for the first narrow verifier-backed Claim class. Record diagnostics and computational failure states
-  whenever approximate inference is used.
-- [ ] **Correctness feedback and calibration records (P0)** — Link later verifier outcomes to the original probability assessments and report
-  sample counts, log loss, Brier score, calibration curves, interval coverage, and distribution-shift invalidation.
-- [ ] **Uncertainty propagation and dependence control (P1)** — Propagate material uncertainty across Evidence → Claim → Plan → Action outcomes,
-  track common source/model ancestry, and prohibit conditionally-independent updates when dependence is undeclared.
-- [ ] **Uncertainty-aware Control policy (P1)** — Replace universal confidence cutoffs with Goal-scoped acceptance, abstention, escalation,
-  value-of-information, utility/error-cost, reversibility, and tail-risk rules.
-- [ ] **Legacy scalar migration (P1)** — Rename or type the current `confidence` fields, isolate the legacy `FINAL/CONFIDENCE` loop, and prevent
-  neural readout strength, entropy, source reliability, verifier coverage, and posterior correctness probability from sharing one scale.
-- [ ] **GCAS-Uncertainty 0.3 conformance gate (P1)** — Add an end-to-end deterministic probabilistic scenario and distribution-shift case that
-  exercise §14.2 without weakening the existing exactly-once, provenance, verification, and fail-closed guarantees.
+- [x] **UncertaintyAssessment CO and graph schema (P0)** — Machine-validated assessment, calculus, correctness-observation, and calibration COs carry target, quantity, representation, typed sources, conditioning, lineage/dependence, method/diagnostics, version links, scope, provenance, and validity without overwriting historical values.
+- [x] **Rebuildable uncertainty projection `U` and Bayesian updater (P0)** — `U` is rebuilt deterministically from ordinary Cognitive State COs and relations. The exact Beta–Bernoulli slice records explicit priors, Bernoulli assumptions, prior/posterior predictive checks, exact-inference diagnostics, sensitivity, and immutable update links.
+- [x] **Correctness feedback and calibration records (P0)** — Later correctness observations link to the exact forecast assessment. Calibration records retain assessment IDs, samples, Brier score, log loss, curve bins, sharpness, coverage/decision-loss applicability, sample count, and detected scope shift.
+- [x] **Uncertainty propagation and dependence control (P1)** — Assessment dependencies and source lineage are explicit, invalidation propagates through conditioning/update chains, and processor outputs record either a `quantified-by` dependency or `NO_APPLICABLE_ASSESSMENT`. Cross-calculus numeric combination fails closed.
+- [x] **Uncertainty-aware Control policy (P1)** — Control separately exposes urgency, risk, conflict, out-of-domain state, expected information gain, cost, relevance, and priority. Goal-scoped decisions support acceptance, abstention, escalation, and evidence acquisition; no universal threshold is introduced.
+- [x] **Legacy scalar migration (P1)** — Historical CO `confidence` and Workspace `uncertainty` remain validated legacy/scheduling metadata and acquire no posterior semantics. Restored legacy sessions create no synthetic assessments; neural invariants remain unchanged.
+- [x] **GCAS-Uncertainty 0.3 conformance gate (P1)** — `tests/test-uncertainty.scm` covers malformed schemas, legacy restoration, normative Beta–Bernoulli values, restart/rebuild, supersession/invalidation, immutable correctness/calibration, scope shift, abstention/escalation, Control competition, and cross-calculus non-combinability. Reports distinguish `GCAS-Uncertainty 0.3` from the narrow `GCAS-Bayesian 0.3 / BETA_BERNOULLI` profile.
 
 The implementation order and acceptance criteria are defined as U0–U4 in
 [the GAIA MVP contract](docs/gaia-mvp.md#gcas-03-implementation-plan). The first

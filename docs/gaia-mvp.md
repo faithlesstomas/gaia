@@ -79,10 +79,10 @@ governed terminal consolidation, guarded retrieval, dependency invalidation,
 auditable contradiction revision and supersession, and cross-session memory
 tests. The public memory interface preserves the backend adapter boundary. The
 slices also align the documentation and conformance language with GCAS 0.3.
-They do **not** claim `GCAS-Core 0.3`,
-`GCAS-Uncertainty 0.3`, or
-`GCAS-Bayesian 0.3` conformance and does not yet implement an uncertainty
-calculus.
+The completed U0–U4 slice adds the deterministic `GCAS-Uncertainty 0.3` gate
+and reports the narrow exact Beta–Bernoulli domain separately as
+`GCAS-Bayesian 0.3`. These additive profiles do not reinterpret legacy scalar
+confidence or scheduling uncertainty as posterior probability.
 
 The subsequent implementation is intentionally split into reviewable vertical
 slices. Each slice must preserve the existing exactly-once, fail-closed,

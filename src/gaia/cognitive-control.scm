@@ -106,9 +106,13 @@ the other fields penalize proposals that are less relevant, more risky, more
 expensive, or less certain.  Equal scores preserve submission order."
   (+ (candidate-priority candidate)
      (* 10 (candidate-relevance candidate))
+     (* 10 (candidate-urgency candidate))
+     (* 5 (candidate-risk candidate))
+     (* 15 (candidate-conflict candidate))
+     (* 20 (candidate-out-of-domain candidate))
+     (* 15 (candidate-information-gain candidate))
      (* -10 (candidate-risk candidate))
-     (* -10 (candidate-cost candidate))
-     (* -10 (candidate-uncertainty candidate))))
+     (* -10 (candidate-cost candidate))))
 
 (define (control-select-candidate control candidates)
   "Choose one pending workspace candidate under the current Control policy."

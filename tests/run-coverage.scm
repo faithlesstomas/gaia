@@ -44,6 +44,7 @@
          "test-com.scm"
          "test-cognitive-bus.scm"
          "test-cognitive-session.scm"
+         "test-uncertainty.scm"
          "test-action-preflight.scm"
          "test-capability-registry.scm"
          "test-goal-verifier.scm"

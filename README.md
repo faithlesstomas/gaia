@@ -42,6 +42,7 @@ neural intervention remain roadmap work.
 
 See the [GAIA MVP contract](docs/gaia-mvp.md), the
 [capability and readiness matrix](docs/capability-matrix.md), the
+[uncertainty implementation](docs/gcas-uncertainty.md), the
 [deterministic evaluation report](docs/gcas-evaluation.md), the
 [M5 evaluation](docs/evaluations/ncsi-smollm2-m5.md), its
 [machine-readable summary](docs/evaluations/ncsi-smollm2-m5-summary.json), and
