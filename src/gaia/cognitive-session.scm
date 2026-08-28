@@ -184,9 +184,12 @@ satisfies it.  This is the sole production path to GoalCompleted."
         ;; Control after that process has finished must not manufacture a
         ;; duplicate, process-less ProcessTerminated event.
         (let ((process (session-current-process session)))
-          (and process
-               (process-active? process)
-               (session-finish-process! session reason)))
+          (when (and process (process-active? process))
+            (session-finish-process! session reason))
+          ;; Termination is not an admitted Cognitive Object.  Returning the
+          ;; outcome symbol here made workspace-round bookkeeping call CO-ID on
+          ;; FAILURE_BUDGET_EXHAUSTED when a budget expired between rounds.
+          #f)
         (let ((admitted (workspace-admit-next!
                          (session-workspace session)
                          #:selector (lambda (candidates)

@@ -34,13 +34,14 @@ neural intervention remain roadmap work.
 
 | Area | Status | Evidence and boundary |
 |---|---|---|
-| GCAS-Core 0.2 lifecycle | **Implemented baseline** | The model-free corpus passes 22/22 cases with zero hangs and false completions, including 4/4 repair paths; GCAS 0.3 uncertainty conformance is roadmap work. |
+| GCAS-Core 0.2 lifecycle | **Implemented baseline** | The model-free corpus passes 23/23 cases with zero hangs and false completions, including 5/5 repair paths and preflight rejection before execution; GCAS 0.3 uncertainty conformance is roadmap work. |
 | Structured memory and Goal Verification | **MVP in progress** | Verified evidence chains, typed memory roles, guarded graph retrieval, lazy STI activation, terminal consolidation, contradiction revision, and verified procedures persist across sessions. The deterministic gates demonstrate controlled reuse, not general cross-task learning. |
 | NCSI/J-space observation path | **Experimental** | The versioned protocol, RAI UDS adapter, neural Observation COs, bounded Workspace proposals, fallback, and matched M5 harness are implemented. The 18-run SmolLM2 pilot supports `SHIP_EXPERIMENTAL`, not a causal or epistemic claim. |
 | NCSI sidecar hardening and artifact replication | **In progress in RAI** | The clean-environment artifact reproduction/resource baseline and several operational M1–M3 gates remain open. |
 | Goblins AtomSpace backend, STI/LTI, steering, formal proving, cross-task benchmark | **Roadmap** | These capabilities are not part of the current production claim. |
 
 See the [GAIA MVP contract](docs/gaia-mvp.md), the
+[capability and readiness matrix](docs/capability-matrix.md), the
 [deterministic evaluation report](docs/gcas-evaluation.md), the
 [M5 evaluation](docs/evaluations/ncsi-smollm2-m5.md), its
 [machine-readable summary](docs/evaluations/ncsi-smollm2-m5-summary.json), and

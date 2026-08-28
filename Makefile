@@ -45,6 +45,8 @@ test-emacs-client:
 	emacs --batch -Q -L src/gaia-desktop/emacs -l tests/test-emacs-client.el
 
 gcas-conformance-scheme:
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-action-preflight.scm
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-capability-registry.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-goal-verifier.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-cognitive-memory.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-cognitive-memory-graph.scm

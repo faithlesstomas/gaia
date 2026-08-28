@@ -10,9 +10,11 @@ conversation. The Session Orchestrator calls the Generative Processor with:
 - an empty chat-history list.
 
 The initial projection contains the current Goal, admitted Workspace objects,
-lexically selected structured Memory, completion criteria, and active
-constraints. After a failed Action or verifier conflict, the next projection
-adds the relevant Reflection and exact execution feedback. The complete history
+guarded graph-selected structured Memory, a versioned capability and Action
+schema when registered, completion criteria, remaining Control budgets, and
+active constraints. After a preflight failure, failed Action, or verifier
+conflict, the next projection adds a typed repair phase, exact error class,
+failing form, relevant Reflection, remaining budgets, and execution feedback. The complete history
 remains available for audit and UI, but it is not treated as cognitive memory.
 
 This satisfies the GCAS separation between transcript and Memory. Production

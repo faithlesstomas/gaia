@@ -1,7 +1,8 @@
 (define-module (gaia goal-verifier)
-  #:use-module (ice-9 regex)
+  #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-9)
   #:use-module (gaia com)
+  #:use-module (gaia capability-registry)
   #:export (<goal-verdict>
             make-goal-verdict
             goal-verdict?
@@ -10,6 +11,8 @@
             goal-verdict-claim-content
             call-goal-verifier
             default-goal-verifier
+            select-capability-manifest
+            advertised-capability-manifests
             select-goal-verifier
             goal-completion-criteria))
 
@@ -55,48 +58,33 @@ only its bounded observation and must not become GoalCompleted."
    'INCONCLUSIVE
    "No independent Goal verifier was supplied for this task."))
 
-(define fibonacci-pattern
-  (make-regexp "0[^0-9]+1[^0-9]+1[^0-9]+2[^0-9]+3[^0-9]+5[^0-9]+8[^0-9]+13[^0-9]+21[^0-9]+34"))
+(define production-capability-registry (make-default-capability-registry))
 
-(define (fibonacci-goal? task)
-  (let ((text (string-downcase (format #f "~a" task))))
-    (or (string-contains text "fibonacci")
-        (string-contains text "fibonacciego"))))
+(define (advertised-capability-manifests)
+  (filter capability-manifest-advertised?
+          (registry-manifests production-capability-registry)))
 
-(define (fibonacci-goal-verifier goal action result evidence execution-claim state)
-  "Verify the observable contract used by the production Fibonacci capability.
+(define (select-capability-manifest task)
+  (registry-match production-capability-registry task))
 
-The generated Action must return the first ten terms.  The verifier consumes
-the REPL Result, never the LLM's assertion that its implementation is correct."
-  (if (and (string-contains (co-content action) "(define (fibonacci-sequence")
-           (regexp-exec fibonacci-pattern (co-content result)))
+(define (manifest-goal-verifier manifest)
+  (lambda (goal action result evidence execution-claim state)
+    (let ((verification
+           (registry-verify manifest goal action result evidence
+                            execution-claim state)))
       (make-goal-verdict
-       'SATISFIED
-       "The deterministic Fibonacci verifier observed the required procedure and first ten terms."
-       (string-append
-        "Verified Scheme implementation:\n```scheme\n"
-        (co-content action)
-        "\n```\nObserved result: `(0 1 1 2 3 5 8 13 21 34)`."))
-      (make-goal-verdict
-       'REJECTED
-       (string-append
-        "Expected the Action to define fibonacci-sequence and its result to contain "
-        "the first ten Fibonacci terms: "
-        "0 1 1 2 3 5 8 13 21 34. The observed result did not match; revise the "
-        "implementation and return the sequence as the final Scheme value."))))
+       (capability-verification-status verification)
+       (capability-verification-rationale verification)
+       (capability-verification-claim-content verification)))))
 
 (define (select-goal-verifier task)
   "Select an independent verifier for TASK. Unknown task classes fail closed."
-  (if (fibonacci-goal? task)
-      fibonacci-goal-verifier
-      default-goal-verifier))
+  (let ((manifest (select-capability-manifest task)))
+    (if manifest (manifest-goal-verifier manifest) default-goal-verifier)))
 
 (define (goal-completion-criteria task)
   "Return an executable acceptance contract for TASK."
-  (if (fibonacci-goal? task)
-      (string-append
-       "Define a fibonacci-sequence procedure and make the final Scheme "
-       "expression return its first ten terms exactly as "
-       "(0 1 1 2 3 5 8 13 21 34). An independent deterministic verifier must "
-       "accept the observed Result.")
-      "Produce independently verified evidence that satisfies the user Goal."))
+  (let ((manifest (select-capability-manifest task)))
+    (if manifest
+        (capability-manifest-completion-criteria manifest)
+        "Produce independently verified evidence that satisfies the user Goal.")))

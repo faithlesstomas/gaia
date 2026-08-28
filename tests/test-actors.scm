@@ -688,7 +688,7 @@
                   (run-turns-synchronously)
                   (let ((output (get-output-string mock-socket)))
                     (and (= llm-calls 3)
-                         (string-contains output "repl-error")
+                         (string-contains output "Action preflight rejected")
                          (string-contains output "FAILURE_BUDGET_EXHAUSTED")
                          (string-contains output "ProcessTerminated")
                          (string-contains output "(final")

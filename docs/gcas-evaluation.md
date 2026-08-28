@@ -31,8 +31,8 @@ Every fixture additionally enforces these global invariants:
 5. no unexpected adapter call occurred;
 6. a case expected to fail never reports `COMPLETED`.
 
-The initial corpus contains 22 cases across first-pass completion, syntax,
-runtime and verifier repair, planning failures, verification rejection and
+The corpus contains 23 cases across first-pass completion, preflight syntax,
+runtime syntax and verifier repair, planning failures, verification rejection and
 inconclusiveness, repeated Actions, all Control budgets, adapter failure, user
 interruption, and a success callback arriving after interruption.
 
@@ -43,8 +43,8 @@ counts, hangs, false completions, repair success, model calls, executions, and
 latency. The initial deterministic baseline is:
 
 ```text
-cases=22 passed=22 failed=0 hangs=0 false-completions=0
-repair-success=4/4 model-calls=31 executions=25
+cases=23 passed=23 failed=0 hangs=0 false-completions=0
+repair-success=5/5 model-calls=33 executions=26
 ```
 
 Exact outcomes and attempt counts are assertions, not merely telemetry. Latency
