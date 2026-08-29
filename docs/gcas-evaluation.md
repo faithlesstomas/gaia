@@ -67,13 +67,13 @@ be compared while reusing the deterministic corpus as the invariant floor.
 
 `make gcas-live-eval` implements that second layer as an opt-in benchmark. It is
 model-agnostic within GAIA's current OpenAI-compatible chat adapter: the same
-tasks, execution environment, and deterministic datum verifiers are reused for
+tasks, execution environment, and hidden behavioral verifiers are reused for
 every configured model. It is deliberately excluded from `make check` and
 `make gcas-conformance`, so offline CI neither requires a model server nor incurs
 remote inference cost.
 
-The initial safe corpus contains arithmetic, list mapping, list filtering,
-recursive factorial, and Fibonacci tasks. It performs no filesystem mutation
+The eval-v2 corpus contains arithmetic, list mapping, list filtering,
+recursive factorial, and Fibonacci procedure contracts. It performs no filesystem mutation
 and denies permission-gated sandbox capabilities. Configure the matrix with:
 
 ```sh
@@ -107,6 +107,26 @@ task names, repetitions, thinking mode, the complete effective system prompt,
 per-run trajectories,
 model/task cells, and per-model totals. Token counts remain zero when an endpoint
 does not return the OpenAI `usage` object.
+
+### Hidden behavioral oracle (eval v2)
+
+The five former fixed-output tasks retain their stable task IDs, but now require
+procedures: `solve-arithmetic(a,b,c)`, `square-all(xs)`, `keep-evens(xs)`,
+`factorial(n)`, and `fibonacci-sequence(n)`. Prompts and repair feedback expose
+only these public signatures and semantics.
+
+At the execution boundary the evaluator appends a private deterministic harness
+to the submitted Action. Probe selection is seeded by repetition; a repaired
+Action receives an expanded suite with fresh holdout inputs. Only aggregate
+passed/failed counts reach the Goal verifier. Failing inputs and oracle values
+are never projected into model or repair context.
+
+Report schema v2 records `lifecycle_ok`, `action_executed`,
+`hidden_tests_passed`, and `hidden_tests_run` separately. Readiness rejects
+legacy v1 results and any completion not established by hidden tests. Simple
+literals and fixed lookup answers are covered by deterministic regressions.
+This does not prove robustness against deliberately adversarial code; broader
+held-out datasets remain a stronger boundary than static source inspection.
 
 The runner refuses multiple models, models declared above 4B parameters, and
 all invocations without `GAIA_EVAL_RESOURCE_APPROVED=1`. This flag is set only
@@ -179,13 +199,14 @@ for the contract's preferred `repl` fence. This is intentionally scoped to GCAS:
 the legacy notebook extractor remains strict, and normalized Actions still pass
 through policy, sandbox execution, evidence, and independent verification.
 
-An exploratory one-shot `gemma4:e2b` run on 2026-08-14 first scored 0/5 because
+An exploratory one-shot `gemma4:e2b` eval-v1 run on 2026-08-14 first scored 0/5 because
 all five otherwise actionable responses used `scheme` fences. After adapter
 normalization, the identical matrix scored 3/5: arithmetic and factorial passed
 on the first Action, list mapping passed after repair, and list filtering plus
 Fibonacci exhausted the three-failure budget. All five lifecycles terminated
-correctly. This is diagnostic evidence, not a readiness baseline; repeated runs
-are still required.
+correctly. This is diagnostic evidence, not a readiness baseline. All eval-v1
+reports are invalid as readiness evidence because fixed oracle values allowed
+hardcoded implementations.
 
 Benchmark task failure does not make the command fail: a weak-model result is
 valid measurement. The command exits non-zero only when a GCAS lifecycle

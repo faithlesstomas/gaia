@@ -13,14 +13,16 @@ to a generic LLM judge.
 
 | Capability | Manifest | Action boundary | Independent verifier | Deterministic gate | Live gate | Release status |
 |---|---|---|---|---|---|---|
-| Exact arithmetic `(17 × 3) − 9` | `arithmetic-42@1` | Complete Guile Action returning one datum | `EXACT_VALUE`: result equals `42` | Covered | `arithmetic-42` | Candidate; repeated baseline pending |
-| Square fixed list `(1 2 3 4 5)` | `map-squares@1` | Complete Guile Action returning one list | `STRUCTURED_VALUE`: exact list equality | Covered | `map-squares` | Candidate; repeated baseline pending |
-| Filter evens from fixed list | `filter-evens@1` | Complete Guile Action returning one list | `STRUCTURED_VALUE`: exact list equality | Covered | `filter-evens` | Candidate; repeated baseline pending |
-| Recursive factorial of 6 | `factorial-6@1` | Define `factorial`; return one datum | Required binding plus `EXACT_VALUE` result | Covered | `factorial-6` | Candidate; repeated baseline pending |
-| First ten Fibonacci terms | `fibonacci-10@1` | Define `fibonacci-sequence`; return one list | Required binding plus `STRUCTURED_VALUE` result | Covered | `fibonacci-10` | Candidate; repeated baseline pending |
+| Arithmetic relation `(a × b) − c` | production v1; eval v2 | Define `solve-arithmetic(a,b,c)` | Hidden repetition-seeded probes | Covered, including shortcut rejection | `arithmetic-42` v2 | Candidate; v2 baseline pending |
+| Square arbitrary numeric lists | production v1; eval v2 | Define `square-all(xs)` | Hidden lists plus repair holdout | Covered, including shortcut rejection | `map-squares` v2 | Candidate; v2 baseline pending |
+| Filter evens from integer lists | production v1; eval v2 | Define `keep-evens(xs)` | Hidden lists plus repair holdout | Covered, including shortcut rejection | `filter-evens` v2 | Candidate; v2 baseline pending |
+| Factorial for non-negative integers | production v1; eval v2 | Define `factorial(n)` | Hidden boundary and general inputs | Covered, including constant rejection | `factorial-6` v2 | Candidate; v2 baseline pending |
+| Fibonacci prefix for non-negative length | production v1; eval v2 | Define `fibonacci-sequence(n)` | Hidden lengths plus repair holdout | Covered, including lookup rejection | `fibonacci-10` v2 | Candidate; v2 baseline pending |
 
-These are deliberately narrow executable contracts, not claims of general
-arithmetic, general list processing, or general programming competence.
+The live contracts test bounded generalization within these procedure families;
+they are not claims of general programming or mathematical competence. The
+production manifests remain v1 until the private-harness evidence boundary is
+also integrated into normal `solve`.
 
 ## Reusable verifier classes
 
@@ -59,12 +61,17 @@ capability:
 - at least 80% verified task success per capability cell;
 - bounded interruption latency with no post-terminal execution;
 - no repeated Action execution;
+- eval-v2 hidden tests for every successful completion, with fresh holdout
+  probes after repair;
 - reported first-pass and post-repair success, calls, executions, tokens, and
   latency.
 
 A capability that misses its cell threshold MUST be marked experimental or
 removed from the advertised release matrix. Overall averages MUST NOT hide a
 failing capability cell.
+
+Eval-v1 reports are diagnostic-only and cannot contribute repetitions to this
+release gate.
 
 ## Explicitly unsupported in the MVP
 

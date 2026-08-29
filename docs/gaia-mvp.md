@@ -212,6 +212,8 @@ regression floor.
 ### M5 — Longitudinal readiness gate
 
 - Run repeated live-model evaluations for every advertised capability.
+- Use hidden behavioral probes, repetition-seeded cases, and a fresh holdout
+  after repair; never project oracle values into generation or repair context.
 - Measure task success, correct abstention, false completion, terminal rate,
   first-pass and repair success, repeated Actions, calls, tokens, latency, and
   interruption latency.

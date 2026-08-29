@@ -277,7 +277,7 @@
         (('error type message) (fail type message))
         (other (fail 'runtime (format #f "Invalid execution response: ~s" other)))))))
 
-(format #t "GCAS live evaluation: endpoint=~a models=~s tasks=~s repeats=~a thinking=~a\n"
+(format #t "GCAS live evaluation v2: endpoint=~a models=~s tasks=~s repeats=~a thinking=~a oracle=hidden-property-tests\n"
         (get-config 'llm-url) models (map evaluation-task-id tasks) repeats thinking?)
 (format #t "Resource envelope: one-model-only=true parameters=~aB approved=~a\n"
         model-parameters-b resource-approved?)
@@ -304,12 +304,16 @@
 
 (for-each
  (lambda (result)
-   (format #t "~a model=~a task=~a run=~a outcome=~a calls=~a exec=~a tokens=~a latency=~,1fms\n"
+   (format #t "~a model=~a task=~a run=~a outcome=~a lifecycle=~a action-executed=~a hidden-tests=~a/~a calls=~a exec=~a tokens=~a latency=~,1fms\n"
            (if (assoc-ref result "passed") "PASS" "FAIL")
            (assoc-ref result "model")
            (assoc-ref result "task")
            (assoc-ref result "repetition")
            (assoc-ref result "outcome")
+           (assoc-ref result "lifecycle_ok")
+           (assoc-ref result "action_executed")
+           (assoc-ref result "hidden_tests_passed")
+           (assoc-ref result "hidden_tests_run")
            (assoc-ref result "model_calls")
            (assoc-ref result "execution_calls")
            (assoc-ref result "total_tokens")
@@ -318,12 +322,15 @@
 
 (for-each
  (lambda (cell)
-   (format #t "CELL model=~a task=~a passed=~a/~a success=~,1f% first-pass=~a repair=~a/~a missing=~a failures=~a repeated-actions=~a lifecycle-failures=~a\n"
+   (format #t "CELL model=~a task=~a passed=~a/~a success=~,1f% hidden-success=~a tests=~a action-runs=~a first-pass=~a repair=~a/~a missing=~a failures=~a repeated-actions=~a lifecycle-failures=~a\n"
            (assoc-ref cell "model")
            (assoc-ref cell "task")
            (assoc-ref cell "passed")
            (assoc-ref cell "runs")
            (assoc-ref cell "success_rate")
+           (assoc-ref cell "hidden_test_successes")
+           (assoc-ref cell "hidden_tests_run")
+           (assoc-ref cell "actions_executed")
            (assoc-ref cell "first_pass_successes")
            (assoc-ref cell "repair_successes")
            (assoc-ref cell "repair_attempts")
@@ -354,10 +361,11 @@
         (assoc-ref interruption "latency_ms"))
 (for-each
  (lambda (cell)
-   (format #t "GATE model=~a task=~a ready=~a runs=~a success=~,1f% terminal=~,1f% false-completions=~a duplicate-exec=~a\n"
+   (format #t "GATE model=~a task=~a ready=~a runs=~a success=~,1f% terminal=~,1f% invalid-verifications=~a false-completions=~a duplicate-exec=~a\n"
            (assoc-ref cell "model") (assoc-ref cell "task")
            (assoc-ref cell "ready") (assoc-ref cell "runs")
            (assoc-ref cell "success_rate") (assoc-ref cell "terminal_rate")
+           (assoc-ref cell "invalid_verifications")
            (assoc-ref cell "false_completions")
            (assoc-ref cell "duplicate_executions")))
  (assoc-ref readiness "cells"))
@@ -365,7 +373,8 @@
 (when (and output-path (not (string-null? (string-trim-both output-path))))
   (write-json-file
    output-path
-   `(("schema_version" . 1)
+   `(("schema_version" . 2)
+     ("evaluation_contract" . "gcas-live-eval-v2-hidden-property-tests")
      ("created_at" . ,(strftime "%Y-%m-%dT%H:%M:%S%z"
                                 (localtime (current-time))))
      ("endpoint" . ,(get-config 'llm-url))
