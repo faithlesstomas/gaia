@@ -214,13 +214,15 @@
          (<- orchestrator 'handle-message '(list-models))
          (<- orchestrator 'handle-message '(get-thinking))
          (<- orchestrator 'handle-message '(set-thinking "on"))
+         (<- orchestrator 'handle-message '(set-thinking "high"))
+         (<- orchestrator 'handle-message '(get-thinking))
          (<- orchestrator 'handle-message 'interrupt)
          (<- orchestrator 'handle-message '(get-history)))
        (let loop ()
          (set! output-val (get-output-string mock-socket))
          (if (and (string-contains output-val "model-info")
                   (string-contains output-val "models-list")
-                  (string-contains output-val "thinking-info")
+                  (string-contains output-val "(thinking-info \"high\")")
                   (string-contains output-val "history-list"))
              (with-vat session-vat
                (on (<- orchestrator 'handle-message 'eof)
@@ -232,7 +234,7 @@
     (and (port-closed? mock-socket)
          (string-contains output-val "model-info")
          (string-contains output-val "models-list")
-         (string-contains output-val "thinking-info")
+         (string-contains output-val "(thinking-info \"high\")")
          (string-contains output-val "history-list"))))
 
 

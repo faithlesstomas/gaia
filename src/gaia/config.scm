@@ -3,7 +3,9 @@
   #:use-module (ice-9 popen)
   #:use-module (ice-9 rdelim)
   #:use-module (srfi srfi-1)
-  #:export (load-config get-config set-config! gaia-version *workspace-path*))
+  #:use-module (srfi srfi-13)
+  #:export (load-config get-config set-config! gaia-version *workspace-path*
+            normalize-thinking-setting thinking-setting->string))
 
 (define *workspace-path* (make-parameter #f))
 
@@ -31,6 +33,28 @@
   "Updates the configuration value for a specific key."
   (let ((current (*config*)))
     (*config* (acons key value (alist-delete key current)))))
+
+(define (normalize-thinking-setting value)
+  "Normalize a thinking setting, or return the symbol 'invalid.
+The normalized value is #t, #f, or one of the Ollama effort-level strings."
+  (cond
+   ((boolean? value) value)
+   ((string? value)
+    (let ((setting (string-downcase (string-trim-both value))))
+      (cond
+       ((member setting '("on" "true" "1")) #t)
+       ((member setting '("off" "false" "0" "none")) #f)
+       ((member setting '("low" "medium" "high" "max")) setting)
+       (else 'invalid))))
+   (else 'invalid)))
+
+(define (thinking-setting->string value)
+  "Return the CLI/API spelling of a normalized thinking setting."
+  (cond
+   ((eq? value #t) "on")
+   ((eq? value #f) "off")
+   ((string? value) value)
+   (else "invalid")))
 
 (define (get-env-override key)
   "Maps config keys to environment variables and returns value if set."

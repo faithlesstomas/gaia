@@ -347,14 +347,19 @@
                        (send-event client-socket `(models-list '("gemma4:e2b" "gemma4:e4b" "gemini-2.0-flash" "gpt-4o" "claude-3.5-sonnet")))))))
 
       (('get-thinking)
-       (let ((thinking-str (if thinking "on" "off")))
+       (let ((thinking-str (thinking-setting->string thinking)))
          (send-event client-socket `(thinking-info ,thinking-str))))
 
       (('set-thinking state)
        (gaia-log (format #f "[SERVER] Set thinking mode to: ~a" state))
-       (let* ((on? (or (eq? state #t) (string=? (format #f "~a" state) "on"))))
-         (send-event client-socket `(final ,(string-append "Thinking mode set to: " (if on? "on" "off"))))
-         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model on? workspace-dir cognitive-session) 'ok)))
+       (let ((setting (normalize-thinking-setting state)))
+         (if (eq? setting 'invalid)
+             (begin
+               (send-event client-socket '(final "Invalid thinking mode. Use: off, on, false, true, low, medium, high, or max."))
+               (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model thinking workspace-dir cognitive-session) 'ok))
+             (begin
+               (send-event client-socket `(final ,(string-append "Thinking mode set to: " (thinking-setting->string setting))))
+               (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model setting workspace-dir cognitive-session) 'ok)))))
 
       (('get-state-injection)
        (let ((state-str (if (get-config 'state-injection) "on" "off")))
@@ -444,7 +449,7 @@
   /ask <query>      - Ask a one-off question to AI (no recursion)
   /model [name]     - Show or change the active LLM model
   /models           - List available models
-  /thinking [on|off]- Enable or disable reasoning mode
+  /thinking [off|on|low|medium|high|max] - Set or check reasoning mode
   /state [on|off]   - Enable or disable REPL state injection header
   /wisp [on|off]    - Enable or disable Wisp-mode instructions"))
           (send-event client-socket `(final ,help-text))))

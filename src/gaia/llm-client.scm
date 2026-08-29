@@ -153,6 +153,8 @@ Returns (response-header . response-body) or throws 'user-interrupt."
   (let ((m (string-downcase model)))
     (or (string-contains m "think")
         (string-contains m "r1")
+        (string-contains m "qwen3")
+        (string-contains m "gpt-oss")
         (string-contains m "gemma4")
         (string-contains m "reasoning"))))
 
@@ -163,20 +165,31 @@ Returns (response-header . response-body) or throws 'user-interrupt."
 
 (define (get-thinking-fields model think)
   "Return list of association pairs for thinking parameters based on the model and toggle state."
-  (cond
-   ((model-is-cloud-reasoning? model)
-    (if think
-        `(("reasoning_effort" . "medium")
-          ("thinking" . (("type" . "enabled") ("budget_tokens" . 2048) ("budget" . 2048)))
-          ("allowed_openai_params" . #("reasoning_effort" "thinking")))
-        `(("reasoning_effort" . "none")
-          ("thinking" . (("type" . "disabled") ("budget_tokens" . 0) ("budget" . 0)))
-          ("allowed_openai_params" . #("reasoning_effort" "thinking")))))
-   ((model-is-local-reasoning? model)
-    `(("think" . ,think)
-      ("allowed_openai_params" . #("think"))))
-   (else
-    '())))
+  (let* ((normalized (normalize-thinking-setting think))
+         (setting (if (eq? normalized 'invalid) #f normalized))
+         (enabled? (not (eq? setting #f)))
+         (effort (cond
+                  ((eq? setting #f) "none")
+                  ((eq? setting #t) "medium")
+                  ((string? setting) setting)
+                  (else "none"))))
+    (cond
+     ((model-is-cloud-reasoning? model)
+      (if enabled?
+          `(("reasoning_effort" . ,effort)
+            ("thinking" . (("type" . "enabled") ("budget_tokens" . 2048) ("budget" . 2048)))
+            ("allowed_openai_params" . #("reasoning_effort" "thinking")))
+          `(("reasoning_effort" . "none")
+            ("thinking" . (("type" . "disabled") ("budget_tokens" . 0) ("budget" . 0)))
+            ("allowed_openai_params" . #("reasoning_effort" "thinking")))))
+     ((model-is-local-reasoning? model)
+      ;; LiteLLM's allowed-parameter passthrough preserves Ollama's boolean or
+      ;; effort-level `think` value. Its reasoning_effort mapper would collapse
+      ;; Qwen3's low/medium/high levels to a plain boolean.
+      `(("think" . ,setting)
+        ("allowed_openai_params" . #("think"))))
+     (else
+      '()))))
 
 (define (clean-history-for-llm history)
   "Strips extra fields like trajectory from the history turns and normalizes user-repl role for LLM compatibility."

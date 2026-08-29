@@ -801,7 +801,7 @@ Returns (list updated-history updated-env should-continue?)"
     (display "  /eval <scheme> - Execute Scheme code locally\n")
     (display "  /models        - List available models and LoRA adapters\n")
     (display "  /model <name>  - Select a base model or LoRA adapter folder to load\n")
-    (display "  /thinking [on|off]- Enable, disable, or check thinking mode (reasoning)\n")
+    (display "  /thinking [off|on|low|medium|high|max] - Set or check reasoning mode\n")
     (display "  /base-model <name>- Select the foundation model used for training\n")
     (display "  /train         - Manually trigger Fine Tuning (make learn) from dataset\n")
     (display "  /clear         - Clear conversation history\n")
@@ -874,21 +874,19 @@ Returns (list updated-history updated-env should-continue?)"
 
    ;; /thinking
    ((string=? input "/thinking")
-    (display (string-append "Current thinking mode: " (if (get-config 'thinking) "ON" "OFF") "\n"))
+    (display (string-append "Current thinking mode: " (thinking-setting->string (get-config 'thinking)) "\n"))
     (list history env #t))
 
-   ;; /thinking <on/off>
+   ;; /thinking <off/on/level>
    ((string-prefix? "/thinking " input)
-    (let ((arg (string-trim-both (substring input 10))))
-      (cond
-       ((or (string=? arg "on") (string=? arg "1"))
-        (set-config! 'thinking #t)
-        (display (string-append C-CYAN "Thinking mode ENABLED." C-RESET "\n")))
-       ((or (string=? arg "off") (string=? arg "0"))
-        (set-config! 'thinking #f)
-        (display (string-append C-YELLOW "Thinking mode DISABLED." C-RESET "\n")))
-       (else
-        (display (string-append "Current thinking mode: " (if (get-config 'thinking) "ON" "OFF") "\n"))))
+    (let* ((arg (string-trim-both (substring input 10)))
+           (setting (normalize-thinking-setting arg)))
+      (if (eq? setting 'invalid)
+          (display "Invalid thinking mode. Use: off, on, false, true, low, medium, high, or max.\n")
+          (begin
+            (set-config! 'thinking setting)
+            (display (string-append C-CYAN "Thinking mode set to: "
+                                    (thinking-setting->string setting) C-RESET "\n"))))
       (list history env #t)))
 
    ;; /base-model

@@ -31,6 +31,8 @@
   (test-equal "set-model" '(set-model "gpt-4") (parse-slash-command "/model gpt-4"))
   (test-equal "get-thinking" '(get-thinking) (parse-slash-command "/thinking"))
   (test-equal "set-thinking" '(set-thinking "off") (parse-slash-command "/thinking off"))
+  (test-equal "set-thinking level" '(set-thinking "high") (parse-slash-command "/thinking high"))
+  (test-equal "set-thinking boolean" '(set-thinking "false") (parse-slash-command "/thinking false"))
   (test-equal "ask" '(ask "explain scheme") (parse-slash-command "/ask explain scheme"))
   (test-equal "solve" '(solve "verify this claim") (parse-slash-command "/solve verify this claim"))
   (test-equal "investigate" '(investigate "inspect this repository") (parse-slash-command "/investigate inspect this repository"))

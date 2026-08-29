@@ -100,7 +100,26 @@
 (test-assert "model-supports-thinking?"
   (and ((@@ (gaia llm-client) model-supports-thinking?) "gemma4")
        ((@@ (gaia llm-client) model-supports-thinking?) "r1-reasoning")
+       ((@@ (gaia llm-client) model-supports-thinking?) "qwen3:4b")
+       ((@@ (gaia llm-client) model-supports-thinking?) "gpt-oss:20b")
        (not ((@@ (gaia llm-client) model-supports-thinking?) "gpt-4o"))))
+
+(test-equal "qwen3 thinking can be disabled through LiteLLM passthrough"
+  '(("think" . #f)
+    ("allowed_openai_params" . #("think")))
+  ((@@ (gaia llm-client) get-thinking-fields) "qwen3:4b" #f))
+
+(test-equal "qwen3 thinking level is preserved"
+  '(("think" . "high")
+    ("allowed_openai_params" . #("think")))
+  ((@@ (gaia llm-client) get-thinking-fields) "qwen3:4b" "high"))
+
+(test-assert "thinking boolean aliases are normalized"
+  (and (eq? (normalize-thinking-setting "true") #t)
+       (eq? (normalize-thinking-setting "false") #f)
+       (eq? (normalize-thinking-setting "none") #f)
+       (equal? (normalize-thinking-setting "HIGH") "high")
+       (eq? (normalize-thinking-setting "turbo") 'invalid)))
 
 ;; 6. Test stream filter process-buffer! edge cases
 (test-assert "make-stream-filter process-buffer!"

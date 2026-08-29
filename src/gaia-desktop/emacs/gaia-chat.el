@@ -36,6 +36,61 @@
 (defvar-local gaia-chat--code-executed nil
   "Non-nil if code was executed during the current request cycle.")
 
+(defvar-local gaia-chat--model nil
+  "Active model reported by the GAIA server for this chat buffer.")
+
+(defvar-local gaia-chat--thinking-mode nil
+  "Active thinking mode reported by the GAIA server for this chat buffer.")
+
+(defvar-local gaia-chat--last-enabled-thinking "on"
+  "Last enabled thinking mode, restored after toggling thinking back on.")
+
+(defun gaia-chat--model-supports-thinking-p (model)
+  "Return non-nil when MODEL is recognized as supporting thinking."
+  (when model
+    (let ((name (downcase model)))
+      (or (string-match-p "think" name)
+          (string-match-p "r1" name)
+          (string-match-p "qwen3" name)
+          (string-match-p "gpt-oss" name)
+          (string-match-p "gemma4" name)
+          (string-match-p "reasoning" name)
+          (string-match-p "gemini" name)
+          (string-match-p "claude" name)))))
+
+(defun gaia-chat--mode-line-info ()
+  "Build the GAIA session information shown in the mode line."
+  (let* ((connection-state (cond
+                            (gaia-chat--active-request "running")
+                            ((gaia-connected-p) "ready")
+                            (t "offline")))
+         (thinking (when (gaia-chat--model-supports-thinking-p gaia-chat--model)
+                     (format " think:%s" (or gaia-chat--thinking-mode "?")))))
+    (format "  [session:%s model:%s%s %s]"
+            (or gaia-chat--session-id "?")
+            (or gaia-chat--model "?")
+            (or thinking "")
+            connection-state)))
+
+(defun gaia-chat--refresh-mode-line ()
+  "Refresh mode-line state in the current GAIA chat buffer."
+  (force-mode-line-update t))
+
+(defun gaia-chat--canonical-thinking-state (state)
+  "Return the canonical display spelling for thinking STATE."
+  (cond
+   ((member state '("off" "false")) "off")
+   ((member state '("on" "true")) "on")
+   (t state)))
+
+(defun gaia-chat--record-thinking-state (state)
+  "Record thinking STATE and remember it when it is enabled."
+  (let ((canonical (gaia-chat--canonical-thinking-state state)))
+    (setq gaia-chat--thinking-mode canonical)
+    (when (and canonical (not (string= canonical "off")))
+      (setq gaia-chat--last-enabled-thinking canonical))
+    (gaia-chat--refresh-mode-line)))
+
 (defvar gaia-chat-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c C-c") #'gaia-chat-send)
@@ -52,6 +107,12 @@
 (define-derived-mode gaia-mode org-mode "GAIA Chat"
   "Major mode for GAIA interactive buffers, derived from Org-mode."
   (setq-local gaia-chat--stream-state nil)
+  (setq-local gaia-chat--model nil)
+  (setq-local gaia-chat--thinking-mode nil)
+  (setq-local gaia-chat--last-enabled-thinking "on")
+  (setq-local mode-line-format
+              (append '((:eval (gaia-chat--mode-line-info))) mode-line-format))
+  (add-hook 'gaia-connection-on-close-hooks #'gaia-chat--refresh-mode-line nil t)
   ;; Enable word wrapping and prevent truncation (even in split/partial-width windows)
   (setq-local truncate-lines nil)
   (setq-local word-wrap t)
@@ -155,10 +216,12 @@ legacy investigation processor are opt-in commands."
                 (gaia-connect)
                 ;; Send session command immediately
                 (gaia-send `(session ,gaia-chat--session-id ,(expand-file-name default-directory)))
+                (gaia-chat--request-server-info)
                 ;; Accept output to let socket process the queue
                 (accept-process-output gaia-connection-process 0.1))
               ;; Send command
               (setq gaia-chat--active-request t)
+              (gaia-chat--refresh-mode-line)
               (setq gaia-chat--code-executed nil)
               (gaia-send (gaia-chat--input-message input))
               (setq gaia-chat--stream-state nil)
@@ -188,6 +251,10 @@ legacy investigation processor are opt-in commands."
 (defvar gaia-chat--pending-thinking nil
   "Stash for active thinking mode retrieved from server.")
 
+(defconst gaia-chat-thinking-states
+  '("off" "on" "false" "true" "low" "medium" "high" "max")
+  "Thinking modes accepted by the GAIA server.")
+
 (defun gaia-chat-switch-session ()
   "Switch to another session ID by listing server sessions."
   (interactive)
@@ -215,6 +282,7 @@ legacy investigation processor are opt-in commands."
               (unless (gaia-connected-p)
                 (gaia-connect))
               (gaia-send `(session ,chosen ,(expand-file-name default-directory)))
+              (gaia-chat--request-server-info)
               (gaia-send '(get-history))
               (message "Restored session %s" chosen))))))))
 
@@ -224,8 +292,14 @@ legacy investigation processor are opt-in commands."
     (gaia-connect)
     ;; Send session command immediately
     (gaia-send `(session ,gaia-chat--session-id ,(expand-file-name default-directory)))
+    (gaia-chat--request-server-info)
     ;; Accept output to let socket process the queue
     (accept-process-output gaia-connection-process 0.1)))
+
+(defun gaia-chat--request-server-info ()
+  "Request model and thinking state for the current chat session."
+  (gaia-send '(get-model))
+  (gaia-send '(get-thinking)))
 
 (defvar gaia-chat--pending-config nil
   "Stash for synchronous config operation results.")
@@ -273,21 +347,27 @@ legacy investigation processor are opt-in commands."
   (if (eq gaia-chat--pending-thinking 'waiting)
       (error "Failed to retrieve thinking mode from server")
     (let* ((current-state gaia-chat--pending-thinking)
-           (new-state (if (string= current-state "on") "off" "on")))
-      (gaia-chat--send-config-cmd `(set-thinking ,new-state)))))
+           (canonical (gaia-chat--canonical-thinking-state current-state))
+           (new-state (if (string= canonical "off")
+                          gaia-chat--last-enabled-thinking
+                        "off")))
+      (gaia-chat--send-config-cmd `(set-thinking ,new-state))
+      (gaia-chat--record-thinking-state new-state))))
 
 (defun gaia-chat-set-thinking (state)
-  "Set model thinking mode to STATE (on or off) on the GAIA server."
+  "Set model thinking mode to STATE on the GAIA server.
+STATE may enable or disable thinking, or select an Ollama effort level."
   (interactive
    (progn
      (unless (derived-mode-p 'gaia-mode)
        (user-error "This command can only be used in a GAIA Chat buffer"))
-     (list (completing-read "Set model thinking mode: " '("on" "off") nil t))))
+     (list (completing-read "Set model thinking mode: " gaia-chat-thinking-states nil t))))
   (unless (derived-mode-p 'gaia-mode)
     (user-error "This command can only be used in a GAIA Chat buffer"))
-  (if (not (member state '("on" "off")))
-      (error "Invalid state: %s. Must be 'on' or 'off'" state)
-    (gaia-chat--send-config-cmd `(set-thinking ,state))))
+  (if (not (member state gaia-chat-thinking-states))
+      (error "Invalid thinking mode: %s" state)
+    (gaia-chat--send-config-cmd `(set-thinking ,state))
+    (gaia-chat--record-thinking-state state)))
 
 (defun gaia-chat-check-thinking ()
   "Check the current model thinking mode on the GAIA server."
@@ -309,13 +389,30 @@ legacy investigation processor are opt-in commands."
 (defun gaia-chat--on-thinking-info (state)
   "Callback when thinking mode is received from server."
   (setq gaia-chat--pending-thinking state)
+  (gaia-chat--record-thinking-state state)
   (message "GAIA thinking mode is %s" state))
 
 (defvar gaia-chat--pending-models nil
   "Stash for active models list retrieved from server.")
 
+(defun gaia-chat-set-model (model)
+  "Set MODEL as the active model for the current GAIA chat session."
+  (interactive
+   (progn
+     (unless (derived-mode-p 'gaia-mode)
+       (user-error "This command can only be used in a GAIA Chat buffer"))
+     (list (read-string "Set GAIA model: " gaia-chat--model))))
+  (unless (derived-mode-p 'gaia-mode)
+    (user-error "This command can only be used in a GAIA Chat buffer"))
+  (unless (and (stringp model) (not (string-empty-p (string-trim model))))
+    (user-error "Model name cannot be empty"))
+  (let ((model-name (string-trim model)))
+    (gaia-chat--send-config-cmd `(set-model ,model-name))
+    (setq gaia-chat--model model-name)
+    (gaia-chat--refresh-mode-line)))
+
 (defun gaia-chat-switch-model ()
-  "Switch the active model on the GAIA server for this session."
+  "Select the active model from models advertised by the GAIA server."
   (interactive)
   (unless (derived-mode-p 'gaia-mode)
     (user-error "This command can only be used in a GAIA Chat buffer"))
@@ -332,7 +429,12 @@ legacy investigation processor are opt-in commands."
     (let* ((models gaia-chat--pending-models)
            (chosen (completing-read "Select model: " models nil t)))
       (when (and chosen (not (string-empty-p chosen)))
-        (gaia-chat--send-config-cmd `(set-model ,chosen))))))
+        (gaia-chat-set-model chosen)))))
+
+(defun gaia-chat--on-model-info (model)
+  "Record the active MODEL reported by the GAIA server."
+  (setq gaia-chat--model model)
+  (gaia-chat--refresh-mode-line))
 
 (defun gaia-chat--on-models-list (models)
   "Callback when list of models is received."
@@ -512,9 +614,12 @@ legacy investigation processor are opt-in commands."
   (with-current-buffer (gaia-chat-buffer)
     (let ((inhibit-read-only t))
       (setq gaia-chat--active-request nil)
+      (gaia-chat--refresh-mode-line)
       (setq gaia-chat--stream-state nil)
       (setq gaia-chat--code-executed nil)
       (gaia-chat--insert-prompt)
+      ;; Also catches model/thinking changes made through typed slash commands.
+      (gaia-chat--request-server-info)
       (gaia-chat--scroll-to-bottom)
       (pop-to-buffer (current-buffer) '((display-buffer-reuse-window display-buffer-same-window))))))
 
@@ -523,6 +628,7 @@ legacy investigation processor are opt-in commands."
   (with-current-buffer (gaia-chat-buffer)
     (let ((inhibit-read-only t))
       (setq gaia-chat--active-request nil)
+      (gaia-chat--refresh-mode-line)
       (goto-char (point-max))
       (when (eq gaia-chat--stream-state 'thought)
         (insert "\n#+END_QUOTE\n\n"))
@@ -554,6 +660,7 @@ legacy investigation processor are opt-in commands."
   (with-current-buffer (gaia-chat-buffer)
     (let ((inhibit-read-only t))
       (setq gaia-chat--active-request nil)
+      (gaia-chat--refresh-mode-line)
       (goto-char (point-max))
       (insert "\n*** Server Error\n" err "\n")
       (setq gaia-chat--stream-state nil)
@@ -610,6 +717,7 @@ legacy investigation processor are opt-in commands."
 (gaia-connection-register-handler 'repl-private-result #'gaia-chat--on-repl-private-result)
 (gaia-connection-register-handler 'repl-private-result-error #'gaia-chat--on-repl-private-result-error)
 (gaia-connection-register-handler 'thinking-info #'gaia-chat--on-thinking-info)
+(gaia-connection-register-handler 'model-info #'gaia-chat--on-model-info)
 (gaia-connection-register-handler 'models-list #'gaia-chat--on-models-list)
 (gaia-connection-register-handler 'cognitive-events #'gaia-chat--on-cognitive-events)
 (gaia-connection-register-handler 'cognitive-state #'gaia-chat--on-cognitive-state)
