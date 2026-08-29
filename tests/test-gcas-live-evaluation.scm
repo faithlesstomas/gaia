@@ -2,6 +2,7 @@
 
 (use-modules (srfi srfi-1)
              (srfi srfi-64)
+             (gaia cognitive-bus)
              (gaia gcas-evaluation)
              (gaia utils))
 
@@ -90,9 +91,42 @@
     (and (vector? (assoc-ref decoded "cells"))
          (= (vector-length (assoc-ref decoded "cells")) 4))))
 
-(test-equal "both model identifiers reach the injected adapter"
-  '("model-a" "model-b")
-  (sort (delete-duplicates seen-models string=?) string<?))
+(test-assert "evaluation observability reports progress, GCAS events and processor routing"
+  (let ((observations '()) (event-traces '()) (processor-traces '()))
+    (let ((observed-results
+           (run-evaluation-matrix
+            (list (car offline-tasks)) '("observed-model") 1
+            mock-generate mock-execute-factory
+            #:observer
+            (lambda (type payload)
+              (set! observations (cons type observations)))
+            #:trace-sink-factory
+            (lambda (run-id)
+              (lambda (session event)
+                (set! event-traces (cons (event-type event) event-traces))))
+            #:diagnostic-sink-factory
+            (lambda (run-id)
+              (lambda (session type payload)
+                (set! processor-traces (cons type processor-traces)))))))
+      (and (assoc-ref (car observed-results) "passed")
+           (every (lambda (type) (memq type observations))
+                  '(CaseStarted ModelCallStarted ModelCallCompleted
+                    ExecutionStarted ExecutionCompleted CaseCompleted))
+           (memq 'WorkspaceBroadcast event-traces)
+           (memq 'ProcessorReceived processor-traces)
+           (memq 'ProcessorReturned processor-traces)))))
+
+(test-assert "diagnostic observer failures cannot change evaluation outcome"
+  (assoc-ref
+   (run-evaluation-case
+    (car offline-tasks) "observer-failure" 1
+    mock-generate (mock-execute-factory "observer-failure")
+    #:observer (lambda args (error "diagnostic observer failed")))
+   "passed"))
+
+(test-assert "both matrix model identifiers reach the injected adapter"
+  (every (lambda (model) (member model seen-models))
+         '("model-a" "model-b")))
 
 (test-assert "summary is separated by model and includes usage"
   (and (= (length offline-summary) 2)

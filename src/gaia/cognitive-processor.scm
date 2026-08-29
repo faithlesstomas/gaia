@@ -87,6 +87,11 @@ the bus; valid returned proposals become candidates, never direct broadcasts."
          (bus-subscribe
           (session-bus session) subscription
           (lambda (event)
+            (session-diagnose!
+             session 'ProcessorReceived
+             `((processor . ,(processor-id processor))
+               (event-id . ,(event-id event))
+               (event-type . ,(event-type event))))
             (let ((proposals
                    (catch #t
                      (lambda () ((processor-handler processor) event))
@@ -100,6 +105,17 @@ the bus; valid returned proposals become candidates, never direct broadcasts."
                           (details . ,(format #f "~s" args)))
                         #:origin 'CONTROL)
                        '()))))
+              (session-diagnose!
+               session 'ProcessorReturned
+               `((processor . ,(processor-id processor))
+                 (event-id . ,(event-id event))
+                 (event-type . ,(event-type event))
+                 (proposal-count . ,(length proposals))
+                 (proposals . ,(map (lambda (proposal)
+                                      (let ((co (proposal-object proposal)))
+                                        `((id . ,(co-id co))
+                                          (type . ,(co-type co)))))
+                                    proposals))))
               (for-each (lambda (proposal)
                           (submit-processor-proposal! session processor proposal))
                         proposals))

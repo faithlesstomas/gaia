@@ -17,6 +17,7 @@
   #:use-module (gaia cognitive-memory)
   #:use-module (gaia cognitive-state)
   #:use-module (gaia cognitive-bus)
+  #:use-module (gaia cognitive-trace)
   #:use-module (gaia workspace)
   #:use-module (gaia goal-verifier)
   #:use-module (gaia production-processors)
@@ -62,45 +63,8 @@
     (verification-status . ,(co-verification-status co))
     (relations . ,(co-relations co))))
 
-(define (trace-preview value)
-  (let* ((text (format #f "~s" value))
-         (single-line
-          (string-map (lambda (char)
-                        (if (or (char=? char #\newline) (char=? char #\return))
-                            #\space char))
-                      text)))
-    (if (> (string-length single-line) 240)
-        (string-append (substring single-line 0 240) "...")
-        single-line)))
-
-(define (make-cognitive-trace-sink session-id)
-  "Return a structured server logger for every durable cognitive event."
-  (lambda (session event)
-    (let* ((payload (event-payload event))
-           (workspace (session-workspace session))
-           (process (session-current-process session))
-           (control (if process (process-control process) (session-control session)))
-           (payload-summary
-            (if (cognitive-object? payload)
-                (format #f
-                        "co={id=~a type=~a provenance=~a epistemic=~a verification=~a relations=~s content=~a}"
-                        (co-id payload) (co-type payload) (co-provenance payload)
-                        (co-epistemic-status payload) (co-verification-status payload)
-                        (co-relations payload) (trace-preview (co-content payload)))
-                (format #f "payload=~a" (trace-preview payload)))))
-      (gaia-log
-       (format #f
-               "[GCAS][~a] event=~a origin=~a ~a process={id=~a active=~a outcome=~a} control={transitions=~a progress=~a failures=~a termination=~a} workspace={pending=~s active=~s}"
-               session-id (event-type event) (event-origin event) payload-summary
-               (and process (process-id process))
-               (and process (process-active? process))
-               (and process (process-outcome process))
-               (control-transition-count control)
-               (control-progress-count control)
-               (control-failure-count control)
-               (control-termination-reason control)
-               (map co-id (workspace-candidates workspace))
-               (map co-id (workspace-active workspace)))))))
+(define (make-server-cognitive-trace-sink session-id)
+  (make-cognitive-trace-sink session-id gaia-log))
 
 (define (cognitive-status-summary cognitive-session)
   (let* ((process (session-current-process cognitive-session))
@@ -129,7 +93,7 @@
                       (memory-objects (session-memory cognitive-session)))))))
 
 ;; Session Orchestrator Actor
-(define-actor (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model thinking #:optional (workspace-dir #f) (cognitive-session (make-cognitive-session #:memory-path (string-append "sessions/" session-id ".gcas-memory.scm") #:state-path (string-append "sessions/" session-id ".gcas-state.scm") #:trace-sink (make-cognitive-trace-sink session-id))))
+(define-actor (^session-orchestrator bcom session-id client-socket channel permission-sink sandbox-actor agent-actor llm-client history model thinking #:optional (workspace-dir #f) (cognitive-session (make-cognitive-session #:memory-path (string-append "sessions/" session-id ".gcas-memory.scm") #:state-path (string-append "sessions/" session-id ".gcas-state.scm") #:trace-sink (make-server-cognitive-trace-sink session-id))))
   #:self self
   (methods
    [(update-history new-history)
@@ -361,7 +325,7 @@
               (new-sb-actor (spawn ^repl-sandbox session-id event-sink permission-sink '() workspace-dir))
               (new-agent-actor (spawn ^agent-actor session-id new-sb-actor llm-client event-sink permission-sink)))
          (send-event client-socket '(final "Environment and history cleared."))
-         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client '() model thinking workspace-dir (make-cognitive-session #:memory-path (string-append "sessions/" session-id ".gcas-memory.scm") #:state-path (string-append "sessions/" session-id ".gcas-state.scm") #:restore? #f #:trace-sink (make-cognitive-trace-sink session-id))) 'ok)))
+         (bcom (^session-orchestrator bcom session-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client '() model thinking workspace-dir (make-cognitive-session #:memory-path (string-append "sessions/" session-id ".gcas-memory.scm") #:state-path (string-append "sessions/" session-id ".gcas-state.scm") #:restore? #f #:trace-sink (make-server-cognitive-trace-sink session-id))) 'ok)))
 
       (('get-model)
        (send-event client-socket `(model-info ,model)))
@@ -448,7 +412,7 @@
                       (new-agent-actor (spawn ^agent-actor new-id new-sb-actor llm-client event-sink permission-sink)))
                  (with-output-to-file ".last_session" (lambda () (display new-id)))
                  (send-event client-socket `(final ,(string-append "Session switched to: " new-id)))
-                 (bcom (^session-orchestrator bcom new-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client new-history model thinking new-ws (make-cognitive-session #:memory-path (string-append "sessions/" new-id ".gcas-memory.scm") #:state-path (string-append "sessions/" new-id ".gcas-state.scm") #:trace-sink (make-cognitive-trace-sink new-id))) 'ok))))))
+                 (bcom (^session-orchestrator bcom new-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client new-history model thinking new-ws (make-cognitive-session #:memory-path (string-append "sessions/" new-id ".gcas-memory.scm") #:state-path (string-append "sessions/" new-id ".gcas-state.scm") #:trace-sink (make-server-cognitive-trace-sink new-id))) 'ok))))))
 
       (('list-sessions)
        (let ((sessions (if (file-exists? "sessions")

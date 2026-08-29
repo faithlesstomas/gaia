@@ -114,6 +114,66 @@ after explicit operator approval for that run. Registering several aliases in
 LiteLLM is not permission to load them; the benchmark sends requests to exactly
 one model. Offline tests never contact Ollama or LiteLLM.
 
+### Live observability
+
+Long evaluations can expose bounded, non-semantic diagnostics without changing
+the GCAS event log or benchmark trajectory. `GAIA_EVAL_VERBOSE` accepts four
+levels:
+
+- `0` keeps the final per-run, cell, summary, and readiness output;
+- `1` adds matrix progress, model-call start/end, a waiting heartbeat, Action
+  execution, and an immediate result for every completed case;
+- `2` additionally prints every durable GCAS event with its CO preview, Control
+  counters, and Global Workspace pending/active identifiers;
+- `3` additionally prints complete prompts, model responses, Actions, Results,
+  and actual processor receive/return routing. This level may expose sensitive
+  prompt or memory content and should be stored accordingly.
+
+The supporting controls are:
+
+```sh
+GAIA_EVAL_VERBOSE=2                    # 0..3
+GAIA_EVAL_HEARTBEAT_SECONDS=10        # positive integer
+GAIA_EVAL_PREVIEW_CHARS=240           # level-1/2 console preview bound
+GAIA_EVAL_TRACE_OUTPUT=/tmp/gcas.jsonl # flushed after every diagnostic
+```
+
+The JSONL trace contains every enabled diagnostic and embeds the complete result
+of each finished case. It therefore preserves completed work when the outer
+command is interrupted before the final JSON report is written. Verbosity is an
+observer only: callback failures are isolated, processor diagnostics are not
+stored in Cognitive State or published on the Bus, and enabling logging must not
+change readiness metrics.
+
+The evaluation runner calls LiteLLM directly; it does not pass through the GAIA
+headless server and therefore does not produce `gaia-server.log`. When LiteLLM
+was started with `make llm-server`, its independent process log can be followed
+in another terminal with:
+
+```sh
+make llm-server-logs
+```
+
+Readiness continues to use non-streaming inference so verbosity cannot change
+the measured transport path or token accounting. The heartbeat reports that a
+request is still pending, while full model output appears after the endpoint
+returns.
+
+For example, a fully observable smoke test is:
+
+```sh
+GAIA_EVAL_MODELS='qwen3-4b-eval' \
+GAIA_EVAL_MODEL_PARAMETERS_B=4 \
+GAIA_EVAL_RESOURCE_APPROVED=1 \
+GAIA_EVAL_TASKS='arithmetic-42' \
+GAIA_EVAL_REPEATS=1 \
+GAIA_EVAL_VERBOSE=3 \
+GAIA_EVAL_HEARTBEAT_SECONDS=10 \
+GAIA_EVAL_TRACE_OUTPUT=/tmp/gcas-qwen3-smoke.jsonl \
+GAIA_EVAL_OUTPUT=/tmp/gcas-qwen3-smoke.json \
+make gcas-live-eval
+```
+
 The production Action adapter accepts `scheme` fences as a normalization alias
 for the contract's preferred `repl` fence. This is intentionally scoped to GCAS:
 the legacy notebook extractor remains strict, and normalized Actions still pass

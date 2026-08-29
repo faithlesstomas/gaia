@@ -174,8 +174,16 @@ An empty IDS list selects the complete corpus."
 (define (evaluation-relation-ref co key)
   (assoc-ref (co-relations co) key))
 
+(define (notify-evaluation-observer observer type payload)
+  "Deliver a non-semantic evaluation diagnostic; observer failure is isolated."
+  (when observer
+    (catch #t
+      (lambda () (observer type payload))
+      (lambda _ #f))))
+
 (define* (run-evaluation-case task model repetition generate execute
-                              #:key (run-id #f))
+                              #:key (run-id #f) (observer #f)
+                              (trace-sink #f) (diagnostic-sink #f))
   "Run one TASK/MODEL/REPETITION through the production GCAS processor.
 
 GENERATE receives MODEL, RUN-ID, cognitive PROMPT, SUCCESS and FAILURE.
@@ -185,7 +193,10 @@ provider- and runtime-agnostic."
   (let* ((case-id (or run-id
                       (format #f "eval-~a-~a-~a"
                               model (evaluation-task-id task) repetition)))
-         (session (make-cognitive-session #:workspace-capacity 8 #:restore? #f))
+         (session (make-cognitive-session
+                   #:workspace-capacity 8 #:restore? #f
+                   #:trace-sink trace-sink
+                   #:diagnostic-sink diagnostic-sink))
          (model-calls 0)
          (execution-calls 0)
          (prompt-tokens 0)
@@ -208,26 +219,50 @@ provider- and runtime-agnostic."
            #:generate
            (lambda (context succeed fail)
              (set! model-calls (+ model-calls 1))
-             (catch #t
-               (lambda ()
-                 (generate
-                  model case-id context
-                  (lambda* (response #:optional (metadata '()))
-                    (set! responses (cons response responses))
-                    (set! prompt-tokens
-                          (+ prompt-tokens (metadata-ref metadata 'prompt_tokens)))
-                    (set! completion-tokens
-                          (+ completion-tokens (metadata-ref metadata 'completion_tokens)))
-                    (set! total-tokens
-                          (+ total-tokens (metadata-ref metadata 'total_tokens)))
-                    (succeed response))
-                  (lambda (message)
-                    (set! adapter-errors (cons (format #f "~a" message) adapter-errors))
-                    (fail (format #f "~a" message)))))
-               (lambda (key . args)
-                 (let ((message (format #f "~a ~s" key args)))
-                   (set! adapter-errors (cons message adapter-errors))
-                   (fail message)))))
+             (let ((call-number model-calls)
+                   (call-started (get-internal-real-time)))
+               (notify-evaluation-observer
+                observer 'ModelCallStarted
+                `((run-id . ,case-id) (model . ,model)
+                  (call . ,call-number) (context . ,context)))
+               (catch #t
+                 (lambda ()
+                   (generate
+                    model case-id context
+                    (lambda* (response #:optional (metadata '()))
+                      (set! responses (cons response responses))
+                      (set! prompt-tokens
+                            (+ prompt-tokens (metadata-ref metadata 'prompt_tokens)))
+                      (set! completion-tokens
+                            (+ completion-tokens (metadata-ref metadata 'completion_tokens)))
+                      (set! total-tokens
+                            (+ total-tokens (metadata-ref metadata 'total_tokens)))
+                      (notify-evaluation-observer
+                       observer 'ModelCallCompleted
+                       `((run-id . ,case-id) (model . ,model)
+                         (call . ,call-number) (response . ,response)
+                         (metadata . ,metadata)
+                         (latency-ms . ,(* 1000.0
+                                          (/ (- (get-internal-real-time)
+                                                call-started)
+                                             internal-time-units-per-second)))))
+                      (succeed response))
+                    (lambda (message)
+                      (set! adapter-errors
+                            (cons (format #f "~a" message) adapter-errors))
+                      (notify-evaluation-observer
+                       observer 'ModelCallFailed
+                       `((run-id . ,case-id) (model . ,model)
+                         (call . ,call-number) (error . ,(format #f "~a" message))))
+                      (fail (format #f "~a" message)))))
+                 (lambda (key . args)
+                   (let ((message (format #f "~a ~s" key args)))
+                     (set! adapter-errors (cons message adapter-errors))
+                     (notify-evaluation-observer
+                      observer 'ModelCallFailed
+                      `((run-id . ,case-id) (model . ,model)
+                        (call . ,call-number) (error . ,message)))
+                     (fail message))))))
            #:extract-action
            (lambda (response)
              ;; The caller supplies model text, while the production extractor
@@ -237,11 +272,34 @@ provider- and runtime-agnostic."
            (lambda (code succeed fail)
              (set! execution-calls (+ execution-calls 1))
              (set! actions (cons code actions))
+             (notify-evaluation-observer
+              observer 'ExecutionStarted
+              `((run-id . ,case-id) (call . ,execution-calls) (action . ,code)))
              (catch #t
-               (lambda () (execute code succeed fail))
+               (lambda ()
+                 (execute
+                  code
+                  (lambda (result)
+                    (notify-evaluation-observer
+                     observer 'ExecutionCompleted
+                     `((run-id . ,case-id) (call . ,execution-calls)
+                       (action . ,code) (result . ,result)))
+                    (succeed result))
+                  (lambda (type message)
+                    (notify-evaluation-observer
+                     observer 'ExecutionFailed
+                     `((run-id . ,case-id) (call . ,execution-calls)
+                       (action . ,code) (error-type . ,type)
+                       (error . ,message)))
+                    (fail type message))))
                (lambda (key . args)
                  (let ((message (format #f "~a ~s" key args)))
                    (set! adapter-errors (cons message adapter-errors))
+                   (notify-evaluation-observer
+                    observer 'ExecutionFailed
+                    `((run-id . ,case-id) (call . ,execution-calls)
+                      (action . ,code) (error-type . runtime)
+                      (error . ,message)))
                    (fail 'runtime message)))))
            #:on-finished
            (lambda (outcome final-text hypothesis-text)
@@ -277,7 +335,8 @@ provider- and runtime-agnostic."
                  (= (length finish-records) 1)
                  (eq? (caar finish-records) outcome)))
            (passed? (and lifecycle-ok? (eq? outcome 'COMPLETED))))
-      `(("task" . ,(symbol->string (evaluation-task-id task)))
+      (let ((result
+             `(("task" . ,(symbol->string (evaluation-task-id task)))
         ("category" . ,(symbol->string (evaluation-task-category task)))
         ("model" . ,model)
         ("repetition" . ,repetition)
@@ -303,27 +362,50 @@ provider- and runtime-agnostic."
         ("finish_callbacks" . ,(length finish-records))
         ("responses" . ,(list->vector (reverse responses)))
         ("actions" . ,(list->vector (reverse actions)))
-        ("adapter_errors" . ,(list->vector (reverse adapter-errors)))))))
+               ("adapter_errors" . ,(list->vector (reverse adapter-errors))))))
+        result))))
 
-(define* (run-evaluation-matrix tasks models repeats generate execute-factory)
+(define* (run-evaluation-matrix tasks models repeats generate execute-factory
+                                #:key (observer #f)
+                                (trace-sink-factory #f)
+                                (diagnostic-sink-factory #f))
   "Run every TASK x MODEL x repetition combination.
 EXECUTE-FACTORY receives a unique run id and returns a fresh execution adapter."
   (unless (and (pair? tasks) (pair? models) (integer? repeats) (> repeats 0))
     (error "Evaluation matrix requires tasks, models and a positive repeat count"))
-  (append-map
-   (lambda (model)
-     (append-map
-      (lambda (task)
-        (map
-         (lambda (repetition)
-           (let ((run-id (format #f "eval-~a-~a-~a"
-                                 model (evaluation-task-id task) repetition)))
-             (run-evaluation-case
-              task model repetition generate (execute-factory run-id)
-              #:run-id run-id)))
-         (iota repeats 1)))
-      tasks))
-   models))
+  (let ((index 0)
+        (total (* (length tasks) (length models) repeats)))
+    (append-map
+     (lambda (model)
+       (append-map
+        (lambda (task)
+          (map
+           (lambda (repetition)
+             (let ((run-id (format #f "eval-~a-~a-~a"
+                                   model (evaluation-task-id task) repetition)))
+               (set! index (+ index 1))
+               (notify-evaluation-observer
+                observer 'CaseStarted
+                `((run-id . ,run-id) (index . ,index) (total . ,total)
+                  (model . ,model) (task . ,(evaluation-task-id task))
+                  (repetition . ,repetition)))
+               (let ((result
+                      (run-evaluation-case
+                       task model repetition generate (execute-factory run-id)
+                       #:run-id run-id #:observer observer
+                       #:trace-sink (and trace-sink-factory
+                                          (trace-sink-factory run-id))
+                       #:diagnostic-sink
+                       (and diagnostic-sink-factory
+                            (diagnostic-sink-factory run-id)))))
+                 (notify-evaluation-observer
+                  observer 'CaseCompleted
+                  `((run-id . ,run-id) (index . ,index) (total . ,total)
+                    (result . ,result)))
+                 result)))
+           (iota repeats 1)))
+        tasks))
+     models)))
 
 (define (summarize-evaluation-results results)
   (map
