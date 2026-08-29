@@ -107,7 +107,7 @@
 
 (for-each
  (lambda (cell)
-   (format #t "CELL model=~a task=~a passed=~a/~a success=~,1f% first-pass=~a repair=~a/~a missing=~a failures=~a repeats=~a lifecycle-failures=~a\n"
+   (format #t "CELL model=~a task=~a passed=~a/~a success=~,1f% first-pass=~a repair=~a/~a missing=~a failures=~a repeated-actions=~a lifecycle-failures=~a\n"
            (assoc-ref cell "model")
            (assoc-ref cell "task")
            (assoc-ref cell "passed")
@@ -167,7 +167,7 @@
      ("resource_envelope" . (("one_model_only" . #t)
                               ("model_parameters_b" . ,model-parameters-b)
                               ("operator_approved" . ,resource-approved?)))
-     ("readiness" . ,readiness)
+     ("readiness" . ,(readiness-json-object readiness))
      ("system_prompt_source" . ,(if (getenv "GAIA_SYSTEM_PROMPT")
                                       "GAIA_SYSTEM_PROMPT"
                                       "GCAS_SYSTEM_PROMPT"))

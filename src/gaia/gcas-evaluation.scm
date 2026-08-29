@@ -22,7 +22,8 @@
             summarize-evaluation-cells
             validate-live-resource-policy
             run-interruption-readiness-check
-            evaluate-readiness))
+            evaluate-readiness
+            readiness-json-object))
 
 ;; Live evaluation tasks are deliberately independent from a model provider.
 ;; Their acceptance boundary consumes only the executed Action and Result COs.
@@ -437,6 +438,14 @@ hide a failing task."
       ("minimum_success_rate" . ,minimum-success-rate)
       ("interruption" . ,interruption)
       ("cells" . ,cell-gates))))
+
+(define (readiness-json-object readiness)
+  "Project a readiness result to guile-json's object/array representation."
+  (map (lambda (entry)
+         (if (string=? (car entry) "cells")
+             (cons "cells" (list->vector (cdr entry)))
+             entry))
+       readiness))
 
 (define (summarize-evaluation-cells results)
   "Aggregate the model x task cells without hiding task-specific failures."

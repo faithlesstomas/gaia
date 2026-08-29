@@ -2,7 +2,8 @@
 
 (use-modules (srfi srfi-1)
              (srfi srfi-64)
-             (gaia gcas-evaluation))
+             (gaia gcas-evaluation)
+             (gaia utils))
 
 (test-begin "gaia-gcas-live-evaluation")
 
@@ -79,6 +80,15 @@
                   (and (= (assoc-ref result "false_completions") 0)
                        (= (assoc-ref result "duplicate_executions") 0)))
                 offline-results))))
+
+(test-assert "readiness cells serialize as a JSON array"
+  (let* ((readiness
+          (evaluate-readiness offline-cells offline-results
+                              (run-interruption-readiness-check)))
+         (encoded (scm->json (readiness-json-object readiness)))
+         (decoded (json->scm encoded)))
+    (and (vector? (assoc-ref decoded "cells"))
+         (= (vector-length (assoc-ref decoded "cells")) 4))))
 
 (test-equal "both model identifiers reach the injected adapter"
   '("model-a" "model-b")
