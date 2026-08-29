@@ -24,6 +24,11 @@
          (parsed (and value (string->number value))))
     (if (and (integer? parsed) (> parsed 0)) parsed fallback)))
 
+(define (env-positive-number name)
+  (let* ((value (getenv name))
+         (parsed (and value (string->number value))))
+    (and (number? parsed) (> parsed 0) parsed)))
+
 (define (env-boolean name fallback)
   (let ((value (getenv name)))
     (if value
@@ -40,6 +45,15 @@
 (define repeats (env-positive-integer "GAIA_EVAL_REPEATS" 1))
 (define thinking? (and (env-boolean "GAIA_EVAL_THINKING" #f) #t))
 (define output-path (getenv "GAIA_EVAL_OUTPUT"))
+(define enforce-readiness? (and (env-boolean "GAIA_EVAL_ENFORCE_READINESS" #f) #t))
+(define minimum-repeats (env-positive-integer "GAIA_EVAL_MIN_REPEATS" 10))
+(define resource-approved? (and (env-boolean "GAIA_EVAL_RESOURCE_APPROVED" #f) #t))
+(define model-parameters-b (env-positive-number "GAIA_EVAL_MODEL_PARAMETERS_B"))
+
+;; Live inference is intentionally opt-in. Ollama may retain model weights, so
+;; a multi-model matrix can exhaust GPU/RAM even though runs are sequential.
+(define resource-envelope
+  (validate-live-resource-policy models resource-approved? model-parameters-b))
 
 (define (live-generate model run-id context succeed fail)
   (let* ((response (chat-with-llm run-id context model (get-gcas-system-prompt)
@@ -63,12 +77,19 @@
 
 (format #t "GCAS live evaluation: endpoint=~a models=~s tasks=~s repeats=~a thinking=~a\n"
         (get-config 'llm-url) models (map evaluation-task-id tasks) repeats thinking?)
+(format #t "Resource envelope: one-model-only=true parameters=~aB approved=~a\n"
+        model-parameters-b resource-approved?)
 (force-output)
 
 (define results
   (run-evaluation-matrix tasks models repeats live-generate make-live-executor))
 (define summary (summarize-evaluation-results results))
 (define cells (summarize-evaluation-cells results))
+(define interruption (run-interruption-readiness-check))
+(define readiness
+  (evaluate-readiness cells results interruption
+                      #:minimum-repeats minimum-repeats
+                      #:minimum-success-rate 80.0))
 
 (for-each
  (lambda (result)
@@ -115,6 +136,21 @@
            (assoc-ref item "latency_ms")))
  summary)
 
+(format #t "READINESS status=~a min-repeats=~a interruption=~a latency=~,3fms\n"
+        (assoc-ref readiness "status")
+        (assoc-ref readiness "minimum_repeats")
+        (assoc-ref interruption "passed")
+        (assoc-ref interruption "latency_ms"))
+(for-each
+ (lambda (cell)
+   (format #t "GATE model=~a task=~a ready=~a runs=~a success=~,1f% terminal=~,1f% false-completions=~a duplicate-exec=~a\n"
+           (assoc-ref cell "model") (assoc-ref cell "task")
+           (assoc-ref cell "ready") (assoc-ref cell "runs")
+           (assoc-ref cell "success_rate") (assoc-ref cell "terminal_rate")
+           (assoc-ref cell "false_completions")
+           (assoc-ref cell "duplicate_executions")))
+ (assoc-ref readiness "cells"))
+
 (when (and output-path (not (string-null? (string-trim-both output-path))))
   (write-json-file
    output-path
@@ -128,6 +164,10 @@
                                     tasks)))
      ("repeats" . ,repeats)
      ("thinking" . ,thinking?)
+     ("resource_envelope" . (("one_model_only" . #t)
+                              ("model_parameters_b" . ,model-parameters-b)
+                              ("operator_approved" . ,resource-approved?)))
+     ("readiness" . ,readiness)
      ("system_prompt_source" . ,(if (getenv "GAIA_SYSTEM_PROMPT")
                                       "GAIA_SYSTEM_PROMPT"
                                       "GCAS_SYSTEM_PROMPT"))
@@ -137,6 +177,7 @@
      ("results" . ,(list->vector results))))
   (format #t "Wrote JSON report to ~a\n" output-path))
 
-(exit (if (every (lambda (result) (assoc-ref result "lifecycle_ok")) results)
-          0
-          1))
+(exit (if (and (every (lambda (result) (assoc-ref result "lifecycle_ok")) results)
+               (or (not enforce-readiness?)
+                   (string=? (assoc-ref readiness "status") "READY")))
+          0 1))

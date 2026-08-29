@@ -277,6 +277,15 @@
 
 ;; --- 7. Test handle-client: permission-request and permission-response ---
 
+(test-assert "permission scopes are exact or directory-boundary scoped"
+  (let ((matches? (@@ (gaia server) operation-matches-scopes?)))
+    (and (matches? '(write-file "/tmp/gaia/a.txt" "x")
+                   '((directory . "/tmp/gaia")))
+         (not (matches? '(write-file "/tmp/gaia-escape/a.txt" "x")
+                        '((directory . "/tmp/gaia"))))
+         (matches? '(delete-file "/tmp/x")
+                   '((always delete-file "/tmp/x"))))))
+
 (test-assert "handle-client: permission-request and permission-response flow"
   (let* ((got-permission-request #f)
          (got-eval-success #f)

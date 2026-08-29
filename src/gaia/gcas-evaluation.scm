@@ -19,10 +19,27 @@
             run-evaluation-case
             run-evaluation-matrix
             summarize-evaluation-results
-            summarize-evaluation-cells))
+            summarize-evaluation-cells
+            validate-live-resource-policy
+            run-interruption-readiness-check
+            evaluate-readiness))
 
 ;; Live evaluation tasks are deliberately independent from a model provider.
 ;; Their acceptance boundary consumes only the executed Action and Result COs.
+
+(define (validate-live-resource-policy models approved? model-parameters-b)
+  "Enforce the operator's local inference envelope before contacting an endpoint."
+  (unless (and (list? models) (= (length models) 1))
+    (error "Resource policy permits exactly one live-evaluation model" models))
+  (unless approved?
+    (error "Live evaluation requires explicit per-run operator approval"))
+  (unless (and (number? model-parameters-b) (> model-parameters-b 0))
+    (error "Live evaluation requires the model's actual parameter count"))
+  (when (> model-parameters-b 4.0)
+    (error "Live evaluation model exceeds the operator's 4B parameter limit"
+           (car models) model-parameters-b))
+  `((one-model-only . #t) (model . ,(car models))
+    (model-parameters-b . ,model-parameters-b) (operator-approved . #t)))
 
 (define* (make-datum-evaluation-task id category prompt expected
                                      #:key
@@ -273,6 +290,10 @@ provider- and runtime-agnostic."
         ("action_failures" . ,action-failures)
         ("verifier_conflicts" . ,(- (length conflicts) repeated-actions))
         ("repeated_actions" . ,repeated-actions)
+        ("duplicate_executions" .
+         ,(- (length actions) (length (delete-duplicates actions string=?))))
+        ("false_completions" .
+         ,(if (and (eq? outcome 'COMPLETED) (not passed?)) 1 0))
         ("prompt_tokens" . ,prompt-tokens)
         ("completion_tokens" . ,completion-tokens)
         ("total_tokens" . ,total-tokens)
@@ -335,6 +356,87 @@ EXECUTE-FACTORY receives a unique run id and returns a fresh execution adapter."
                             model-results))))))
    (delete-duplicates (map (lambda (result) (assoc-ref result "model")) results)
                       string=?)))
+
+(define* (run-interruption-readiness-check #:key (max-latency-ms 100.0))
+  "Exercise the real synchronous process interruption boundary and a late model
+callback.  This is model-free because interruption correctness must not depend
+on endpoint responsiveness."
+  (let ((session (make-cognitive-session #:workspace-capacity 2))
+        (late-success #f) (executions 0) (finishes '()))
+    (start-production-process!
+     session "Interrupt this readiness probe."
+     #:generate (lambda (prompt succeed fail) (set! late-success succeed))
+     #:extract-action extract-gcas-action
+     #:execute (lambda args (set! executions (+ executions 1)))
+     #:on-finished (lambda (outcome final-text hypothesis-text)
+                     (set! finishes (cons outcome finishes))))
+    (let ((started (get-internal-real-time)))
+      (session-request-interrupt! session)
+      (let ((latency (* 1000.0
+                        (/ (- (get-internal-real-time) started)
+                           internal-time-units-per-second))))
+        (when late-success (late-success "```repl\n42\n```"))
+        (let* ((terminals
+                (count (lambda (event)
+                         (memq (event-type event)
+                               '(GoalCompleted ProcessTerminated)))
+                       (state-events (session-state session))))
+               (passed (and (= terminals 1) (= (length finishes) 1)
+                            (eq? (car finishes) 'USER_INTERRUPTED)
+                            (= executions 0) (<= latency max-latency-ms))))
+          `(("passed" . ,passed) ("latency_ms" . ,latency)
+            ("max_latency_ms" . ,max-latency-ms)
+            ("terminal_events" . ,terminals)
+            ("finish_callbacks" . ,(length finishes))
+            ("post_terminal_executions" . ,executions)))))))
+
+(define* (evaluate-readiness cells results interruption
+                             #:key (minimum-repeats 10)
+                             (minimum-success-rate 80.0))
+  "Apply release thresholds per capability cell; aggregate averages cannot
+hide a failing task."
+  (let* ((cell-gates
+          (map
+           (lambda (cell)
+             (let* ((model (assoc-ref cell "model"))
+                    (task (assoc-ref cell "task"))
+                    (cell-results
+                     (filter (lambda (result)
+                               (and (string=? (assoc-ref result "model") model)
+                                    (string=? (assoc-ref result "task") task)))
+                             results))
+                    (false-completions
+                     (fold + 0 (map (lambda (result)
+                                      (assoc-ref result "false_completions"))
+                                    cell-results)))
+                    (duplicate-executions
+                     (fold + 0 (map (lambda (result)
+                                      (assoc-ref result "duplicate_executions"))
+                                    cell-results)))
+                    (ready (and (>= (assoc-ref cell "runs") minimum-repeats)
+                                (= (assoc-ref cell "lifecycle_failures") 0)
+                                (= false-completions 0)
+                                (= duplicate-executions 0)
+                                (>= (assoc-ref cell "success_rate")
+                                    minimum-success-rate))))
+               `(("model" . ,model) ("task" . ,task) ("ready" . ,ready)
+                 ("runs" . ,(assoc-ref cell "runs"))
+                 ("success_rate" . ,(assoc-ref cell "success_rate"))
+                 ("terminal_rate" .
+                  ,(* 100.0 (/ (- (assoc-ref cell "runs")
+                                  (assoc-ref cell "lifecycle_failures"))
+                               (assoc-ref cell "runs"))))
+                 ("false_completions" . ,false-completions)
+                 ("duplicate_executions" . ,duplicate-executions))))
+           cells))
+         (ready (and (pair? cell-gates)
+                     (every (lambda (cell) (assoc-ref cell "ready")) cell-gates)
+                     (assoc-ref interruption "passed"))))
+    `(("status" . ,(if ready "READY" "NOT_READY"))
+      ("minimum_repeats" . ,minimum-repeats)
+      ("minimum_success_rate" . ,minimum-success-rate)
+      ("interruption" . ,interruption)
+      ("cells" . ,cell-gates))))
 
 (define (summarize-evaluation-cells results)
   "Aggregate the model x task cells without hiding task-specific failures."

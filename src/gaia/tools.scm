@@ -28,6 +28,8 @@
             list-boots
             get-kernel-logs
             git-ls-files
+            run-command-argv
+            run-argv-in-sandbox
             run-in-sandbox
             guix-container-supported?
             read-files
@@ -92,6 +94,14 @@
          (output (read-string pipe)))
     (close-pipe pipe)
     (or output "")))
+
+(define (run-command-argv argv)
+  "Execute one already-parsed argv vector directly.  No argument is evaluated
+by a command shell."
+  (unless (and (pair? argv) (every string? argv)
+               (every (lambda (arg) (not (string-contains arg (string #\nul)))) argv))
+    (error "Command argv must be a non-empty list of strings" argv))
+  (apply run-cmd-with-output (car argv) (cdr argv)))
 
 (define (search-file pattern path)
   "Greps for pattern in file."
@@ -238,6 +248,23 @@
             ;; Local fallback since guix shell --container is restricted in this environment
             (run-cmd-with-output "bash" "-c" (string-append "cd " workspace-path " && " cmd))
             (error "Sandbox Error: guix shell --container is not supported in this environment, and local sandbox fallback is disabled.")))))
+
+(define (run-argv-in-sandbox argv)
+  "Execute parsed argv in the optional Guix container without reconstructing a
+shell command.  The fallback also passes argv directly to exec."
+  (unless (and (pair? argv) (every string? argv))
+    (error "Sandbox argv must be a non-empty list of strings" argv))
+  (let ((workspace-path (get-workspace-path)))
+    (if (guix-container-supported?)
+        (apply run-cmd-with-output
+               "guix" "shell" "--container"
+               (string-append "--share=" workspace-path "=/workspace")
+               "coreutils" "git" "findutils" "grep" "sed" "gawk" "texinfo" "guile"
+               "--" (car argv) (cdr argv))
+        ;; Parsed argv has no shell grammar to interpret.  Direct local exec is
+        ;; therefore the safe degraded mode; the legacy raw-shell fallback flag
+        ;; does not apply to this capability.
+        (run-command-argv argv))))
 
 (define (string-replace-substring str old new)
   (let ((len (string-length old)))

@@ -139,7 +139,12 @@
             (equal? expr approved-expr))
            (('directory . dir-prefix)
             (and (eq? (car expr) 'write-file)
-                 (string-prefix? dir-prefix (cadr expr))))
+                 (let* ((normalized (if (string-suffix? "/" dir-prefix)
+                                        dir-prefix
+                                        (string-append dir-prefix "/")))
+                        (path (cadr expr)))
+                   (or (string=? path dir-prefix)
+                       (string-prefix? normalized path)))))
            (_ #f)))
        scopes))
 

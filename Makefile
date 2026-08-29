@@ -46,6 +46,7 @@ test-emacs-client:
 
 gcas-conformance-scheme:
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-uncertainty.scm
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-command-policy.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-action-preflight.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-capability-registry.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-goal-verifier.scm
@@ -55,6 +56,7 @@ gcas-conformance-scheme:
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-production-processors.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-ncsi.scm
 	$(MAKE) gcas-eval
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-gcas-live-evaluation.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-server.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-actors.scm
 

@@ -6,6 +6,20 @@
 
 (test-begin "gaia-gcas-live-evaluation")
 
+(test-assert "live resource policy requires one approved model at or below 4B"
+  (and (equal? (assoc-ref (validate-live-resource-policy '("qwen3:4b") #t 4.0)
+                          'model)
+               "qwen3:4b")
+       (catch #t
+         (lambda () (validate-live-resource-policy '("a" "b") #t 1.0) #f)
+         (lambda _ #t))
+       (catch #t
+         (lambda () (validate-live-resource-policy '("qwen3:4b") #f 4.0) #f)
+         (lambda _ #t))
+       (catch #t
+         (lambda () (validate-live-resource-policy '("gemma4:e2b") #t 5.1) #f)
+         (lambda _ #t))))
+
 (define offline-tasks
   (list
    (make-datum-evaluation-task 'answer-a 'exact "Return 42." 42)
@@ -52,6 +66,19 @@
                 (= (assoc-ref result "terminal_events") 1)
                 (= (assoc-ref result "finish_callbacks") 1)))
          offline-results))
+
+(test-assert "readiness fails closed below repetitions and passes per capable cell"
+  (let* ((interruption (run-interruption-readiness-check))
+         (not-ready (evaluate-readiness offline-cells offline-results interruption))
+         (ready (evaluate-readiness offline-cells offline-results interruption
+                                    #:minimum-repeats 2)))
+    (and (assoc-ref interruption "passed")
+         (string=? (assoc-ref not-ready "status") "NOT_READY")
+         (string=? (assoc-ref ready "status") "READY")
+         (every (lambda (result)
+                  (and (= (assoc-ref result "false_completions") 0)
+                       (= (assoc-ref result "duplicate_executions") 0)))
+                offline-results))))
 
 (test-equal "both model identifiers reach the injected adapter"
   '("model-a" "model-b")

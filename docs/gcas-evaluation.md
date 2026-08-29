@@ -77,16 +77,24 @@ recursive factorial, and Fibonacci tasks. It performs no filesystem mutation
 and denies permission-gated sandbox capabilities. Configure the matrix with:
 
 ```sh
-# One model, one run of every task (defaults to GAIA_MODEL)
+# One explicitly approved model, one run of every task
+GAIA_EVAL_MODELS='qwen3:4b' \
+GAIA_EVAL_MODEL_PARAMETERS_B=4 \
+GAIA_EVAL_RESOURCE_APPROVED=1 \
 make gcas-live-eval
 
-# Multiple models and three repetitions per model/task cell
-GAIA_EVAL_MODELS='gemma4:e2b,another-model' \
+# One model and three repetitions per capability cell
+GAIA_EVAL_MODELS='qwen3:4b' \
+GAIA_EVAL_MODEL_PARAMETERS_B=4 \
+GAIA_EVAL_RESOURCE_APPROVED=1 \
 GAIA_EVAL_REPEATS=3 \
 make gcas-live-eval
 
 # A subset, explicit reasoning mode, and a machine-readable report
 GAIA_EVAL_TASKS='arithmetic-42,fibonacci-10' \
+GAIA_EVAL_MODELS='qwen3:4b' \
+GAIA_EVAL_MODEL_PARAMETERS_B=4 \
+GAIA_EVAL_RESOURCE_APPROVED=1 \
 GAIA_EVAL_THINKING=1 \
 GAIA_EVAL_OUTPUT=/tmp/gcas-live-eval.json \
 make gcas-live-eval
@@ -99,6 +107,12 @@ task names, repetitions, thinking mode, the complete effective system prompt,
 per-run trajectories,
 model/task cells, and per-model totals. Token counts remain zero when an endpoint
 does not return the OpenAI `usage` object.
+
+The runner refuses multiple models, models declared above 4B parameters, and
+all invocations without `GAIA_EVAL_RESOURCE_APPROVED=1`. This flag is set only
+after explicit operator approval for that run. Registering several aliases in
+LiteLLM is not permission to load them; the benchmark sends requests to exactly
+one model. Offline tests never contact Ollama or LiteLLM.
 
 The production Action adapter accepts `scheme` fences as a normalization alias
 for the contract's preferred `repl` fence. This is intentionally scoped to GCAS:

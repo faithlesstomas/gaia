@@ -19,6 +19,8 @@
             sandbox-initial-symbols
             backup-module
             restore-module!
+            parse-command-argv
+            command-argv-safe?
             SAFE-GUILE-EXPORTS
             CAPABILITY-NAMES))
 
@@ -64,23 +66,46 @@
         (error "Access Denied: Path outside workspace" path)
         expanded)))
 
-(define (safe-command-string? cmd)
-  "Checks if the command is a single command without shell operators or redirections."
-  (let ((forbidden-chars '(#\; #\& #\| #\` #\$ #\newline #\> #\<)))
-    (not (any (lambda (c) (string-index cmd c)) forbidden-chars))))
-
-(define (is-command-safe? cmd)
-  "Determines if a command is safe to run without user permission."
-  (and (safe-command-string? cmd)
-       (let* ((trimmed (string-trim-both cmd))
-              (parts (string-split trimmed #\space))
-              (first-word (if (null? parts) "" (car parts))))
+(define (parse-command-argv cmd)
+  "Parse a small shell-like quoting grammar into argv. Shell operators,
+expansion, redirection, control characters, and unterminated quotes fail
+closed; the result is suitable only for direct execution."
+  (and (string? cmd)
+       (let loop ((chars (string->list cmd)) (quote-state #f) (escaped? #f)
+                  (word '()) (argv '()))
          (cond
-          ((member first-word '("grep" "find" "sed" "awk" "info")) #t)
-          ((string=? first-word "git")
-           (let ((subcommand (if (and (pair? (cdr parts)) (not (string-null? (cadr parts)))) (cadr parts) "")))
-             (member subcommand '("status" "diff" "log" "ls-files"))))
-          (else #f)))))
+          ((null? chars)
+           (and (not quote-state) (not escaped?)
+                (let ((result (if (null? word) argv
+                                  (cons (list->string (reverse word)) argv))))
+                  (and (pair? result) (reverse result)))))
+          (escaped?
+           (loop (cdr chars) quote-state #f (cons (car chars) word) argv))
+          ((char=? (car chars) #\\)
+           (loop (cdr chars) quote-state #t word argv))
+          ((and (not quote-state) (char-whitespace? (car chars)))
+           (if (null? word)
+               (loop (cdr chars) quote-state #f word argv)
+               (loop (cdr chars) quote-state #f '()
+                     (cons (list->string (reverse word)) argv))))
+          ((memv (car chars) '(#\; #\& #\| #\` #\$ #\newline #\return #\> #\< #\nul))
+           #f)
+          ((memv (car chars) '(#\' #\"))
+           (cond
+            ((not quote-state) (loop (cdr chars) (car chars) #f word argv))
+            ((char=? quote-state (car chars)) (loop (cdr chars) #f #f word argv))
+            (else (loop (cdr chars) quote-state #f (cons (car chars) word) argv))))
+          (else (loop (cdr chars) quote-state #f (cons (car chars) word) argv))))))
+
+(define (command-argv-safe? argv)
+  "Policy over parsed argv, never over a textual prefix."
+  (and (pair? argv)
+       (cond
+        ((member (car argv) '("grep" "find" "sed" "awk" "info")) #t)
+        ((string=? (car argv) "git")
+         (and (pair? (cdr argv))
+              (member (cadr argv) '("status" "diff" "log" "ls-files"))))
+        (else #f))))
 
 ;; Whitelist of allowed primitives from (guile)
 (define SAFE-GUILE-EXPORTS
@@ -490,62 +515,37 @@
                   ;; Process Capability (process-cap)
                   (cons 'run-command
                         (lambda (cmd)
-                          (let ((is-safe? (is-command-safe? cmd)))
-                            (if is-safe?
-                                (catch #t
-                                  (lambda ()
-                                    (let ((res (run-in-sandbox cmd)))
-                                      (if (string-contains res "guix shell:")
-                                          (error "Guix container failed")
-                                          res)))
-                                  (lambda _
-                                    (let* ((pipe (open-pipe (string-append cmd " 2>&1") OPEN_READ))
-                                           (out (read-string pipe)))
-                                      (close-pipe pipe)
-                                      out)))
-                                (if perm-handler
-                                    (begin
-                                      (handle-perm-response (perm-handler `(run-command ,cmd)))
-                                      (catch #t
-                                        (lambda ()
-                                          (let ((res (run-in-sandbox cmd)))
-                                            (if (string-contains res "guix shell:")
-                                                (error "Guix container failed")
-                                                res)))
-                                        (lambda _
-                                          (let* ((pipe (open-pipe (string-append cmd " 2>&1") OPEN_READ))
-                                                 (out (read-string pipe)))
-                                            (close-pipe pipe)
-                                            out))))
-                                    (error "Permission Denied: No permission handler registered for dangerous operation"))))))
+                          (let ((argv (parse-command-argv cmd)))
+                            (unless argv
+                              (error "Command rejected: cannot represent it as direct argv" cmd))
+                            (unless (command-argv-safe? argv)
+                              (if perm-handler
+                                  (handle-perm-response
+                                   (perm-handler `(run-command ,argv)))
+                                  (error "Permission Denied: No permission handler registered for command")))
+                            (run-argv-in-sandbox argv))))
                   (cons 'system
                         (lambda (cmd)
-                          (if perm-handler
-                              (begin
-                                (handle-perm-response (perm-handler `(system ,cmd)))
-                                (let* ((pipe (open-pipe (string-append cmd " 2>&1") OPEN_READ))
-                                       (out (read-string pipe)))
-                                  (close-pipe pipe)
-                                  out))
-                              (error "Permission Denied: No permission handler registered for dangerous operation"))))
+                          (error "Raw shell execution is not supported; use run-command with direct argv policy" cmd)))
                   (cons 'system*
                         (lambda args
-                          (let ((cmd (string-join (map (lambda (a) (format #f "~a" a)) args) " ")))
+                          (let ((argv (map (lambda (arg) (format #f "~a" arg)) args)))
+                            (unless (pair? argv) (error "system* requires argv"))
                             (if perm-handler
                                 (begin
-                                  (handle-perm-response (perm-handler `(system* ,cmd)))
-                                  (let* ((pipe (open-pipe (string-append cmd " 2>&1") OPEN_READ))
-                                         (out (read-string pipe)))
-                                    (close-pipe pipe)
-                                    out))
-                                (error "Permission Denied: No permission handler registered for dangerous operation")))))
+                                  (handle-perm-response (perm-handler `(system* ,argv)))
+                                  (run-command-argv argv))
+                                (error "Permission Denied: No permission handler registered for direct command")))))
                   (cons 'run-in-sandbox
                         (lambda (cmd)
-                          (if perm-handler
-                              (let ((op-name (if (guix-container-supported?) 'run-in-sandbox 'run-local-fallback)))
-                                (handle-perm-response (perm-handler `(,op-name ,cmd)))
-                                (run-in-sandbox cmd))
-                              (error "Permission Denied: No permission handler registered for dangerous operation"))))
+                          (let ((argv (parse-command-argv cmd)))
+                            (unless argv
+                              (error "Sandbox command rejected: cannot represent it as direct argv" cmd))
+                            (if perm-handler
+                                (begin
+                                  (handle-perm-response (perm-handler `(run-in-sandbox ,argv)))
+                                  (run-argv-in-sandbox argv))
+                                (error "Permission Denied: No permission handler registered for direct sandbox command")))))
                   ;; Python Polyglot Capability (python-cap)
                   (cons 'run-python
                         (lambda (py-code)

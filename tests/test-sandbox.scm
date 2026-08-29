@@ -81,12 +81,30 @@
 
 (test-assert "command-hardening-injection-blocked"
   (let ((sb (make-test-sandbox #f))) ;; Handlers denied
-    ;; grep with shell operator (semicolon) is unsafe, should throw user-interrupt
-    (catch 'user-interrupt
-      (lambda ()
-        (sandbox-eval sb "(run-command \"grep foo bar; rm -rf /tmp\")")
-        #f)
-      (lambda _ #t))))
+    ;; Shell grammar is not representable by the direct argv capability.
+    (let ((result (sandbox-eval sb "(run-command \"grep foo bar; rm -rf /tmp\")")))
+      (and (pair? result) (eq? (car result) 'error)
+           (string-contains (caddr result) "cannot represent")))))
+
+(test-assert "command policy parses quoted argv and never invokes a shell"
+  (let ((captured #f)
+        (sb (make-test-sandbox #f)))
+    (let ((approved
+           (make-sandbox "argv-policy" (lambda _ #t)
+                         (lambda (expr) (set! captured expr) #t))))
+      (sandbox-eval approved "(run-command \"printf 'a b'\")")
+      (and (equal? captured '(run-command ("printf" "a b")))
+           (let ((result
+                  (sandbox-eval sb
+                                "(run-command \"git status $(touch /tmp/nope)\")")))
+             (and (pair? result) (eq? (car result) 'error)
+                  (string-contains (caddr result) "cannot represent")))))))
+
+(test-assert "raw system shell is unavailable even with HITL approval"
+  (let* ((sb (make-test-sandbox #t))
+         (result (sandbox-eval sb "(system \"echo unsafe\")")))
+    (and (pair? result) (eq? (car result) 'error)
+         (string-contains (caddr result) "Raw shell execution is not supported"))))
 
 ;; 6. Test Sandbox Forking / Cloning
 (test-equal "sandbox-fork-isolation"

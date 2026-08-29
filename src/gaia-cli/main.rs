@@ -4,6 +4,7 @@ use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::io::BufReader;
 use std::os::unix::net::UnixStream;
+use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
@@ -26,6 +27,29 @@ fn cognitive_inspection_operation(command: &str) -> Option<&'static str> {
         "/cognitive-state" | "/cognitive-objects" => Some("get-cognitive-state"),
         _ => None,
     }
+}
+
+fn permission_response(choice: &str, expr: &Value) -> Option<Value> {
+    let response = match choice.trim().to_lowercase().as_str() {
+        "y" | "yes" => Value::Bool(true),
+        "" | "n" | "no" => Value::Bool(false),
+        "a" | "always" => Value::list(vec![Value::symbol("always"), expr.clone()]),
+        "d" | "directory" => {
+            let expr_cons = expr.as_cons()?;
+            if expr_cons.car().as_symbol()? != "write-file" {
+                return None;
+            }
+            let path_cons = expr_cons.cdr().as_cons()?;
+            let path = path_cons.car().as_str()?;
+            let directory = Path::new(path).parent()?.to_str()?;
+            Value::list(vec![Value::symbol("directory"), Value::string(directory)])
+        }
+        _ => return None,
+    };
+    Some(Value::list(vec![
+        Value::symbol("permission-response"),
+        response,
+    ]))
 }
 
 /// Events forwarded from the listener thread to the main thread.
@@ -460,7 +484,8 @@ fn dispatch(
 
 #[cfg(test)]
 mod tests {
-    use super::cognitive_inspection_operation;
+    use super::{cognitive_inspection_operation, permission_response};
+    use lexpr::Value;
 
     #[test]
     fn maps_gcas_inspection_commands_to_protocol_operations() {
@@ -477,6 +502,33 @@ mod tests {
             Some("get-cognitive-state")
         );
         assert_eq!(cognitive_inspection_operation("/help"), None);
+    }
+
+    #[test]
+    fn builds_scoped_hitl_permission_responses() {
+        let write = Value::list(vec![
+            Value::symbol("write-file"),
+            Value::string("/tmp/gaia/report.txt"),
+            Value::string("content"),
+        ]);
+        assert_eq!(
+            permission_response("a", &write),
+            Some(Value::list(vec![
+                Value::symbol("permission-response"),
+                Value::list(vec![Value::symbol("always"), write.clone()]),
+            ]))
+        );
+        assert_eq!(
+            permission_response("d", &write),
+            Some(Value::list(vec![
+                Value::symbol("permission-response"),
+                Value::list(vec![
+                    Value::symbol("directory"),
+                    Value::string("/tmp/gaia"),
+                ]),
+            ]))
+        );
+        assert!(permission_response("d", &Value::symbol("other")).is_none());
     }
 }
 
@@ -521,31 +573,24 @@ fn wait_and_print(rx: &Receiver<ServerEvent>, stream: &mut UnixStream) -> Result
                                     print_scheme(&expr_str);
                                 }
 
+                                let directory_available = handled_diff;
                                 let mut input = String::new();
                                 loop {
-                                    print!("Allow execution? (y/N): ");
+                                    print!(
+                                        "Allow? [y] once / [n] deny / [a] always exact{}: ",
+                                        if directory_available { " / [d] directory writes" } else { "" }
+                                    );
                                     use std::io::Write;
                                     std::io::stdout().flush()?;
                                     input.clear();
                                     std::io::stdin().read_line(&mut input)?;
-                                    let ans = input.trim().to_lowercase();
-                                    if ans == "y" || ans == "yes" {
-                                        send_sexp(
-                                            stream,
-                                            &Value::list(vec![
-                                                Value::symbol("permission-response"),
-                                                Value::Bool(true),
-                                            ]),
-                                        )?;
-                                        break;
-                                    } else if ans == "" || ans == "n" || ans == "no" {
-                                        send_sexp(
-                                            stream,
-                                            &Value::list(vec![
-                                                Value::symbol("permission-response"),
-                                                Value::Bool(false),
-                                            ]),
-                                        )?;
+                                    if let Some(response) = permission_response(&input, expr) {
+                                        if !directory_available
+                                            && matches!(input.trim().to_lowercase().as_str(), "d" | "directory")
+                                        {
+                                            continue;
+                                        }
+                                        send_sexp(stream, &response)?;
                                         break;
                                     }
                                 }
