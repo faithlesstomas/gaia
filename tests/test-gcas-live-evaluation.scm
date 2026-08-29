@@ -21,7 +21,13 @@
          (lambda _ #t))
        (catch #t
          (lambda () (validate-live-resource-policy '("gemma4:e2b") #t 5.1) #f)
-         (lambda _ #t))))
+         (lambda _ #t))
+       (equal? (assoc-ref
+                (validate-live-resource-policy
+                 '("qwen3.5-4b") #t 4.7
+                 #:max-model-parameters-b 4.7)
+                'model)
+               "qwen3.5-4b")))
 
 (define offline-tasks
   (list

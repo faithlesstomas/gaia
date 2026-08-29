@@ -56,6 +56,8 @@
 (define minimum-repeats (env-positive-integer "GAIA_EVAL_MIN_REPEATS" 10))
 (define resource-approved? (and (env-boolean "GAIA_EVAL_RESOURCE_APPROVED" #f) #t))
 (define model-parameters-b (env-positive-number "GAIA_EVAL_MODEL_PARAMETERS_B"))
+(define max-model-parameters-b
+  (or (env-positive-number "GAIA_EVAL_MAX_MODEL_PARAMETERS_B") 4.0))
 (define verbosity (env-nonnegative-integer "GAIA_EVAL_VERBOSE" 0))
 (define heartbeat-seconds
   (env-positive-integer "GAIA_EVAL_HEARTBEAT_SECONDS" 10))
@@ -255,7 +257,9 @@
 ;; Live inference is intentionally opt-in. Ollama may retain model weights, so
 ;; a multi-model matrix can exhaust GPU/RAM even though runs are sequential.
 (define resource-envelope
-  (validate-live-resource-policy models resource-approved? model-parameters-b))
+  (validate-live-resource-policy models resource-approved? model-parameters-b
+                                 #:max-model-parameters-b
+                                 max-model-parameters-b))
 
 (define (live-generate model run-id context succeed fail)
   (let* ((response (chat-with-llm run-id context model (get-gcas-system-prompt)
@@ -279,8 +283,8 @@
 
 (format #t "GCAS live evaluation v2: endpoint=~a models=~s tasks=~s repeats=~a thinking=~a oracle=hidden-property-tests\n"
         (get-config 'llm-url) models (map evaluation-task-id tasks) repeats thinking?)
-(format #t "Resource envelope: one-model-only=true parameters=~aB approved=~a\n"
-        model-parameters-b resource-approved?)
+(format #t "Resource envelope: one-model-only=true parameters=~aB max=~aB approved=~a\n"
+        model-parameters-b max-model-parameters-b resource-approved?)
 (format #t "Observability: verbose=~a heartbeat=~as trace=~a LiteLLM-log=.litellm.log\n"
         verbosity heartbeat-seconds
         (if trace-port trace-output-path "disabled"))
@@ -389,6 +393,7 @@
      ("trace_output" . ,(and trace-port trace-output-path))
      ("resource_envelope" . (("one_model_only" . #t)
                               ("model_parameters_b" . ,model-parameters-b)
+                              ("max_model_parameters_b" . ,max-model-parameters-b)
                               ("operator_approved" . ,resource-approved?)))
      ("readiness" . ,(readiness-json-object readiness))
      ("system_prompt_source" . ,(if (getenv "GAIA_SYSTEM_PROMPT")

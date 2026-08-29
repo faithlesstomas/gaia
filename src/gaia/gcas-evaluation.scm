@@ -29,7 +29,8 @@
 ;; Live evaluation tasks are deliberately independent from a model provider.
 ;; Their acceptance boundary consumes only the executed Action and Result COs.
 
-(define (validate-live-resource-policy models approved? model-parameters-b)
+(define* (validate-live-resource-policy models approved? model-parameters-b
+                                        #:key (max-model-parameters-b 4.0))
   "Enforce the operator's local inference envelope before contacting an endpoint."
   (unless (and (list? models) (= (length models) 1))
     (error "Resource policy permits exactly one live-evaluation model" models))
@@ -37,9 +38,12 @@
     (error "Live evaluation requires explicit per-run operator approval"))
   (unless (and (number? model-parameters-b) (> model-parameters-b 0))
     (error "Live evaluation requires the model's actual parameter count"))
-  (when (> model-parameters-b 4.0)
-    (error "Live evaluation model exceeds the operator's 4B parameter limit"
-           (car models) model-parameters-b))
+  (unless (and (number? max-model-parameters-b)
+               (> max-model-parameters-b 0))
+    (error "Live evaluation requires a positive operator parameter limit"))
+  (when (> model-parameters-b max-model-parameters-b)
+    (error "Live evaluation model exceeds the operator's parameter limit"
+           (car models) model-parameters-b max-model-parameters-b))
   `((one-model-only . #t) (model . ,(car models))
     (model-parameters-b . ,model-parameters-b) (operator-approved . #t)))
 

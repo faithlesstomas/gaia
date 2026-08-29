@@ -128,11 +128,20 @@ literals and fixed lookup answers are covered by deterministic regressions.
 This does not prove robustness against deliberately adversarial code; broader
 held-out datasets remain a stronger boundary than static source inspection.
 
-The runner refuses multiple models, models declared above 4B parameters, and
-all invocations without `GAIA_EVAL_RESOURCE_APPROVED=1`. This flag is set only
+The runner refuses multiple models, models above the explicitly approved
+per-run ceiling, and all invocations without
+`GAIA_EVAL_RESOURCE_APPROVED=1`. This flag is set only
 after explicit operator approval for that run. Registering several aliases in
 LiteLLM is not permission to load them; the benchmark sends requests to exactly
 one model. Offline tests never contact Ollama or LiteLLM.
+
+The default ceiling is 4B. An operator may explicitly approve a different
+per-run ceiling with `GAIA_EVAL_MAX_MODEL_PARAMETERS_B`; both the actual model
+size and the approved ceiling are recorded in the report. For example, a model
+reported by Ollama as 4.7B requires both
+`GAIA_EVAL_MODEL_PARAMETERS_B=4.7` and
+`GAIA_EVAL_MAX_MODEL_PARAMETERS_B=4.7`. This override never relaxes the
+one-model-only invariant.
 
 ### Live observability
 

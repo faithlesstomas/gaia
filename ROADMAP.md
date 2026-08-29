@@ -135,7 +135,8 @@ milestone combines a narrow dependable `solve` path with durable graph memory,
 guarded retrieval, contradiction preservation, and multi-session evaluation.
 The local models used for evaluation vary substantially in size and are tuned
 primarily for tool use rather than sustained Guile REPL programming. Live gates
-run only one explicitly approved model of at most 4B parameters at a time. GCAS
+run only one explicitly approved model at a time, with a 4B default ceiling and
+an explicitly recorded per-run override for operator-approved exceptions. GCAS
 must expose model limitations honestly and compensate with structure;
 architectural conformance alone is not evidence of task competence or cognitive
 continuity.
@@ -153,7 +154,7 @@ continuity.
 - [x] **Phase-aware cognitive prompt projection (P1)** — Production `solve` uses a compact GCAS-only Action contract without legacy `FINAL/CONFIDENCE`, while `/investigate` retains the RLM prompt. Initial and repair projections keep chat history empty and include typed phase, capability/action schema, remaining transition/stall/failure/replan budgets, exact error class and failing form, Goal, Workspace, Memory, and Reflection state.
 - [x] **Structured repair policy (P1)** — Scheme and Wisp Actions are parsed and macro-expanded without evaluation before an Action CO or execution request is created. Reader and macro syntax failures name the rejected form, feed bounded replanning, require a complete distinct replacement, and preserve non-progress detection.
 - [/] **Capability/verifier registry (P1)** — Reusable verifier classes, fail-closed matching, and five v1 production manifests are implemented. The live corpus now uses eval-v2 hidden behavioral contracts; production manifests still require the same private-harness evidence boundary before promotion to v2.
-- [/] **Readiness gate (P1)** — Threshold enforcement fails closed below 10 repetitions, 100% terminal responses, zero false completions/duplicate executions, 80% verified success per capability, the interruption bound, or eval-v2 hidden-test provenance. Prior eval-v1 runs are invalidated. A repeated eval-v2 baseline for one operator-approved ≤4B model remains required.
+- [/] **Readiness gate (P1)** — Threshold enforcement fails closed below 10 repetitions, 100% terminal responses, zero false completions/duplicate executions, 80% verified success per capability, the interruption bound, or eval-v2 hidden-test provenance. Prior eval-v1 runs are invalidated. A repeated eval-v2 baseline for one operator-approved model within its explicitly recorded resource ceiling remains required.
 
 The prompting design is documented in
 [docs/gcas-prompt-projection.md](docs/gcas-prompt-projection.md), and the corpus
