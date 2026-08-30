@@ -13,6 +13,13 @@ plausible response. Its defining property is durable cognitive continuity:
 useful state survives inference calls, client reconnects, process termination,
 and server restarts without replaying a conversation transcript as memory.
 
+This continuity includes the ordinary assistant experience. Plain conversational
+input MUST run as a bounded GCAS Cognitive Process, not as an ever-growing LLM
+chat request. The transcript may remain available as a UI and audit artefact, but
+it is never the authoritative prompt memory. Each turn is represented by typed
+Cognitive Objects; the next prompt is reconstructed from the current utterance,
+a bounded recent conversational episode, and relevant structured memory.
+
 ## Required invariants
 
 Every MVP capability must preserve the GCAS-Core 0.2 regression gate and
@@ -43,6 +50,19 @@ additionally satisfy the applicable GCAS 0.3 requirements:
 9. **Attention is not confidence.** Workspace admission may prioritize an
    uncertain candidate because of risk, conflict, surprise, or expected
    information gain. Admission and broadcast never increase evidential weight.
+10. **Conversation is a GCAS process.** Ordinary chat creates a Goal and typed
+    user/assistant COs, traverses Memory, Workspace, Control, and Answer
+    boundaries, and reaches exactly one terminal response. The LLM receives an
+    empty protocol history and a bounded reconstructed context.
+11. **Dialogue delivery is not factual verification.** A deterministic delivery
+    verifier may establish that a response was produced for the active turn; it
+    does not promote the response's factual content. Assistant text remains an
+    `UNVERIFIED` `HYPOTHESIS` unless separately supported by an applicable
+    verifier and evidence graph.
+12. **Conversation identity survives restart.** Clients resume the last logical
+    session by default, with an explicit session override and an explicit clear
+    operation. Starting a new client process must not silently make remembered
+    conversation unreachable.
 
 ## MVP acceptance scenarios
 
@@ -59,6 +79,8 @@ The MVP readiness gate must exercise these scenarios end to end:
 | Bayesian correctness trace | A narrow verifier-backed target records a declared prior, evidence, posterior, posterior prediction, later correctness outcome, and a separate calibration update without rewriting the original assessment. |
 | Uncertainty-driven attention | A high-risk or high-information candidate can outrank a more confident routine candidate, while both retain their original epistemic and verification state. |
 | Distribution shift | An assessment outside its calibration scope is marked out of domain and triggers a declared widen, revalidate, abstain, or escalate policy. |
+| GCAS conversational continuity | Two or more natural-language turns are represented as COs; a fresh server/client instance resumes the same logical session, retrieves relevant prior dialogue without transcript replay, and produces a bounded reconstructed prompt. |
+| Conversational epistemic boundary | The user can converse normally, while the delivered assistant response remains an unverified hypothesis and the separately verified completion Claim attests only to response delivery, not factual truth. |
 
 The deterministic memory gates now cover user testimony across restart,
 verified cross-session graph memory, transitive invalidation, contradiction
@@ -192,6 +214,14 @@ regression floor.
 - Propagate invalidation through justification dependencies.
 - Select memory by Goal relevance, graph relations, time, provenance,
   contradiction state, and activation rather than lexical overlap alone.
+- Represent ordinary user and assistant dialogue turns as role-typed episodic
+  COs linked by conversation-turn and reply relations.
+- Reconstruct conversation prompts from a bounded recent episode plus relevant
+  semantic, procedural, testimony, and metacognitive memory. Never append the
+  transcript to the model request.
+- Preserve an explicit epistemic boundary: delivery verification may complete
+  the conversational Goal, while response content remains `HYPOTHESIS` and
+  `UNVERIFIED`.
 
 ### M3 — Capability and verifier registry
 
@@ -219,12 +249,21 @@ regression floor.
   interruption latency.
 - Add multi-session tests for retrieval, revision, procedural reuse, and stale
   memory rejection.
+- Add a model-free end-to-end conversation gate proving empty LLM history,
+  bounded prompt growth, relevant recall after restart, exactly-once delivery,
+  and non-promotion of assistant content.
+- Add an operator-approved live conversation scenario that checks coherent
+  follow-up recall without using the transcript as prompt memory.
 
 ### M6 — Security and release
 
 - Replace shell-prefix command checks with parsed/direct execution policy.
 - Complete client UI support for scoped HITL permissions.
 - Publish the exact supported capability matrix and readiness thresholds.
+- Make normal client input use GCAS conversation, retain `/solve` for executable
+  verified Goals and `/ask` only as an explicitly legacy one-shot path.
+- Resume the last logical session by default, expose the active identity, and
+  keep `/clear` as an explicit new-memory boundary.
 
 ## Deferred beyond MVP
 
