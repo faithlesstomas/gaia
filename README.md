@@ -248,8 +248,9 @@ make test-ncsi
 ```
 
 The deterministic commands above require no model server and are the public
-reproducibility floor. Live calls have a 300-second per-call bound by default;
-override it with `GAIA_LLM_TIMEOUT_SECONDS`. The live GCAS and NCSI evaluations are opt-in because
+reproducibility floor. Live calls have a 300-second per-call bound and a
+2048-token output bound by default; override them with
+`GAIA_LLM_TIMEOUT_SECONDS` and `GAIA_LLM_MAX_OUTPUT_TOKENS`. The live GCAS and NCSI evaluations are opt-in because
 they require pinned model endpoints and, for NCSI, the separately installed RAI
 neural dependencies and a checksummed lens artifact. To reproduce the published
 M5 pilot, start the RAI sidecar at `$XDG_RUNTIME_DIR/rai/neural.sock`, then run:

@@ -20,6 +20,7 @@
 (define %default-config
   `((llm-url . "http://localhost:4000")
     (llm-timeout-seconds . 300)
+    (llm-max-output-tokens . 2048)
     (model . "gemma4:e2b")
     (base-model . "gemma4:e2b")
     (thinking . #t)
@@ -64,6 +65,8 @@ The normalized value is #t, #f, or one of the Ollama effort-level strings."
                                   ((llm-url) "GAIA_LLM_URL")
                                   ((llm-timeout-seconds)
                                    "GAIA_LLM_TIMEOUT_SECONDS")
+                                  ((llm-max-output-tokens)
+                                   "GAIA_LLM_MAX_OUTPUT_TOKENS")
                                   ((model) "GAIA_MODEL")
                                   ((base-model) "GAIA_BASE_MODEL")
                                   ((system-prompt) "GAIA_SYSTEM_PROMPT")
@@ -80,9 +83,10 @@ The normalized value is #t, #f, or one of the Ollama effort-level strings."
       (or (string=? env-val "1")
           (string-ci=? env-val "true")
           (string-ci=? env-val "yes")))
-     ((and env-val (eq? key 'llm-timeout-seconds))
+     ((and env-val
+           (member key '(llm-timeout-seconds llm-max-output-tokens)))
       (let ((number (string->number env-val)))
-        (and (number? number) (> number 0) number)))
+        (and (number? number) (integer? number) (> number 0) number)))
      (else env-val))))
 
 (define (load-config)

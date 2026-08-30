@@ -143,8 +143,10 @@ LiteLLM is not permission to load them; the benchmark sends requests to exactly
 one model. Offline tests never contact Ollama or LiteLLM.
 
 Synchronous LiteLLM calls are bounded by `GAIA_LLM_TIMEOUT_SECONDS` (300 seconds
-by default). A timeout becomes an explicit adapter failure instead of leaving a
-run waiting indefinitely.
+by default) and `GAIA_LLM_MAX_OUTPUT_TOKENS` (2048 tokens by default). A timeout
+becomes an explicit adapter failure instead of leaving a run waiting
+indefinitely; the output limit prevents a local model from consuming the entire
+wall-clock allowance with an unbounded completion.
 
 The default ceiling is 4B. An operator may explicitly approve a different
 per-run ceiling with `GAIA_EVAL_MAX_MODEL_PARAMETERS_B`; both the actual model

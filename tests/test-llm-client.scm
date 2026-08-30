@@ -16,12 +16,15 @@
         (load abs-path)))))
 
 ;; Mock the (web client) and (web response) modules
+(define captured-request-body #f)
+
 (let ((client-mod (resolve-module '(web client) #:ensure #f))
       (resp-mod (resolve-module '(web response) #:ensure #f)))
 
   ;; Mock http-post
   (module-set! client-mod 'http-post
                (lambda* (url #:key body headers)
+                 (set! captured-request-body body)
                  (cond
                   ((string-contains url "/v1/chat/completions")
                    (values 'mock-hdr "{\"choices\": [{\"message\": {\"content\": \"Sync Hello\", \"reasoning_content\": \"Thinking hard\"}}], \"usage\": {\"prompt_tokens\": 8, \"completion_tokens\": 2, \"total_tokens\": 10}}"))
@@ -71,6 +74,18 @@
          (= (assoc-ref usage "prompt_tokens") 8)
          (= (assoc-ref usage "completion_tokens") 2)
          (= (assoc-ref usage "total_tokens") 10))))
+
+(test-assert "chat-with-llm sends a bounded max_tokens value"
+  (begin
+    (set! captured-request-body #f)
+    (chat-with-llm "session-bounded" "Hello" "gpt-4o" "System prompt"
+                   #:max-output-tokens 321)
+    (and (string? captured-request-body)
+         (string-contains captured-request-body "\"max_tokens\":321"))))
+
+(test-error "chat-with-llm rejects a non-positive output token limit"
+  (chat-with-llm "session-unbounded" "Hello" "gpt-4o" "System prompt"
+                 #:max-output-tokens 0))
 
 (test-assert "chat-with-llm synchronous fails with a bounded timeout"
   (let* ((web-client-module (resolve-module '(web client)))
