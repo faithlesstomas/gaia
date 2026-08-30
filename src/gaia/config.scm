@@ -23,6 +23,7 @@
     (base-model . "gemma4:e2b")
     (thinking . #t)
     (system-prompt . #f)
+    (conversation-system-prompt . #f)
     (state-injection . #f)
     (wisp-mode . #f)
     (allow-sandbox-fallback . #f))) ;; Default system prompt is usually hardcoded in core, but can be overridden
@@ -63,6 +64,8 @@ The normalized value is #t, #f, or one of the Ollama effort-level strings."
                                   ((model) "GAIA_MODEL")
                                   ((base-model) "GAIA_BASE_MODEL")
                                   ((system-prompt) "GAIA_SYSTEM_PROMPT")
+                                  ((conversation-system-prompt)
+                                   "GAIA_CONVERSATION_SYSTEM_PROMPT")
                                   ((state-injection) "GAIA_STATE_INJECTION")
                                   ((wisp-mode) "GAIA_WISP_MODE")
                                   ((allow-sandbox-fallback) "GAIA_ALLOW_SANDBOX_FALLBACK")

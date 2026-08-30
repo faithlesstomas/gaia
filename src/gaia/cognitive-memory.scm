@@ -1,5 +1,6 @@
 (define-module (gaia cognitive-memory)
   #:use-module (srfi srfi-1)
+  #:use-module (srfi srfi-13)
   #:use-module (srfi srfi-9)
   #:use-module (ice-9 rdelim)
   #:use-module (ice-9 ftw)
@@ -25,7 +26,12 @@
             memory-retrieve
             memory-retrieve-facts
             make-user-memory-claim
-            reconstruct-context))
+            make-conversation-turn
+            memory-record-conversation-turn!
+            memory-conversation-turns
+            memory-retrieve-conversation
+            reconstruct-context
+            reconstruct-conversation-context))
 
 ;; Episodic/semantic COs are stored independently from chat transcripts.  The
 ;; optional S-expression file is a transparent, local durability mechanism for
@@ -426,10 +432,14 @@ Activation is an attention quantity only; reading it cannot alter the stored CO.
   (length (lset-intersection string=? (tokenize query) (tokenize (co-content candidate)))))
 
 (define (user-assertion? text)
-  (let ((normalized (string-downcase text)))
-    (any (lambda (marker) (string-contains normalized marker))
-         '("my name is" "mam na imię" "nazywam się" "i prefer" "preferuję"
-           "my favourite" "my favorite" "moim ulubionym" "lubię"))))
+  (let ((normalized (string-trim-both (string-downcase text))))
+    ;; A retrieval question can contain the same lexical marker as the
+    ;; assertion it asks about (for example: "Jak mam na imię?").  Persist it
+    ;; as an episodic turn, not as fresh USER_TESTIMONY.
+    (and (not (string-suffix? "?" normalized))
+         (any (lambda (marker) (string-contains normalized marker))
+              '("my name is" "mam na imię" "nazywam się" "i prefer" "preferuję"
+                "my favourite" "my favorite" "moim ulubionym" "lubię")))))
 
 (define (make-user-memory-claim text)
   "Represent an explicit user assertion as an unverified Observation.
@@ -442,6 +452,69 @@ accept the proposition expressed by the statement as a verified world fact."
         'observation (string-append "User stated: " text)
         #:provenance 'USER
         #:relations '((memory-role . USER_TESTIMONY)))))
+
+(define (conversation-turn? co)
+  (and (cognitive-object? co)
+       (memq (assoc-ref (co-relations co) 'conversation-speaker)
+             '(USER ASSISTANT))))
+
+(define (conversation-turn-index co)
+  (or (assoc-ref (co-relations co) 'conversation-turn) 0))
+
+(define (next-conversation-turn memory)
+  (+ 1 (fold (lambda (co current)
+               (max current (conversation-turn-index co)))
+             0
+             (filter conversation-turn? (memory-objects memory)))))
+
+(define* (make-conversation-turn memory speaker content
+                                 #:key in-reply-to process-id)
+  "Create one typed, epistemically explicit dialogue-turn CO.
+
+USER assertions that match the narrow testimony recognizer remain unverified
+USER_TESTIMONY. Other user turns and all assistant responses are EPISODIC.
+Assistant content is always an LLM HYPOTHESIS/UNVERIFIED; recording delivery
+must never promote its factual status."
+  (unless (and (cognitive-memory? memory)
+               (memq speaker '(USER ASSISTANT))
+               (string? content)
+               (> (string-length content) 0)
+               (or (not in-reply-to) (string? in-reply-to))
+               (or (not process-id) (string? process-id)))
+    (error "Invalid conversation turn" speaker content in-reply-to process-id))
+  (let* ((turn (next-conversation-turn memory))
+         (testimony (and (eq? speaker 'USER)
+                         (make-user-memory-claim content)))
+         (base
+          (or testimony
+              (make-cognitive-object
+               (if (eq? speaker 'USER) 'observation 'hypothesis)
+               content
+               #:provenance (if (eq? speaker 'USER) 'USER 'LLM)
+               #:relations `((memory-role . EPISODIC)))))
+         (with-speaker (co-add-relation base 'conversation-speaker speaker))
+         (with-turn (co-add-relation with-speaker 'conversation-turn turn))
+         (with-reply (if in-reply-to
+                         (co-add-relation with-turn 'in-reply-to in-reply-to)
+                         with-turn))
+         (complete (if process-id
+                       (co-add-relation with-reply 'process process-id)
+                       with-reply)))
+    complete))
+
+(define* (memory-record-conversation-turn! memory speaker content
+                                            #:key in-reply-to process-id)
+  "Create and persist one GCAS conversation turn."
+  (let ((complete (make-conversation-turn memory speaker content
+                                          #:in-reply-to in-reply-to
+                                          #:process-id process-id)))
+    (memory-consolidate! memory (list complete)
+                         #:reason 'CONVERSATION_TURN
+                         #:revalidation (if (eq? (memory-role complete)
+                                                'USER_TESTIMONY)
+                                            'ON_NEW_USER_TESTIMONY
+                                            'ON_RELATED_CONVERSATION))
+    complete))
 
 (define (temporally-valid? co)
   (let ((now (current-time)))
@@ -540,6 +613,70 @@ eligible as current facts."
       (memory-activate! memory (map co-id selected))
       selected)))
 
+(define* (memory-conversation-turns memory #:key (limit 6) (exclude-ids '()))
+  "Return a bounded recent dialogue episode in chronological order."
+  (unless (and (integer? limit) (>= limit 0) (list? exclude-ids))
+    (error "Invalid conversation retrieval bounds" limit exclude-ids))
+  (let* ((eligible
+          (filter (lambda (co)
+                    (and (conversation-turn? co)
+                         (temporally-valid? co)
+                         (not (assoc-ref (co-relations co) 'superseded-by))
+                         (not (member (co-id co) exclude-ids))))
+                  (memory-objects memory)))
+         (newest
+          (sort eligible
+                (lambda (left right)
+                  (> (conversation-turn-index left)
+                     (conversation-turn-index right)))))
+         (bounded (take newest (min limit (length newest)))))
+    (reverse bounded)))
+
+(define* (memory-retrieve-conversation memory utterance
+                                        #:key
+                                        (recent-limit 6)
+                                        (relevant-limit 5)
+                                        (exclude-ids '()))
+  "Select a bounded conversational episode and relevant structured memory.
+
+The return value separates `recent' and `relevant' projections so prompt
+construction can label chronology independently from semantic relevance. It
+never contains the transcript and never changes a CO's epistemic status."
+  (unless (and (string? utterance)
+               (integer? recent-limit) (>= recent-limit 0)
+               (integer? relevant-limit) (>= relevant-limit 0))
+    (error "Invalid conversation retrieval request"
+           utterance recent-limit relevant-limit))
+  (let* ((recent (memory-conversation-turns
+                  memory #:limit recent-limit #:exclude-ids exclude-ids))
+         (recent-ids (map co-id recent))
+         (older-dialogue
+          (filter (lambda (co)
+                    (and (conversation-turn? co)
+                         (not (member (co-id co) recent-ids))
+                         (not (member (co-id co) exclude-ids))
+                         (temporally-valid? co)
+                         (not (assoc-ref (co-relations co) 'superseded-by))))
+                  (memory-objects memory)))
+         (scored-episodes
+          (sort (filter (lambda (pair) (> (cdr pair) 0))
+                        (map (lambda (co)
+                               (cons co (overlap-score utterance co)))
+                             older-dialogue))
+                (lambda (left right) (> (cdr left) (cdr right)))))
+         (episode-matches
+          (map car
+               (take scored-episodes
+                     (min relevant-limit (length scored-episodes)))))
+         (structured
+          (filter (lambda (co) (not (conversation-turn? co)))
+                  (memory-retrieve memory utterance #:limit relevant-limit)))
+         (combined (unique-cos (append structured episode-matches)))
+         (relevant
+          (take combined (min relevant-limit (length combined)))))
+    (memory-activate! memory (map co-id (append recent relevant)))
+    `((recent . ,recent) (relevant . ,relevant))))
+
 (define* (reconstruct-context goal active-workspace selected-memories
                             #:key (constraints '()))
   "Build the non-transcript prompt context from explicit GCAS state."
@@ -556,3 +693,47 @@ eligible as current facts."
    "Active constraints:\n"
    (if (null? constraints) "- Treat model output as an unverified hypothesis.\n"
        (string-join (map (lambda (constraint) (string-append "- " constraint "\n")) constraints) ""))))
+
+(define* (reconstruct-conversation-context goal retrieval
+                                           #:key (max-chars 6000))
+  "Build a bounded non-transcript prompt for one conversational Goal."
+  (unless (and (cognitive-object? goal)
+               (list? retrieval)
+               (integer? max-chars)
+               (>= max-chars 512))
+    (error "Invalid conversation context request" goal retrieval max-chars))
+  (define (render-turn co)
+    (format #f "- [~a ~a; epistemic=~a; verification=~a] ~a\n"
+            (or (assoc-ref (co-relations co) 'conversation-speaker) 'MEMORY)
+            (co-type co)
+            (co-epistemic-status co)
+            (co-verification-status co)
+            (co-content co)))
+  (define (render-memory co)
+    (format #f "- [~a; role=~a; epistemic=~a; verification=~a] ~a\n"
+            (co-type co)
+            (or (memory-role co) 'UNCLASSIFIED)
+            (co-epistemic-status co)
+            (co-verification-status co)
+            (co-content co)))
+  (let* ((recent (or (assoc-ref retrieval 'recent) '()))
+         (relevant (or (assoc-ref retrieval 'relevant) '()))
+         (full
+          (string-append
+           "GCAS conversational projection (not a transcript replay).\n"
+           "Current user utterance:\n" (co-content goal) "\n\n"
+           "Relevant structured memory:\n"
+           (if (null? relevant) "- none\n"
+               (string-join (map render-memory relevant) ""))
+           "\nBounded recent conversation episode:\n"
+           (if (null? recent) "- none\n"
+               (string-join (map render-turn recent) ""))
+           "\nEpistemic constraints:\n"
+           "- Respond naturally to the current user utterance.\n"
+           "- Memory entries are typed evidence, not automatically verified facts.\n"
+           "- Do not claim that assistant hypotheses are verified.\n"
+           "- Do not emit code or GCAS completion-control markers unless the user explicitly asks to discuss them.\n")))
+    (if (> (string-length full) max-chars)
+        (string-append (substring full 0 (- max-chars 24))
+                       "\n[projection truncated]\n")
+        full)))

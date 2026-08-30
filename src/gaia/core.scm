@@ -11,7 +11,7 @@
   #:use-module (srfi srfi-13)
   #:use-module (srfi srfi-43)
   #:use-module (gaia config)
-  #:export (start-gaia SYSTEM_PROMPT GCAS_SYSTEM_PROMPT get-system-prompt get-solver-system-prompt get-gcas-system-prompt extract-code extract-gcas-action extract-final-signal extract-confidence
+  #:export (start-gaia SYSTEM_PROMPT GCAS_SYSTEM_PROMPT GCAS_CONVERSATION_SYSTEM_PROMPT get-system-prompt get-solver-system-prompt get-gcas-system-prompt get-gcas-conversation-system-prompt extract-code extract-gcas-action extract-final-signal extract-confidence
             extract-delegation markdown->ansi MAX-RECURSION-DEPTH CONFIDENCE-THRESHOLD
             C-RESET C-BOLD C-RED C-GREEN C-YELLOW C-BLUE C-CYAN C-GREY
             start-gaia rlm-loop *interrupted* check-interrupt! gaia-log clean-assistant-content
@@ -257,6 +257,21 @@ You are the Generative Processor in GAIA's GCAS cognitive process. Propose one s
 # EXECUTION BOUNDARY
 The REPL is stateful across successful Actions. A syntax or runtime failure rolls back the entire Action. GAIA—not you—decides Goal completion from execution evidence and an independent verifier.")
 
+(define GCAS_CONVERSATION_SYSTEM_PROMPT
+  "# ROLE
+You are the conversational Generative Processor in GAIA's GCAS cognitive process. Produce one natural assistant response to the current user utterance using only the bounded typed projection supplied in the request.
+
+# CONVERSATION CONTRACT
+1. Respond directly and naturally. Do not emit `FINAL`, `FINAL_VAR`, `CONFIDENCE`, a tool request, or a fenced `repl` Action.
+2. The request is not a transcript replay. It contains the current utterance, a bounded recent episode, and selected structured memories.
+3. Respect every memory entry's provenance, epistemic status, and verification status. A USER_TESTIMONY record establishes what the user said, not an independently verified world fact.
+4. Prior ASSISTANT entries are HYPOTHESIS/UNVERIFIED. Use them only for conversational continuity; never cite their presence as proof that their factual content is true.
+5. If evidence is insufficient, say so plainly. Do not invent missing memories or claim certainty merely because a statement appears in the context.
+6. Keep the response relevant and concise enough for an interactive local assistant.
+
+# COMPLETION BOUNDARY
+GAIA verifies only that one bounded response was delivered for the active turn. That structural delivery check does not verify factual propositions in your prose. Your response therefore remains an UNVERIFIED hypothesis unless a separate capability verifier establishes a narrower claim.")
+
 (define (get-system-prompt)
   (let* ((base (if (get-config 'wisp-mode)
                    SYSTEM_PROMPT
@@ -324,6 +339,11 @@ small for local models."
        (if (get-config 'wisp-mode)
            "\n\n# OPTIONAL WISP OUTPUT\nYou may use one fenced ```wisp block instead of ```repl. Use two-space indentation and SRFI-119 syntax; never emit both formats."
            ""))))
+
+(define (get-gcas-conversation-system-prompt)
+  "Return the dedicated GCAS conversational epistemic contract."
+  (or (get-config 'conversation-system-prompt)
+      GCAS_CONVERSATION_SYSTEM_PROMPT))
 
 (define (string-contains-last str pattern)
   (let loop ((start 0)

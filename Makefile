@@ -52,6 +52,7 @@ gcas-conformance-scheme:
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-goal-verifier.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-cognitive-memory.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-cognitive-memory-graph.scm
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-conversation-processors.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-cognitive-session.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-production-processors.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-ncsi.scm
