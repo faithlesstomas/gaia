@@ -31,9 +31,10 @@ Natural-language conversation is a product capability but not an executable
 capability in the table above. Plain input runs a bounded GCAS Cognitive Process,
 persists typed dialogue COs, reconstructs context after restart with empty LLM
 history, and verifies only response delivery. Assistant prose remains
-`HYPOTHESIS`/`UNVERIFIED`. Its deterministic conformance gate is covered; the
-operator-approved two-turn model gate is available as
-`make gcas-live-conversation-eval` and its release result is pending.
+`HYPOTHESIS`/`UNVERIFIED`. Its deterministic conformance gate is covered. The
+operator-approved two-turn gate passed on `qwen3.5-4b` with zero provider
+history and bounded restored Memory; see
+[the evaluation report](evaluations/gcas-conversation-qwen3.5-4b-mvp.md).
 
 ## Reusable verifier classes
 

@@ -16,6 +16,12 @@
              (gaia llm-client)
              (gaia utils))
 
+;; This evaluation intentionally consumes a locally hosted model and must stay
+;; operator-driven.  Fail before configuration or network access if somebody
+;; accidentally wires the runner into a CI environment.
+(when (getenv "CI")
+  (error "Live conversation evaluation is forbidden in CI; run it locally with explicit operator approval"))
+
 (define (env-boolean name fallback)
   (let ((value (getenv name)))
     (if value

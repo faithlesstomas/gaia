@@ -90,9 +90,9 @@ procedural reuse in `tests/test-cognitive-memory.scm`,
 `tests/test-production-processors.scm`. Failure-first repair, safe abstention,
 Bayesian correctness, uncertainty-driven attention, distribution shift,
 metacognitive capability revision, and GCAS conversation continuity are covered
-by deterministic production/conformance gates. Repeated live-model readiness
-and the operator-approved live conversation result remain release evidence, not
-claims of current completion.
+by deterministic production/conformance gates. The operator-approved live
+conversation gate passed on `qwen3.5-4b`; repeated live-model capability
+readiness remains release evidence, not a claim of current completion.
 
 ## Current implementation-slice boundary
 
@@ -107,9 +107,10 @@ and reports the narrow exact Beta–Bernoulli domain separately as
 `GCAS-Bayesian 0.3`. These additive profiles do not reinterpret legacy scalar
 confidence or scheduling uncertainty as posterior probability.
 
-The deterministic conformance gate is green. The MVP is not release-ready until
-one explicitly approved model satisfies the repeated per-capability thresholds
-and the two-turn live conversation gate under a recorded resource envelope.
+The deterministic conformance gate is green, and the two-turn conversation gate
+passed under a recorded single-model resource envelope. The MVP is not
+release-ready until one explicitly approved model satisfies the repeated
+per-capability thresholds.
 This distinction prevents code completion from being reported as model
 competence.
 
@@ -195,7 +196,7 @@ regression floor.
 | M2 | complete | live recall quality is checked in M5 |
 | M3 | complete; five production-v2 manifests | repeated per-model results |
 | M4 | complete | repeated repair results |
-| M5 | harnesses complete | approved repeated capability baseline and live conversation run |
+| M5 | harnesses complete; live conversation passed | approved repeated capability baseline |
 | M6 | complete | publish the resulting ready/experimental matrix |
 
 ### M0 — Contract and regression floor

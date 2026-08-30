@@ -143,8 +143,9 @@ continuity.
 
 **Status:** the M0–M6 implementation scope is complete. The deterministic
 conformance gate is green. Release readiness remains provisional until one
-operator-approved model passes the repeated eval-v2 capability matrix and the
-two-turn live conversation gate under the recorded resource envelope.
+operator-approved model passes the repeated eval-v2 capability matrix. The
+two-turn live conversation gate passed on `qwen3.5-4b` under the recorded
+single-model 4.7B resource envelope.
 
 - [x] **MVP definition and acceptance contract (P0)** — `docs/gaia-mvp.md` defines the product claim, required invariants, eleven longitudinal acceptance scenarios, delivery milestones, and explicit post-MVP scope.
 - [x] **Cognitive Memory Graph v1 (P0)** — The local durable store exposes typed duplicate-safe links, bounded graph traversal, dependency discovery, transitive invalidation, versioned supersession, explicit episodic/semantic/procedural/user-testimony/metacognitive roles, and a bounded lazy STI projection. Invalidated, expired, and superseded Claims are ineligible as current facts. The public memory interface remains the adapter boundary; a Goblins/AtomSpace backend is an implementation replacement rather than an MVP acceptance dependency.
@@ -160,7 +161,7 @@ two-turn live conversation gate under the recorded resource envelope.
 - [x] **Phase-aware cognitive prompt projection (P1)** — Production `solve` uses a compact GCAS-only Action contract without legacy `FINAL/CONFIDENCE`, while `/investigate` retains the RLM prompt. Initial and repair projections keep chat history empty and include typed phase, capability/action schema, remaining transition/stall/failure/replan budgets, exact error class and failing form, Goal, Workspace, Memory, and Reflection state.
 - [x] **Structured repair policy (P1)** — Scheme and Wisp Actions are parsed and macro-expanded without evaluation before an Action CO or execution request is created. Reader and macro syntax failures name the rejected form, feed bounded replanning, require a complete distinct replacement, and preserve non-progress detection.
 - [x] **Capability/verifier registry (P1)** — Reusable verifier classes, fail-closed matching, and five production-v2 manifests are implemented. Normal `/solve` and the live corpus append private behavioral harnesses only at the execution boundary; repaired Actions receive fresh holdouts and model-visible feedback contains aggregate results only.
-- [/] **Readiness gate (P1)** — Threshold enforcement fails closed below 10 repetitions, 100% terminal responses, zero false completions/duplicate executions, 80% verified success per capability, the interruption bound, or eval-v2 hidden-test provenance. `make gcas-live-conversation-eval` adds an operator-approved restart/recall scenario, and synchronous calls have a configurable timeout. A repeated eval-v2 baseline plus the live conversation result for one approved model remain required; prior eval-v1 runs are invalidated.
+- [/] **Readiness gate (P1)** — Threshold enforcement fails closed below 10 repetitions, 100% terminal responses, zero false completions/duplicate executions, 80% verified success per capability, the interruption bound, or eval-v2 hidden-test provenance. The operator-approved `qwen3.5-4b` restart/recall run passed with empty provider history and a bounded restored projection; see [the live conversation report](docs/evaluations/gcas-conversation-qwen3.5-4b-mvp.md). The repeated eval-v2 capability baseline remains required; prior eval-v1 runs are invalidated.
 
 The prompting design is documented in
 [docs/gcas-prompt-projection.md](docs/gcas-prompt-projection.md), and the corpus

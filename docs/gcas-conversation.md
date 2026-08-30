@@ -88,6 +88,10 @@ GAIA_CONVERSATION_EVAL_OUTPUT=/tmp/gcas-conversation.json \
 make gcas-live-conversation-eval
 ```
 
+This target is local-only and fails closed whenever the `CI` environment
+variable is present. It is not part of any GitLab pipeline, `make check`, or
+`make gcas-conformance`; those commands exercise only its model-free contract.
+
 It establishes a nonce in turn one, constructs a fresh session object, asks for
 the nonce in turn two, and checks recall, bounded non-transcript projection,
 empty provider history, assistant epistemic status, delivery-only Claims, and
@@ -98,3 +102,6 @@ still run separately with `make gcas-live-eval`.
 The live gate demonstrates coherent bounded recall for one declared model and
 runtime configuration. It does not establish open-ended factual accuracy,
 general long-term memory quality, or broad benchmark competence.
+
+The recorded MVP run passed on `qwen3.5-4b` under a single-model 4.7B envelope;
+see [the evaluation report](evaluations/gcas-conversation-qwen3.5-4b-mvp.md).

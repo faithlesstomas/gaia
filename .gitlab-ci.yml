@@ -42,6 +42,8 @@ test:
   interruptible: true
   <<: *guix_setup
   script:
+    # Live model evaluations are deliberately excluded. Their runners also
+    # reject CI=true so they cannot consume Ollama resources accidentally.
     # Each suite runs in a fresh process with its own timeout (see run-coverage.scm).
     # Test logs are uploaded as artifacts, so avoid dumping every Guix build log.
     - GAIA_TEST_TIMEOUT=120 guix shell -m guix.scm make -- make check

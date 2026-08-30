@@ -35,6 +35,7 @@ gcas-live-eval:
 	GUILE_AUTO_COMPILE=0 guile -L src scripts/run-gcas-live-eval.scm
 
 gcas-live-conversation-eval:
+	@test -z "$$CI" || { echo "ERROR: gcas-live-conversation-eval is local-only and forbidden in CI" >&2; exit 2; }
 	GUILE_AUTO_COMPILE=0 guile -L src scripts/run-gcas-live-conversation-eval.scm
 
 ncsi-eval:
