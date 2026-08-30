@@ -2,8 +2,23 @@
 
 ## Current behavior
 
-Production `solve` does not replay the session transcript as an LLM
-conversation. The Session Orchestrator calls the Generative Processor with:
+Neither ordinary conversation nor production `solve` replays the session
+transcript. Both Session Orchestrator paths call their Generative Processor
+with an empty chat-history list and a task-specific system contract.
+
+For ordinary conversation, `get-gcas-conversation-system-prompt` defines the
+epistemic boundary and the transient prompt contains:
+
+- the active conversational Goal and current utterance;
+- a bounded recent episode of typed USER/ASSISTANT turns;
+- bounded relevant structured Memory with provenance and status;
+- an explicit marker that the projection is not transcript replay.
+
+Assistant output remains an LLM `HYPOTHESIS`/`UNVERIFIED`. A separate
+`DELIVERY_ONLY` Claim can complete the turn but says nothing about the factual
+truth of the prose. The default context cap is 6000 characters.
+
+For production `solve`, the Session Orchestrator uses:
 
 - `get-gcas-system-prompt` as a compact stable system contract;
 - a transient user/context prompt reconstructed from Cognitive Objects;
@@ -23,7 +38,12 @@ contract explicitly forbids `FINAL`, `FINAL_VAR`, and `CONFIDENCE`, because the
 GCAS Answer Processor and Goal Verifier own terminal decisions. The legacy
 solver prompt remains available only to the `investigate` compatibility path.
 
-The current contract also states the transactional execution boundary, requires
+The production capability manifests are v2. Their model-visible contract names
+only a procedure signature and behavior. At the execution boundary GAIA appends
+a private deterministic harness; a repair receives a larger fresh holdout.
+Only aggregate passed/failed counts reach the verifier and repair projection.
+
+The current Action contract also states the transactional execution boundary, requires
 one complete distinct Action, prefers a returned value, and includes compact
 Guile rules for `if`, bindings, and `set!`. Wisp instructions are appended only
 when Wisp mode is enabled. An explicit `GAIA_SYSTEM_PROMPT` override still wins.

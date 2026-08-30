@@ -87,28 +87,31 @@ verified cross-session graph memory, transitive invalidation, contradiction
 revision, auditable supersession, stale-memory rejection, and verified
 procedural reuse in `tests/test-cognitive-memory.scm`,
 `tests/test-cognitive-memory-graph.scm`, and
-`tests/test-production-processors.scm`. Failure-first repair and safe abstention
-remain covered by the production and evaluation gates. Bayesian correctness,
-uncertainty-driven attention, distribution shift, metacognitive capability
-revision, and repeated live-model readiness remain milestone requirements, not
+`tests/test-production-processors.scm`. Failure-first repair, safe abstention,
+Bayesian correctness, uncertainty-driven attention, distribution shift,
+metacognitive capability revision, and GCAS conversation continuity are covered
+by deterministic production/conformance gates. Repeated live-model readiness
+and the operator-approved live conversation result remain release evidence, not
 claims of current completion.
 
 ## Current implementation-slice boundary
 
-The first two MVP implementation slices deliver M1 and M2 over the transparent
-local store: durable typed memory edges and roles, bounded traversal, lazy STI,
-governed terminal consolidation, guarded retrieval, dependency invalidation,
-auditable contradiction revision and supersession, and cross-session memory
-tests. The public memory interface preserves the backend adapter boundary. The
-slices also align the documentation and conformance language with GCAS 0.3.
+The M0–M6 implementation scope is complete over the transparent local store:
+durable typed memory edges and roles, bounded traversal and lazy STI, governed
+terminal consolidation, guarded retrieval, contradiction revision, production
+v2 private behavioral verification, structured repair, ordinary GCAS
+conversation, client session resumption, and opt-in live runners are present.
+The public memory interface preserves the backend adapter boundary.
 The completed U0–U4 slice adds the deterministic `GCAS-Uncertainty 0.3` gate
 and reports the narrow exact Beta–Bernoulli domain separately as
 `GCAS-Bayesian 0.3`. These additive profiles do not reinterpret legacy scalar
 confidence or scheduling uncertainty as posterior probability.
 
-The subsequent implementation is intentionally split into reviewable vertical
-slices. Each slice must preserve the existing exactly-once, fail-closed,
-provenance, restoration, and client-protocol gates.
+The deterministic conformance gate is green. The MVP is not release-ready until
+one explicitly approved model satisfies the repeated per-capability thresholds
+and the two-turn live conversation gate under a recorded resource envelope.
+This distinction prevents code completion from being reported as model
+competence.
 
 ## GCAS 0.3 implementation plan
 
@@ -185,6 +188,16 @@ regression floor.
 
 ## Delivery milestones
 
+| Milestone | Implementation status | Remaining release evidence |
+|---|---|---|
+| M0 | complete | keep regression floor green |
+| M1 | complete | none |
+| M2 | complete | live recall quality is checked in M5 |
+| M3 | complete; five production-v2 manifests | repeated per-model results |
+| M4 | complete | repeated repair results |
+| M5 | harnesses complete | approved repeated capability baseline and live conversation run |
+| M6 | complete | publish the resulting ready/experimental matrix |
+
 ### M0 — Contract and regression floor
 
 - Maintain this Definition of Done and its mapping in `ROADMAP.md`.
@@ -230,6 +243,8 @@ regression floor.
 - Give each advertised capability an intent matcher, Goal contract, capability
   manifest, planner/action schema, verifier, deterministic fixture, and live
   evaluation case.
+- Keep private probes outside every model-visible prompt. Append the manifest-v2
+  harness only at execution and use a fresh expanded holdout after repair.
 - Continue to fail closed for unknown task classes.
 
 ### M4 — Structured Action and repair

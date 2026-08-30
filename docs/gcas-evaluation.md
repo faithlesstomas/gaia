@@ -128,12 +128,23 @@ literals and fixed lookup answers are covered by deterministic regressions.
 This does not prove robustness against deliberately adversarial code; broader
 held-out datasets remain a stronger boundary than static source inspection.
 
+The same evidence boundary is used by normal production `/solve`: all five
+advertised manifests are version 2 and the production Execution Processor
+appends a manifest-owned private harness without exposing probes in model or
+repair context. The live evaluator retains repetition-seeded probe selection
+and report metrics; production uses an attempt-seeded base suite plus a larger
+repair holdout.
+
 The runner refuses multiple models, models above the explicitly approved
 per-run ceiling, and all invocations without
 `GAIA_EVAL_RESOURCE_APPROVED=1`. This flag is set only
 after explicit operator approval for that run. Registering several aliases in
 LiteLLM is not permission to load them; the benchmark sends requests to exactly
 one model. Offline tests never contact Ollama or LiteLLM.
+
+Synchronous LiteLLM calls are bounded by `GAIA_LLM_TIMEOUT_SECONDS` (300 seconds
+by default). A timeout becomes an explicit adapter failure instead of leaving a
+run waiting indefinitely.
 
 The default ceiling is 4B. An operator may explicitly approve a different
 per-run ceiling with `GAIA_EVAL_MAX_MODEL_PARAMETERS_B`; both the actual model
@@ -173,6 +184,13 @@ command is interrupted before the final JSON report is written. Verbosity is an
 observer only: callback failures are isolated, processor diagnostics are not
 stored in Cognitive State or published on the Bus, and enabling logging must not
 change readiness metrics.
+
+`make gcas-live-conversation-eval` is the separate two-turn M5 gate for ordinary
+assistant continuity. It creates a nonce-bearing turn, restores a fresh session
+object, checks follow-up recall through the bounded Memory projection, verifies
+empty provider history and the assistant/delivery epistemic boundary, and can
+write `GAIA_CONVERSATION_EVAL_OUTPUT`. It obeys the same one-model resource
+approval and verbosity controls.
 
 The evaluation runner calls LiteLLM directly; it does not pass through the GAIA
 headless server and therefore does not produce `gaia-server.log`. When LiteLLM

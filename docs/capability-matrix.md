@@ -13,16 +13,27 @@ to a generic LLM judge.
 
 | Capability | Manifest | Action boundary | Independent verifier | Deterministic gate | Live gate | Release status |
 |---|---|---|---|---|---|---|
-| Arithmetic relation `(a × b) − c` | production v1; eval v2 | Define `solve-arithmetic(a,b,c)` | Hidden repetition-seeded probes | Covered, including shortcut rejection | `arithmetic-42` v2 | Candidate; v2 baseline pending |
-| Square arbitrary numeric lists | production v1; eval v2 | Define `square-all(xs)` | Hidden lists plus repair holdout | Covered, including shortcut rejection | `map-squares` v2 | Candidate; v2 baseline pending |
-| Filter evens from integer lists | production v1; eval v2 | Define `keep-evens(xs)` | Hidden lists plus repair holdout | Covered, including shortcut rejection | `filter-evens` v2 | Candidate; v2 baseline pending |
-| Factorial for non-negative integers | production v1; eval v2 | Define `factorial(n)` | Hidden boundary and general inputs | Covered, including constant rejection | `factorial-6` v2 | Candidate; v2 baseline pending |
-| Fibonacci prefix for non-negative length | production v1; eval v2 | Define `fibonacci-sequence(n)` | Hidden lengths plus repair holdout | Covered, including lookup rejection | `fibonacci-10` v2 | Candidate; v2 baseline pending |
+| Arithmetic relation `(a × b) − c` | production v2; eval v2 | Define `solve-arithmetic(a,b,c)` | Private inputs plus repair holdout | Covered, including shortcut rejection | `arithmetic-42` v2 | Implemented; repeated baseline pending |
+| Square arbitrary numeric lists | production v2; eval v2 | Define `square-all(xs)` | Private lists plus repair holdout | Covered, including shortcut rejection | `map-squares` v2 | Implemented; repeated baseline pending |
+| Filter evens from integer lists | production v2; eval v2 | Define `keep-evens(xs)` | Private lists plus repair holdout | Covered, including shortcut rejection | `filter-evens` v2 | Implemented; repeated baseline pending |
+| Factorial for non-negative integers | production v2; eval v2 | Define `factorial(n)` | Private boundary and general inputs | Covered, including constant rejection | `factorial-6` v2 | Implemented; repeated baseline pending |
+| Fibonacci prefix for non-negative length | production v2; eval v2 | Define `fibonacci-sequence(n)` | Private lengths plus repair holdout | Covered, including lookup rejection | `fibonacci-10` v2 | Implemented; repeated baseline pending |
 
 The live contracts test bounded generalization within these procedure families;
-they are not claims of general programming or mathematical competence. The
-production manifests remain v1 until the private-harness evidence boundary is
-also integrated into normal `solve`.
+they are not claims of general programming or mathematical competence. Normal
+production `solve` and eval v2 share the private-harness evidence boundary.
+Production probes are attempt-seeded; the live matrix additionally seeds cells
+by repetition and records hidden-test metrics.
+
+## Ordinary assistant capability
+
+Natural-language conversation is a product capability but not an executable
+capability in the table above. Plain input runs a bounded GCAS Cognitive Process,
+persists typed dialogue COs, reconstructs context after restart with empty LLM
+history, and verifies only response delivery. Assistant prose remains
+`HYPOTHESIS`/`UNVERIFIED`. Its deterministic conformance gate is covered; the
+operator-approved two-turn model gate is available as
+`make gcas-live-conversation-eval` and its release result is pending.
 
 ## Reusable verifier classes
 
