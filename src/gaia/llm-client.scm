@@ -35,13 +35,15 @@
   (fcntl port F_SETFL (logior O_NONBLOCK (fcntl port F_GETFL)))
   (setvbuf port 'none))
 
-(define (interruptible-http-post url body headers)
+(define (interruptible-http-post url body headers timeout-seconds)
   "Runs http-post in a thread so the main thread can poll for Ctrl-C.
-Returns (response-header . response-body) or throws 'user-interrupt."
+Returns (response-header . response-body), throws 'user-interrupt, or throws
+'llm-timeout when the configured wall-clock bound expires."
   (let* ((result-box (make-mutex))
          (result-val #f)
          (result-err #f)
          (done? #f)
+         (started (get-internal-real-time))
          (worker (call-with-new-thread
                   (lambda ()
                     (catch #t
@@ -61,9 +63,16 @@ Returns (response-header . response-body) or throws 'user-interrupt."
         (throw 'user-interrupt))
        (done?
         ;; Worker finished — return result or re-throw error
-        (if result-err
+       (if result-err
             (apply throw (car result-err) (cdr result-err))
             result-val))
+       ((and (number? timeout-seconds)
+             (> timeout-seconds 0)
+             (>= (/ (- (get-internal-real-time) started)
+                    (* 1.0 internal-time-units-per-second))
+                 timeout-seconds))
+        (cancel-thread worker)
+        (throw 'llm-timeout timeout-seconds))
        (else
         (usleep 100000) ;; 100ms
         (poll))))))
@@ -204,7 +213,13 @@ Returns (response-header . response-body) or throws 'user-interrupt."
                        turn))))
        history))
 
-(define* (chat-with-llm session-id input model system-prompt #:key (think #f) (history '()) (stream-callback #f) (role "user"))
+(define* (chat-with-llm session-id input model system-prompt
+                        #:key
+                        (think #f)
+                        (history '())
+                        (stream-callback #f)
+                        (role "user")
+                        (timeout-seconds (get-config 'llm-timeout-seconds)))
   (let* ((host (get-config 'llm-url))
          (url (string-append host "/v1/chat/completions"))
          (clean-history (clean-history-for-llm history))
@@ -274,7 +289,8 @@ Returns (response-header . response-body) or throws 'user-interrupt."
                               (loop)))))))
                     (lambda () (set! *active-llm-port* #f)))))))
         ;; Synchronous Non-streaming Path
-        (let* ((result (interruptible-http-post url body headers))
+        (let* ((result (interruptible-http-post
+                        url body headers timeout-seconds))
                (response-header (car result))
                (response-body (cdr result)))
           (let* ((body-str (if (string? response-body) response-body (utf8->string response-body)))

@@ -8,7 +8,7 @@ export GAIA_MODEL
 export GAIA_BASE_MODEL
 export GAIA_ALLOW_SANDBOX_FALLBACK
 
-.PHONY: run repl check test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-actors test-server test-rlm test-tool-use benchmark dataset clean llm-server llm-server-logs llm-server-stop clean-trajectories monitor client server gcas-showcase gcas-eval gcas-live-eval gcas-conformance gcas-conformance-scheme test-clients test-emacs-client
+.PHONY: run repl check test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-actors test-server test-rlm test-tool-use benchmark dataset clean llm-server llm-server-logs llm-server-stop clean-trajectories monitor client server gcas-showcase gcas-eval gcas-live-eval gcas-live-conversation-eval gcas-conformance gcas-conformance-scheme test-clients test-emacs-client
 
 GUIX_SHELL = guix shell -m guix.scm --
 GUIX_DEV_SHELL = guix shell -m guix-dev.scm --
@@ -33,6 +33,9 @@ gcas-eval:
 
 gcas-live-eval:
 	GUILE_AUTO_COMPILE=0 guile -L src scripts/run-gcas-live-eval.scm
+
+gcas-live-conversation-eval:
+	GUILE_AUTO_COMPILE=0 guile -L src scripts/run-gcas-live-conversation-eval.scm
 
 ncsi-eval:
 	GUILE_AUTO_COMPILE=0 guile -L src scripts/run-ncsi-evaluation.scm

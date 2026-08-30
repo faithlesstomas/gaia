@@ -72,6 +72,26 @@
          (= (assoc-ref usage "completion_tokens") 2)
          (= (assoc-ref usage "total_tokens") 10))))
 
+(test-assert "chat-with-llm synchronous fails with a bounded timeout"
+  (let* ((web-client-module (resolve-module '(web client)))
+         (original-http-post (module-ref web-client-module 'http-post)))
+    (dynamic-wind
+      (lambda ()
+        (module-set! web-client-module 'http-post
+                     (lambda* (url #:key body headers)
+                       (usleep 250000)
+                       (values 'mock-hdr "{}"))))
+      (lambda ()
+        (catch 'llm-timeout
+          (lambda ()
+            (chat-with-llm "session-timeout" "Wait" "qwen3:4b"
+                           "System prompt" #:timeout-seconds 0.02)
+            #f)
+          (lambda (key seconds)
+            (and (eq? key 'llm-timeout) (= seconds 0.02)))))
+      (lambda ()
+        (module-set! web-client-module 'http-post original-http-post)))))
+
 ;; 3. Test chat-with-llm streaming path
 (test-assert "chat-with-llm streaming"
   (let* ((tokens '())

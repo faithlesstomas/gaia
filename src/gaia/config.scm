@@ -19,6 +19,7 @@
 
 (define %default-config
   `((llm-url . "http://localhost:4000")
+    (llm-timeout-seconds . 300)
     (model . "gemma4:e2b")
     (base-model . "gemma4:e2b")
     (thinking . #t)
@@ -61,6 +62,8 @@ The normalized value is #t, #f, or one of the Ollama effort-level strings."
   "Maps config keys to environment variables and returns value if set."
   (let ((env-val (let ((env-var (case key
                                   ((llm-url) "GAIA_LLM_URL")
+                                  ((llm-timeout-seconds)
+                                   "GAIA_LLM_TIMEOUT_SECONDS")
                                   ((model) "GAIA_MODEL")
                                   ((base-model) "GAIA_BASE_MODEL")
                                   ((system-prompt) "GAIA_SYSTEM_PROMPT")
@@ -71,11 +74,16 @@ The normalized value is #t, #f, or one of the Ollama effort-level strings."
                                   ((allow-sandbox-fallback) "GAIA_ALLOW_SANDBOX_FALLBACK")
                                   (else #f))))
                    (and env-var (getenv env-var)))))
-    (if (and env-val (member key '(allow-sandbox-fallback state-injection wisp-mode)))
-        (or (string=? env-val "1")
-            (string-ci=? env-val "true")
-            (string-ci=? env-val "yes"))
-        env-val)))
+    (cond
+     ((and env-val
+           (member key '(allow-sandbox-fallback state-injection wisp-mode)))
+      (or (string=? env-val "1")
+          (string-ci=? env-val "true")
+          (string-ci=? env-val "yes")))
+     ((and env-val (eq? key 'llm-timeout-seconds))
+      (let ((number (string->number env-val)))
+        (and (number? number) (> number 0) number)))
+     (else env-val))))
 
 (define (load-config)
   "Loads configuration from defaults and environment variables."
