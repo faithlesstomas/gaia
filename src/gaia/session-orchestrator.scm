@@ -20,6 +20,7 @@
   #:use-module (gaia cognitive-trace)
   #:use-module (gaia workspace)
   #:use-module (gaia goal-verifier)
+  #:use-module (gaia conversation-processors)
   #:use-module (gaia production-processors)
   #:export (^session-orchestrator))
 
@@ -192,6 +193,46 @@
                                (<- self 'update-history updated-history)))))))
                #:catch (lambda (err)
                          (send-event client-socket `(error ,(format #f "LLM request failed: ~a" err))))))))
+
+      (('converse utterance)
+       (gaia-log (format #f "[SERVER] Received GCAS conversation turn: ~a"
+                         utterance))
+       (let ((event-sink (lambda (event) (send-event client-socket event))))
+         (start-conversation-process!
+          cognitive-session utterance
+          #:generate
+          (lambda (context succeed fail)
+            ;; Conversational continuity is reconstructed from typed CO memory.
+            ;; The protocol history is deliberately empty even though HISTORY
+            ;; remains available to the UI and audit endpoints.
+            (let ((chat-promise
+                   (<- llm-client 'chat session-id context model
+                       (get-gcas-conversation-system-prompt)
+                       thinking '() event-sink)))
+              (on chat-promise
+                  (lambda (response)
+                    (let ((payload (assoc-ref response "payload"))
+                          (err (assoc-ref response "error")))
+                      (if (and payload (not err))
+                          (succeed (assoc-ref payload "content"))
+                          (fail (if (string? err)
+                                    err
+                                    (format #f "~a" err))))))
+                  #:catch (lambda (err) (fail (format #f "~a" err))))))
+          #:on-client-event event-sink
+          #:on-finished
+          (lambda (outcome final-text hypothesis-text)
+            (let ((updated-history
+                   (append history
+                           (list `(("role" . "user")
+                                   ("content" . ,utterance))
+                                 `(("role" . "assistant")
+                                   ("content" . ,final-text))))))
+              (save-session session-id updated-history)
+              (with-output-to-file ".last_session"
+                (lambda () (display session-id)))
+              (send-event client-socket `(final ,final-text))
+              (<- self 'update-history updated-history))))))
 
       (('solve task)
        (gaia-log (format #f "[SERVER] Received solve task: ~a" task))
@@ -409,7 +450,10 @@
               (new-ws (if (and (not (null? args)) (not (null? (cdr args)))) (cadr args) workspace-dir)))
          (if (string-null? new-id)
              (send-event client-socket `(final ,(string-append "Current session ID: " session-id)))
-             (begin
+             (if (not (valid-session-id? new-id))
+                 (send-event client-socket
+                             '(final "Invalid session ID. Use 1-128 letters, digits, '.', '_' or '-'."))
+                 (begin
                (gaia-log (format #f "[SERVER] Swapping session to: ~a" new-id))
                (let* ((new-history (load-session new-id))
                       (event-sink (lambda (event) (send-event client-socket event)))
@@ -417,7 +461,7 @@
                       (new-agent-actor (spawn ^agent-actor new-id new-sb-actor llm-client event-sink permission-sink)))
                  (with-output-to-file ".last_session" (lambda () (display new-id)))
                  (send-event client-socket `(final ,(string-append "Session switched to: " new-id)))
-                 (bcom (^session-orchestrator bcom new-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client new-history model thinking new-ws (make-cognitive-session #:memory-path (string-append "sessions/" new-id ".gcas-memory.scm") #:state-path (string-append "sessions/" new-id ".gcas-state.scm") #:trace-sink (make-server-cognitive-trace-sink new-id))) 'ok))))))
+                 (bcom (^session-orchestrator bcom new-id client-socket channel permission-sink new-sb-actor new-agent-actor llm-client new-history model thinking new-ws (make-cognitive-session #:memory-path (string-append "sessions/" new-id ".gcas-memory.scm") #:state-path (string-append "sessions/" new-id ".gcas-state.scm") #:trace-sink (make-server-cognitive-trace-sink new-id))) 'ok)))))))
 
       (('list-sessions)
        (let ((sessions (if (file-exists? "sessions")
@@ -441,12 +485,12 @@
   /clear            - Clear current session history and environment
   /env              - Show variables defined in REPL
   /eval <scheme>    - Execute Scheme code directly in REPL
-  /solve <query>    - Run the GCAS cognitive process (default for normal input)
+  /chat <message>   - Run a GCAS conversation turn (default for normal input)
+  /solve <query>    - Run an executable, independently verified GCAS Goal
   /investigate <q>  - Use the legacy recursive LLM–REPL investigation processor
-  /ask <query>      - Ask the LLM without initiating a GCAS process
+  /ask <query>      - Legacy one-shot LLM chat outside a GCAS process
   /cognitive-events - Show the current session's GCAS event trace
   /cognitive-state  - Show Goal, Control, Workspace, CO, and Memory state
-  /ask <query>      - Ask a one-off question to AI (no recursion)
   /model [name]     - Show or change the active LLM model
   /models           - List available models
   /thinking [off|on|low|medium|high|max] - Set or check reasoning mode

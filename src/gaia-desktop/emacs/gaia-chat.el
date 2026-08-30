@@ -45,6 +45,22 @@
 (defvar-local gaia-chat--last-enabled-thinking "on"
   "Last enabled thinking mode, restored after toggling thinking back on.")
 
+(defun gaia-chat--valid-session-id-p (value)
+  "Return non-nil when VALUE is a safe durable GAIA session identifier."
+  (and (stringp value)
+       (> (length value) 0)
+       (<= (length value) 128)
+       (string-match-p "\\`[[:alnum:]_.-]+\\'" value)))
+
+(defun gaia-chat--last-session-id ()
+  "Read the last logical GAIA session from the project boundary."
+  (let ((path (expand-file-name ".last_session" (gaia--find-project-root))))
+    (when (file-readable-p path)
+      (with-temp-buffer
+        (insert-file-contents path)
+        (let ((value (string-trim (buffer-string))))
+          (and (gaia-chat--valid-session-id-p value) value))))))
+
 (defun gaia-chat--model-supports-thinking-p (model)
   "Return non-nil when MODEL is recognized as supporting thinking."
   (when model
@@ -128,6 +144,7 @@
   "Get or create a GAIA buffer for SESSION-ID."
   (let* ((sid (or session-id
                   (and (eq major-mode 'gaia-mode) gaia-chat--session-id)
+                  (gaia-chat--last-session-id)
                   (format "gaia-%d" (time-convert nil 'integer))))
          (buf-name (format "*gaia-%s*" sid))
          (buf (get-buffer-create buf-name)))
@@ -173,9 +190,11 @@
 
 (defun gaia-chat--input-message (input)
   "Translate user input into the public GAIA cognitive protocol.
-Normal text starts GCAS `solve`; one-shot chat, direct execution, and the
-legacy investigation processor are opt-in commands."
+Normal text starts a memory-backed GCAS conversation. Executable Goals,
+one-shot legacy chat, direct execution, and investigation are opt-in commands."
   (cond
+   ((string-prefix-p "/chat " input) `(converse ,(string-trim (substring input 6))))
+   ((string-prefix-p "/converse " input) `(converse ,(string-trim (substring input 10))))
    ((string-prefix-p "/solve " input) `(solve ,(string-trim (substring input 7))))
    ((string-prefix-p "/investigate " input) `(investigate ,(string-trim (substring input 13))))
    ((string-prefix-p "/ask " input) `(ask ,(string-trim (substring input 5))))
@@ -184,7 +203,7 @@ legacy investigation processor are opt-in commands."
    ((member input '("/cognitive-state" "/cognitive-objects")) '(get-cognitive-state))
    ;; Other slash commands remain server-owned for compatibility.
    ((string-prefix-p "/" input) `(eval ,input))
-   (t `(solve ,input))))
+   (t `(converse ,input))))
 
 (defun gaia-chat-send ()
   "Send the text written after the prompt to the GAIA server."

@@ -5,6 +5,7 @@ use rustyline::DefaultEditor;
 use std::io::BufReader;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::{env, fs};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
@@ -19,6 +20,37 @@ use crate::render::*;
 enum Action {
     Continue,
     Exit,
+}
+
+fn valid_session_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+}
+
+fn generated_session_id() -> String {
+    format!(
+        "gaia-cli-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or_default()
+    )
+}
+
+fn initial_session_id() -> String {
+    env::var("GAIA_SESSION_ID")
+        .ok()
+        .filter(|value| valid_session_id(value))
+        .or_else(|| {
+            fs::read_to_string(".last_session")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| valid_session_id(value))
+        })
+        .unwrap_or_else(generated_session_id)
 }
 
 fn cognitive_inspection_operation(command: &str) -> Option<&'static str> {
@@ -68,15 +100,11 @@ use std::sync::Arc;
 
 fn main() -> Result<()> {
     let running_agent = Arc::new(AtomicBool::new(false));
-    let mut session_id = format!(
-        "gaia-cli-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs()
-    );
+    let mut session_id = initial_session_id();
 
     println!("\n{BOLD}{GREEN}GAIA CLI {}{RESET}", env!("GAIA_VERSION"));
-    println!("Type {BOLD}/help{RESET} for commands. Normal input runs the GCAS solve process.\n");
+    println!("Type {BOLD}/help{RESET} for commands. Normal input runs a memory-backed GCAS conversation.\n");
+    println!("Resuming session: {BOLD}{session_id}{RESET}\n");
 
     let mut stream = connect_with_retry(SOCKET_PATH)?;
 
@@ -419,12 +447,13 @@ fn dispatch(
             }
             Ok(Action::Continue)
         }
-        "/solve" | "/investigate" | "/ask" | "/eval" => {
+        "/chat" | "/converse" | "/solve" | "/investigate" | "/ask" | "/eval" => {
             let query = input[cmd.len()..].trim();
             if query.is_empty() {
                 return Err(anyhow::anyhow!("{} requires an argument", cmd));
             }
             let operation = match cmd {
+                "/chat" | "/converse" => "converse",
                 "/solve" => "solve",
                 "/investigate" => "investigate",
                 "/ask" => "ask",
@@ -467,12 +496,12 @@ fn dispatch(
             // Drain any stale events in the channel
             while rx.try_recv().is_ok() {}
 
-            // Normal input starts a GCAS process. One-shot chat and legacy
-            // investigation are available through explicit commands.
+            // Normal input starts a GCAS conversational process. Executable
+            // Goals, one-shot chat, and legacy investigation are explicit.
             send_sexp(
                 stream,
                 &Value::list(vec![
-                    Value::symbol("solve"),
+                    Value::symbol("converse"),
                     Value::string(input.to_string()),
                 ]),
             )?;
@@ -484,7 +513,7 @@ fn dispatch(
 
 #[cfg(test)]
 mod tests {
-    use super::{cognitive_inspection_operation, permission_response};
+    use super::{cognitive_inspection_operation, permission_response, valid_session_id};
     use lexpr::Value;
 
     #[test]
@@ -502,6 +531,15 @@ mod tests {
             Some("get-cognitive-state")
         );
         assert_eq!(cognitive_inspection_operation("/help"), None);
+    }
+
+    #[test]
+    fn validates_persistent_session_identifiers() {
+        assert!(valid_session_id("gaia-cli-42"));
+        assert!(valid_session_id("project.chat_1"));
+        assert!(!valid_session_id("../outside"));
+        assert!(!valid_session_id("contains space"));
+        assert!(!valid_session_id(""));
     }
 
     #[test]

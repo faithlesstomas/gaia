@@ -16,6 +16,19 @@
   (should (equal (gaia-chat--input-message "/cognitive-objects")
                  '(get-cognitive-state))))
 
+(ert-deftest gaia-chat-routes-normal-input-through-gcas-conversation ()
+  (should (equal (gaia-chat--input-message "Cześć, pamiętasz mnie?")
+                 '(converse "Cześć, pamiętasz mnie?")))
+  (should (equal (gaia-chat--input-message "/chat hello")
+                 '(converse "hello")))
+  (should (equal (gaia-chat--input-message "/solve calculate 2+2")
+                 '(solve "calculate 2+2"))))
+
+(ert-deftest gaia-chat-validates-resumable-session-identifiers ()
+  (should (gaia-chat--valid-session-id-p "gaia-chat_42.1"))
+  (should-not (gaia-chat--valid-session-id-p "../escape"))
+  (should-not (gaia-chat--valid-session-id-p "contains space")))
+
 (ert-deftest gaia-chat-registers-cognitive-state-renderer ()
   (should (eq (cdr (assq 'cognitive-state gaia-connection-handlers))
               #'gaia-chat--on-cognitive-state)))

@@ -34,6 +34,8 @@
   (test-equal "set-thinking level" '(set-thinking "high") (parse-slash-command "/thinking high"))
   (test-equal "set-thinking boolean" '(set-thinking "false") (parse-slash-command "/thinking false"))
   (test-equal "ask" '(ask "explain scheme") (parse-slash-command "/ask explain scheme"))
+  (test-equal "chat" '(converse "hello there") (parse-slash-command "/chat hello there"))
+  (test-equal "converse" '(converse "hello there") (parse-slash-command "/converse hello there"))
   (test-equal "solve" '(solve "verify this claim") (parse-slash-command "/solve verify this claim"))
   (test-equal "investigate" '(investigate "inspect this repository") (parse-slash-command "/investigate inspect this repository"))
   (test-equal "cognitive-events" '(get-cognitive-events) (parse-slash-command "/cognitive-events"))
@@ -49,6 +51,13 @@
   (test-equal "get-wisp" '(get-wisp-mode) (parse-slash-command "/wisp"))
   (test-equal "set-wisp" '(set-wisp-mode "off") (parse-slash-command "/wisp off"))
   (test-equal "invalid" #f (parse-slash-command "/unknown-command")))
+
+(test-group "session-id-policy"
+  (test-assert "accepts bounded storage-safe session IDs"
+    (and (valid-session-id? "gaia-chat_42.1")
+         (not (valid-session-id? "../escape"))
+         (not (valid-session-id? "contains space"))
+         (not (valid-session-id? "")))))
 
 
 ;; --- 2. Test clean-history ---
