@@ -671,8 +671,8 @@
                          (let-values (((promo resolver) (spawn-promise-and-resolver)))
                           (<-np resolver 'fulfill
                                 `(("payload" . (("content" . ,(if (= llm-calls 1)
-                                                                   "First attempt:\n```repl\n(display '(0 1 2 3 5 8 13 21 34 55))\n```"
-                                                                   "Revised implementation:\n```repl\n(define (fibonacci-sequence n)\n  (let loop ((remaining n) (a 0) (b 1) (result '()))\n    (if (= remaining 0)\n        (reverse result)\n        (loop (- remaining 1) b (+ a b) (cons a result)))))\n(display (fibonacci-sequence 10))\n```"))
+                                                                   "First attempt:\n```repl\n(define (fibonacci-sequence n) '(0 1 2 3 5 8 13 21 34 55))\n(fibonacci-sequence 10)\n```"
+                                                                   "Revised implementation:\n```repl\n(define (fibonacci-sequence n)\n  (let loop ((remaining n) (a 0) (b 1) (result '()))\n    (if (= remaining 0)\n        (reverse result)\n        (loop (- remaining 1) b (+ a b) (cons a result)))))\n(fibonacci-sequence 10)\n```"))
                                                  ("reasoning" . "Reasoning...")))))
                            promo)]))))
                    (agent (spawn ^agent-actor "direct-solve-session" sandbox mock-llm (lambda _ #t) (lambda _ #t)))
@@ -713,8 +713,7 @@
                          (string-contains output "GoalVerified")
                          (string-contains output "GoalCompleted")
                          (string-contains output "COMPLETED")
-                         (string-contains output "Verified Scheme implementation")
-                         (string-contains output "define (fibonacci-sequence")
+                         (string-contains output "Verified hidden behavioral tests")
                          (string-contains output "cognitive-state")
                          (string-contains output "completion-criteria")
                          (string-contains output "workspace")

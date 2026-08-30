@@ -128,16 +128,16 @@
               (if (= generation-calls 1)
                   (succeed "```repl\n(+ 1 2\n```")
                   (succeed
-                   "```repl\n(define (fibonacci-sequence n) '(0 1 1 2 3 5 8 13 21 34))\n(fibonacci-sequence 10)\n```")))
+                   "```repl\n(define (fibonacci-sequence n)\n  (let loop ((remaining n) (a 0) (b 1) (out '()))\n    (if (= remaining 0) (reverse out)\n        (loop (- remaining 1) b (+ a b) (cons a out)))))\n```")))
             #:extract-action
             (lambda (response)
               (if (= generation-calls 1)
                   "(+ 1 2"
-                  "(define (fibonacci-sequence n) '(0 1 1 2 3 5 8 13 21 34))\n(fibonacci-sequence 10)"))
+                  "(define (fibonacci-sequence n)\n  (let loop ((remaining n) (a 0) (b 1) (out '()))\n    (if (= remaining 0) (reverse out)\n        (loop (- remaining 1) b (+ a b) (cons a out)))))"))
             #:execute
             (lambda (code succeed fail)
               (set! execution-calls (+ execution-calls 1))
-              (succeed "(0 1 1 2 3 5 8 13 21 34)")))))
+              (succeed "((passed . 4) (failed . 0))")))))
       (let* ((objects (state-objects (session-state session)))
              (actions (filter (lambda (co) (eq? (co-type co) 'action)) objects))
              (preflight-conflicts
@@ -167,7 +167,7 @@
         (finished #f))
     (let ((process
            (start-production-process!
-            session "Return the first eight Fibonacci terms."
+            session "Repair a deterministic eight-term sequence."
             #:max-replans 2
             #:generate
             (lambda (prompt succeed fail)
@@ -265,12 +265,12 @@
      (select-goal-verifier "Return the first ten Fibonacci terms.")
      #:generate
      (lambda (prompt succeed fail)
-       (succeed "```repl\n(define (fibonacci-sequence n) '(0 1 1 2 3 5 8 13 21 34))\n(fibonacci-sequence 10)\n```"))
+       (succeed "```repl\n(define (fibonacci-sequence n)\n  (let loop ((remaining n) (a 0) (b 1) (out '()))\n    (if (= remaining 0) (reverse out)\n        (loop (- remaining 1) b (+ a b) (cons a out)))))\n```"))
      #:extract-action
      (lambda (response)
-       "(define (fibonacci-sequence n) '(0 1 1 2 3 5 8 13 21 34))\n(fibonacci-sequence 10)")
+       "(define (fibonacci-sequence n)\n  (let loop ((remaining n) (a 0) (b 1) (out '()))\n    (if (= remaining 0) (reverse out)\n        (loop (- remaining 1) b (+ a b) (cons a out)))))")
      #:execute (lambda (code succeed fail)
-                 (succeed "(0 1 1 2 3 5 8 13 21 34)")))
+                 (succeed "((passed . 4) (failed . 0))")))
     (let* ((restored (make-cognitive-session #:state-path state-path
                                              #:memory-path memory-path))
            (restored-state (session-state restored))

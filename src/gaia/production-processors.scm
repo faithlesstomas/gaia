@@ -86,6 +86,7 @@ from Goblins actors and a particular LLM/runtime."
          (subscriptions-cell (list '()))
          (hypothesis-text-cell (list ""))
          (replan-count-cell (list 0))
+         (execution-attempt-cell (list 0))
          (generative-processor-cell (list #f))
          ;; A request made while a broadcast is being handled is deferred.  This
          ;; preserves a true proposal batch and releases the current focus before
@@ -500,15 +501,35 @@ during a broadcast set the flag for a subsequent round."
                           (eq? (co-type action) 'action))
                  (session-emit! session 'ActionRequested action #:origin 'CONTROL)
                  (on-client-event `(code ,(co-content action)))
-                 (execute
-                  (co-content action)
+                 (set-car! execution-attempt-cell
+                           (+ 1 (car execution-attempt-cell)))
+                 (let* ((private-harness
+                         (and capability
+                              (capability-manifest-private-harness capability)))
+                        (executed-code
+                         (if private-harness
+                             (capability-manifest-prepare-action
+                              capability (co-content action)
+                              (car execution-attempt-cell))
+                             (co-content action))))
+                   (execute
+                  executed-code
                   (lambda (result-text)
                     (when (active-process? session process)
                       (let ((result
                              (make-cognitive-object
                               'result result-text #:provenance 'REPL
-                              #:relations `((process . ,process-id*)
-                                            (produced-by . ,(co-id action))))))
+                              #:relations
+                              (append
+                               `((process . ,process-id*)
+                                 (produced-by . ,(co-id action)))
+                               (if private-harness
+                                   `((capability-manifest-version
+                                      . ,(capability-manifest-version capability))
+                                     (oracle-class . HIDDEN_PROPERTY_TESTS)
+                                     (private-harness-attempt
+                                      . ,(car execution-attempt-cell)))
+                                   '())))))
                         (on-client-event `(result ,result-text))
                         (session-record-result! session (co-id action) result))))
                   (lambda (error-type error-text)
@@ -524,7 +545,7 @@ during a broadcast set the flag for a subsequent round."
                                              (error-class . ,error-type)
                                              (failing-form . ,(co-content action))))))
                         (on-client-event `(repl-error ,message))
-                        (session-record-failure! session (co-id action) failure))))))
+                        (session-record-failure! session (co-id action) failure)))))))
              '()))))
 
          (deliberative-processor

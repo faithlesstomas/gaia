@@ -42,10 +42,31 @@
                      (map capability-manifest-id manifests)))
             5)
          (eq? (capability-manifest-id factorial) 'factorial-6)
+         (every (lambda (manifest)
+                  (and (string=? (capability-manifest-version manifest) "2")
+                       (procedure?
+                        (capability-manifest-private-harness manifest))))
+                manifests)
          (eq? (verifier-contract-class
                (capability-manifest-verifier factorial))
-              'EXACT_VALUE)
+              'UNIT_TEST)
          (not unknown))))
+
+(test-assert "production harness is private and expands after repair"
+  (let* ((manifest
+          (registry-match (make-default-capability-registry)
+                          "Return the first ten Fibonacci terms"))
+         (action
+          "(define (fibonacci-sequence n) '(0 1 1 2 3 5 8 13 21 34))")
+         (first (capability-manifest-prepare-action manifest action 1))
+         (repair (capability-manifest-prepare-action manifest action 2)))
+    (and (string-prefix? action first)
+         (string-prefix? action repair)
+         (string-contains first "gaia-private-checks")
+         (> (string-length repair) (string-length first))
+         (not (string-contains
+               (capability-manifest-action-schema manifest)
+               "fibonacci-sequence 12")))))
 
 (test-assert "exact and structured datum verifiers consume executed Results"
   (let* ((exact (make-datum-verifier 'exact-42 42))
