@@ -96,7 +96,7 @@ readiness remains release evidence, not a claim of current completion.
 
 ## Current implementation-slice boundary
 
-The M0–M6 implementation scope is complete over the transparent local store:
+The original M0–M6 implementation checklist is complete over the transparent local store:
 durable typed memory edges and roles, bounded traversal and lazy STI, governed
 terminal consolidation, guarded retrieval, contradiction revision, production
 v2 private behavioral verification, structured repair, ordinary GCAS
@@ -108,11 +108,18 @@ and reports the narrow exact Beta–Bernoulli domain separately as
 confidence or scheduling uncertainty as posterior probability.
 
 The deterministic conformance gate is green, and the two-turn conversation gate
-passed under a recorded single-model resource envelope. The MVP is not
-release-ready until one explicitly approved model satisfies the repeated
-per-capability thresholds.
-This distinction prevents code completion from being reported as model
-competence.
+passed under a recorded single-model resource envelope. A segmented repeated
+diagnostic on `qwen3.5-4b` subsequently failed all five per-capability
+thresholds. The MVP is therefore not release-ready.
+
+There is also a product-contract gap beyond model competence: ordinary
+conversation currently builds one complete textual Memory projection before
+Workspace admission. The Workspace selects and broadcasts that projection but
+does not causally compose it from separately admitted working-state COs. The
+short recall gate proves bounded durable continuity, not a complete cognitive
+assistant state. Consequently the checklist-complete implementation slice must
+not be reported as the finished product MVP until the stronger projection and
+longitudinal conversation scenarios are implemented and verified.
 
 ## GCAS 0.3 implementation plan
 

@@ -42,6 +42,24 @@ procedural, testimony, episodic, and metacognitive records. The current user
 utterance is carried by the active Goal and is excluded from duplicate memory
 projection. The default reconstructed context is capped at 6000 characters.
 
+### Current projection boundary
+
+The current Memory Processor constructs the complete textual context before it
+is admitted to the Global Workspace. The Workspace selects and broadcasts that
+single `context-co`, and the Generative Processor reacts to its broadcast. The
+Workspace therefore governs lifecycle and observability, but does not yet
+causally compose the model context from independently competing/admitted Goal,
+Memory, Reflection, and working-state COs.
+
+Recent continuity is also still close to conventional bounded chat: by default
+the projection includes the raw content of the six most recent turns, plus up
+to five older/structured memories selected partly by lexical overlap. The
+epistemic typing, boundedness, durable graph, empty provider history, and
+restart behavior are real differences, but there is not yet a durable dialogue
+frame for topics, commitments, unresolved questions, or corrected profile
+state. This is an implementation slice, not the completed cognitive-state
+projection described by the stronger MVP invariant.
+
 User profile-like assertions such as “Mam na imię Tomasz” are retained as
 `USER_TESTIMONY` Observations. This verifies only that the user supplied the
 statement; it does not make the proposition a world fact. Questions containing
