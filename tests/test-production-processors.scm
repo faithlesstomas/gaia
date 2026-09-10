@@ -3,6 +3,7 @@
   #:use-module (srfi srfi-64)
   #:use-module (gaia com)
   #:use-module (gaia cognitive-bus)
+  #:use-module (gaia cognitive-control)
   #:use-module (gaia cognitive-memory)
   #:use-module (gaia cognitive-process)
   #:use-module (gaia cognitive-session)
@@ -108,6 +109,57 @@
                       ActionCompleted EvidenceFound BeliefUpdated
                       WorkspaceRoundStarted WorkspaceRoundCompleted)))))))
 
+(test-assert "preflight rejects malformed syntax before execution and projects typed repair state"
+  (let ((session (make-cognitive-session #:workspace-capacity 3))
+        (generation-calls 0)
+        (execution-calls 0)
+        (prompts '()))
+    (let ((process
+           (start-production-process!
+            session "Return the first ten Fibonacci terms."
+            #:completion-criteria
+            (goal-completion-criteria "Return the first ten Fibonacci terms.")
+            #:verify-goal
+            (select-goal-verifier "Return the first ten Fibonacci terms.")
+            #:generate
+            (lambda (prompt succeed fail)
+              (set! generation-calls (+ generation-calls 1))
+              (set! prompts (append prompts (list prompt)))
+              (if (= generation-calls 1)
+                  (succeed "```repl\n(+ 1 2\n```")
+                  (succeed
+                   "```repl\n(define (fibonacci-sequence n)\n  (let loop ((remaining n) (a 0) (b 1) (out '()))\n    (if (= remaining 0) (reverse out)\n        (loop (- remaining 1) b (+ a b) (cons a out)))))\n```")))
+            #:extract-action
+            (lambda (response)
+              (if (= generation-calls 1)
+                  "(+ 1 2"
+                  "(define (fibonacci-sequence n)\n  (let loop ((remaining n) (a 0) (b 1) (out '()))\n    (if (= remaining 0) (reverse out)\n        (loop (- remaining 1) b (+ a b) (cons a out)))))"))
+            #:execute
+            (lambda (code succeed fail)
+              (set! execution-calls (+ execution-calls 1))
+              (succeed "((passed . 4) (failed . 0))")))))
+      (let* ((objects (state-objects (session-state session)))
+             (actions (filter (lambda (co) (eq? (co-type co) 'action)) objects))
+             (preflight-conflicts
+              (filter (lambda (co)
+                        (and (eq? (co-type co) 'conflict)
+                             (assoc-ref (co-relations co) 'preflight-rejected)))
+                      objects)))
+        (and (eq? (process-outcome process) 'COMPLETED)
+             (= generation-calls 2)
+             (= execution-calls 1)
+             (= (control-failure-count (process-control process)) 1)
+             (= (length actions) 1)
+             (= (length preflight-conflicts) 1)
+             (eq? (assoc-ref (co-relations (car preflight-conflicts))
+                             'error-class)
+                  'READ_SYNTAX)
+             (string-contains (car prompts) "Projection phase: INITIAL")
+             (string-contains (car prompts) "Capability: fibonacci-10")
+             (string-contains (cadr prompts) "Projection phase: REPAIR")
+             (string-contains (cadr prompts) "Repair error class: READ_SYNTAX")
+             (string-contains (cadr prompts) "Remaining budgets:"))))))
+
 (test-assert "a deterministic Fibonacci Goal completes only after failure-first independent verification"
   (let ((session (make-cognitive-session #:workspace-capacity 2))
         (generated '())
@@ -115,7 +167,7 @@
         (finished #f))
     (let ((process
            (start-production-process!
-            session "Return the first eight Fibonacci terms."
+            session "Repair a deterministic eight-term sequence."
             #:max-replans 2
             #:generate
             (lambda (prompt succeed fail)
@@ -213,18 +265,48 @@
      (select-goal-verifier "Return the first ten Fibonacci terms.")
      #:generate
      (lambda (prompt succeed fail)
-       (succeed "```repl\n(define (fibonacci-sequence n) '(0 1 1 2 3 5 8 13 21 34))\n(fibonacci-sequence 10)\n```"))
+       (succeed "```repl\n(define (fibonacci-sequence n)\n  (let loop ((remaining n) (a 0) (b 1) (out '()))\n    (if (= remaining 0) (reverse out)\n        (loop (- remaining 1) b (+ a b) (cons a out)))))\n```"))
      #:extract-action
      (lambda (response)
-       "(define (fibonacci-sequence n) '(0 1 1 2 3 5 8 13 21 34))\n(fibonacci-sequence 10)")
+       "(define (fibonacci-sequence n)\n  (let loop ((remaining n) (a 0) (b 1) (out '()))\n    (if (= remaining 0) (reverse out)\n        (loop (- remaining 1) b (+ a b) (cons a out)))))")
      #:execute (lambda (code succeed fail)
-                 (succeed "(0 1 1 2 3 5 8 13 21 34)")))
+                 (succeed "((passed . 4) (failed . 0))")))
     (let* ((restored (make-cognitive-session #:state-path state-path
                                              #:memory-path memory-path))
            (restored-state (session-state restored))
            (event-types (map event-type (state-events restored-state)))
            (facts (filter fact? (state-objects restored-state)))
-           (memories (memory-objects (session-memory restored))))
+           (memories (memory-objects (session-memory restored)))
+           (procedures
+            (filter (lambda (co)
+                      (and (eq? (co-type co) 'procedure)
+                           (eq? (memory-role co) 'PROCEDURAL)))
+                    memories))
+           (reused-prompt-cell (list #f))
+           (reuse-process
+            (start-production-process!
+             restored "Reuse the verified first ten Fibonacci terms procedure."
+             #:generate
+             (lambda (prompt succeed fail)
+               (set-car! reused-prompt-cell prompt)
+               (succeed "No new Action is available for this test."))
+             #:extract-action (lambda (response) #f)
+             #:execute
+             (lambda args
+               (error "procedural retrieval must not execute by itself"))))
+           (revised-memories (memory-objects (session-memory restored)))
+           (capability-assessments
+            (filter
+             (lambda (co)
+               (and (eq? (co-type co) 'reflection)
+                    (eq? (assoc-ref (co-relations co) 'assesses-capability)
+                         'fibonacci-10)))
+             revised-memories))
+           (current-assessments
+            (filter
+             (lambda (co)
+               (not (assoc-ref (co-relations co) 'superseded-by)))
+             capability-assessments)))
       (for-each (lambda (path)
                   (when (file-exists? path) (delete-file path)))
                 (list state-path memory-path))
@@ -233,7 +315,24 @@
            (any (lambda (claim) (assoc-ref (co-relations claim) 'satisfies)) facts)
            (any fact? memories)
            (any (lambda (co) (eq? (co-type co) 'evidence)) memories)
-           (any (lambda (co) (eq? (co-type co) 'result)) memories)))))
+           (any (lambda (co) (eq? (co-type co) 'result)) memories)
+           (= (length procedures) 1)
+           (assoc-ref (co-relations (car procedures)) 'derived-from)
+           (assoc-ref (co-relations (car procedures)) 'supported-by)
+           (eq? (process-outcome reuse-process) 'INSUFFICIENT_INFORMATION)
+           (string-contains (car reused-prompt-cell)
+                            "Verified procedure for Goal")
+           (= (length capability-assessments) 2)
+           (= (length current-assessments) 1)
+           (= (assoc-ref (co-relations (car current-assessments))
+                         'attempt-count)
+              2)
+           (= (assoc-ref (co-relations (car current-assessments))
+                         'success-count)
+              1)
+           (eq? (assoc-ref (co-relations (car current-assessments))
+                           'observed-outcome)
+                'INSUFFICIENT_INFORMATION)))))
 
 (test-assert "a Conflict is reflected and routed to Generative replanning"
   (let ((session (make-cognitive-session #:workspace-capacity 2))

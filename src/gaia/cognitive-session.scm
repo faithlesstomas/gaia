@@ -20,6 +20,7 @@
             session-complete-goal!
             session-memory
             session-state-path
+            session-diagnose!
             session-persist!
             session-submit!
             session-advance!
@@ -36,7 +37,7 @@
 ;; their own proposals.  That keeps cognition separate from any one processor.
 (define-record-type <cognitive-session>
   (%make-session state workspace bus fallback-control memory state-path
-                 current-process-cell trace-sink)
+                 current-process-cell trace-sink diagnostic-sink)
   cognitive-session?
   (state session-state)
   (workspace session-workspace)
@@ -45,13 +46,16 @@
   (memory session-memory)
   (state-path session-state-path)
   (current-process-cell session-current-process-cell)
-  (trace-sink session-trace-sink))
+  (trace-sink session-trace-sink)
+  (diagnostic-sink session-diagnostic-sink))
 
 (define* (make-cognitive-session #:key (workspace-capacity 7) (max-transitions 32)
                                 (memory-path #f) (state-path #f) (restore? #t)
-                                (trace-sink #f))
+                                (trace-sink #f) (diagnostic-sink #f))
   (unless (or (not trace-sink) (procedure? trace-sink))
     (error "trace-sink must be a procedure or #f" trace-sink))
+  (unless (or (not diagnostic-sink) (procedure? diagnostic-sink))
+    (error "diagnostic-sink must be a procedure or #f" diagnostic-sink))
   (let ((session
          (%make-session (if (and state-path restore?)
                             (load-cognitive-state state-path)
@@ -62,7 +66,8 @@
                         (make-cognitive-memory #:path memory-path #:restore? restore?)
                         state-path
                         (list #f)
-                        trace-sink)))
+                        trace-sink
+                        diagnostic-sink)))
     ;; Start an explicitly cleared session with an empty, durable state rather
     ;; than letting an old audit graph be restored later.
     (when (and state-path (not restore?))
@@ -77,6 +82,14 @@
     (if (and process (process-active? process))
         (process-control process)
         (session-fallback-control session))))
+
+(define (session-diagnose! session type payload)
+  "Emit a non-durable diagnostic observation without touching State or Bus."
+  (let ((sink (session-diagnostic-sink session)))
+    (when sink
+      (catch #t
+        (lambda () (sink session type payload))
+        (lambda _ #f)))))
 
 (define* (session-start-process! session goal completion-criteria
                                  #:key
@@ -166,16 +179,37 @@ satisfies it.  This is the sole production path to GoalCompleted."
                          (risk 0)
                          (cost 0)
                          (uncertainty 0)
+                         (urgency 0)
+                         (conflict 0)
+                         (out-of-domain 0)
+                         (information-gain 0)
                          (origin 'KERNEL))
-  (state-store! (session-state session) co)
-  (workspace-propose! (session-workspace session) co
+  (let ((submitted
+         (if (and (memq (co-type co)
+                        '(hypothesis evidence plan action result claim conflict
+                                     reflection rule procedure))
+                  (not (assoc-ref (co-relations co) 'quantified-by))
+                  (not (assoc-ref (co-relations co) 'uncertainty-treatment)))
+             ;; Explicitly record the processor's uncertainty disposition.  A
+             ;; later processor may replace this with QUANTIFIED-BY links, but
+             ;; absence of an assessment is never silently rendered as a
+             ;; probability.
+             (co-add-relation co 'uncertainty-treatment
+                              'NO_APPLICABLE_ASSESSMENT)
+             co)))
+  (state-store! (session-state session) submitted)
+  (workspace-propose! (session-workspace session) submitted
                       #:priority priority
                       #:relevance relevance
                       #:risk risk
                       #:cost cost
-                      #:uncertainty uncertainty)
-  (emit! session (make-cognitive-event 'CandidateSubmitted co #:origin origin))
-  co)
+                      #:uncertainty uncertainty
+                      #:urgency urgency
+                      #:conflict conflict
+                      #:out-of-domain out-of-domain
+                      #:information-gain information-gain)
+  (emit! session (make-cognitive-event 'CandidateSubmitted submitted #:origin origin))
+  submitted))
 
 (define (session-advance! session)
   (let ((reason (control-termination-reason (session-control session))))
@@ -184,9 +218,12 @@ satisfies it.  This is the sole production path to GoalCompleted."
         ;; Control after that process has finished must not manufacture a
         ;; duplicate, process-less ProcessTerminated event.
         (let ((process (session-current-process session)))
-          (and process
-               (process-active? process)
-               (session-finish-process! session reason)))
+          (when (and process (process-active? process))
+            (session-finish-process! session reason))
+          ;; Termination is not an admitted Cognitive Object.  Returning the
+          ;; outcome symbol here made workspace-round bookkeeping call CO-ID on
+          ;; FAILURE_BUDGET_EXHAUSTED when a budget expired between rounds.
+          #f)
         (let ((admitted (workspace-admit-next!
                          (session-workspace session)
                          #:selector (lambda (candidates)

@@ -214,13 +214,15 @@
          (<- orchestrator 'handle-message '(list-models))
          (<- orchestrator 'handle-message '(get-thinking))
          (<- orchestrator 'handle-message '(set-thinking "on"))
+         (<- orchestrator 'handle-message '(set-thinking "high"))
+         (<- orchestrator 'handle-message '(get-thinking))
          (<- orchestrator 'handle-message 'interrupt)
          (<- orchestrator 'handle-message '(get-history)))
        (let loop ()
          (set! output-val (get-output-string mock-socket))
          (if (and (string-contains output-val "model-info")
                   (string-contains output-val "models-list")
-                  (string-contains output-val "thinking-info")
+                  (string-contains output-val "(thinking-info \"high\")")
                   (string-contains output-val "history-list"))
              (with-vat session-vat
                (on (<- orchestrator 'handle-message 'eof)
@@ -232,7 +234,7 @@
     (and (port-closed? mock-socket)
          (string-contains output-val "model-info")
          (string-contains output-val "models-list")
-         (string-contains output-val "thinking-info")
+         (string-contains output-val "(thinking-info \"high\")")
          (string-contains output-val "history-list"))))
 
 
@@ -580,6 +582,78 @@
                          (string-contains output "notebook-done")
                          (string-contains output "ActionCompleted"))))))
 
+            ;; Ordinary text uses a separate conversational GCAS process. The
+            ;; UI transcript is retained for audit, but every LLM request must
+            ;; carry an empty history and a bounded projection from CO Memory.
+            (let* ((sandbox (spawn ^repl-sandbox "direct-conversation-session" (lambda _ #t) (lambda _ #t) '()))
+                   (llm-calls 0)
+                   (conversation-prompts '())
+                   (conversation-histories '())
+                   (conversation-system-prompts '())
+                   (mock-llm
+                    (spawn
+                     (lambda (bcom)
+                       (methods
+                        [(chat session-id prompt model system-prompt think history stream-callback #:optional (role "user"))
+                         (set! llm-calls (+ llm-calls 1))
+                         (set! conversation-prompts
+                               (append conversation-prompts (list prompt)))
+                         (set! conversation-histories
+                               (append conversation-histories (list history)))
+                         (set! conversation-system-prompts
+                               (append conversation-system-prompts
+                                       (list system-prompt)))
+                         (let-values (((promo resolver)
+                                       (spawn-promise-and-resolver)))
+                           (<-np resolver 'fulfill
+                                 `(("payload" .
+                                    (("content" .
+                                      ,(if (= llm-calls 1)
+                                           "Miło Cię poznać, Tomaszu."
+                                           "Pamiętam, że masz na imię Tomasz."))
+                                     ("reasoning" . "")))))
+                           promo)]))))
+                   (agent (spawn ^agent-actor "direct-conversation-session" sandbox mock-llm (lambda _ #t) (lambda _ #t)))
+                   (mock-socket (open-output-string))
+                   (orch (spawn ^session-orchestrator "direct-conversation-session" mock-socket #f (lambda (expr) #t) sandbox agent mock-llm '() "gemma4:e2b" #f)))
+              (<- orch 'handle-message '(clear))
+              (run-turns-synchronously)
+              (<- orch 'handle-message '(converse "Mam na imię Tomasz."))
+              (run-turns-synchronously)
+              (<- orch 'handle-message '(converse "Jak mam na imię?"))
+              (run-turns-synchronously)
+              (<- orch 'handle-message '(get-cognitive-events))
+              (run-turns-synchronously)
+              (<- orch 'handle-message '(get-cognitive-state))
+              (run-turns-synchronously)
+              (let ((output (get-output-string mock-socket)))
+                (test-equal "direct-conversation: invokes one model call per turn"
+                  2 llm-calls)
+                (test-equal "direct-conversation: never replays protocol history"
+                  '(() ()) conversation-histories)
+                (test-assert "direct-conversation: second projection recalls both speakers"
+                  (and (= (length conversation-prompts) 2)
+                       (string-contains (cadr conversation-prompts) "Tomasz")
+                       (string-contains (cadr conversation-prompts)
+                                        "Miło Cię poznać")))
+                (test-assert "direct-conversation: uses the epistemic conversation contract"
+                  (and (= (length conversation-system-prompts) 2)
+                       (string-contains (car conversation-system-prompts)
+                                        "# CONVERSATION CONTRACT")
+                       (string-contains (cadr conversation-system-prompts)
+                                        "# CONVERSATION CONTRACT")
+                       #t))
+                (test-assert "direct-conversation: exposes GCAS delivery lifecycle"
+                  (and (string-contains output "ConversationTurnReceived")
+                       (string-contains output "ResponseDeliveryVerified")
+                       (string-contains output "GoalVerificationCompleted")
+                       (string-contains output "GoalCompleted")
+                       #t))
+                (test-assert "direct-conversation: returns prose without Action execution"
+                  (and (string-contains output
+                                        "Pamiętam, że masz na imię Tomasz")
+                       (not (string-contains output "ActionRequested"))))))
+
             ;; 6. The default solve command is assembled from Bus processors
             ;; and uses the task-specific verifier selected by production.
             (let* ((sandbox (spawn ^repl-sandbox "direct-solve-session" (lambda _ #t) (lambda _ #t) '()))
@@ -597,8 +671,8 @@
                          (let-values (((promo resolver) (spawn-promise-and-resolver)))
                           (<-np resolver 'fulfill
                                 `(("payload" . (("content" . ,(if (= llm-calls 1)
-                                                                   "First attempt:\n```repl\n(display '(0 1 2 3 5 8 13 21 34 55))\n```"
-                                                                   "Revised implementation:\n```repl\n(define (fibonacci-sequence n)\n  (let loop ((remaining n) (a 0) (b 1) (result '()))\n    (if (= remaining 0)\n        (reverse result)\n        (loop (- remaining 1) b (+ a b) (cons a result)))))\n(display (fibonacci-sequence 10))\n```"))
+                                                                   "First attempt:\n```repl\n(define (fibonacci-sequence n) '(0 1 2 3 5 8 13 21 34 55))\n(fibonacci-sequence 10)\n```"
+                                                                   "Revised implementation:\n```repl\n(define (fibonacci-sequence n)\n  (let loop ((remaining n) (a 0) (b 1) (result '()))\n    (if (= remaining 0)\n        (reverse result)\n        (loop (- remaining 1) b (+ a b) (cons a result)))))\n(fibonacci-sequence 10)\n```"))
                                                  ("reasoning" . "Reasoning...")))))
                            promo)]))))
                    (agent (spawn ^agent-actor "direct-solve-session" sandbox mock-llm (lambda _ #t) (lambda _ #t)))
@@ -639,8 +713,7 @@
                          (string-contains output "GoalVerified")
                          (string-contains output "GoalCompleted")
                          (string-contains output "COMPLETED")
-                         (string-contains output "Verified Scheme implementation")
-                         (string-contains output "define (fibonacci-sequence")
+                         (string-contains output "Verified hidden behavioral tests")
                          (string-contains output "cognitive-state")
                          (string-contains output "completion-criteria")
                          (string-contains output "workspace")
@@ -688,7 +761,7 @@
                   (run-turns-synchronously)
                   (let ((output (get-output-string mock-socket)))
                     (and (= llm-calls 3)
-                         (string-contains output "repl-error")
+                         (string-contains output "Action preflight rejected")
                          (string-contains output "FAILURE_BUDGET_EXHAUSTED")
                          (string-contains output "ProcessTerminated")
                          (string-contains output "(final")

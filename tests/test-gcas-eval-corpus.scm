@@ -72,6 +72,12 @@
             '(("(syntax-bad)" (error syntax "bad form"))
               ("(syntax-fixed)" (ok "42")))
             'COMPLETED 2 2 #:accepted-results '("42") #:repair-target? #t)
+   (fixture 'preflight-syntax-repair 'repair
+            '("preflight-bad" "preflight-fixed")
+            '(("preflight-bad" . "(+ 1 2")
+              ("preflight-fixed" . "(+ 40 2)"))
+            '(("(+ 40 2)" (ok "42")))
+            'COMPLETED 2 1 #:accepted-results '("42") #:repair-target? #t)
    (fixture 'runtime-repair 'repair
             '("runtime-bad" "runtime-fixed")
             '(("runtime-bad" . "(runtime-bad)")

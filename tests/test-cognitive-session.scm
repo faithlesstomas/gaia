@@ -205,6 +205,20 @@
                (member 'WorkspaceBroadcast (map car ordered))
                (member 'WorkspaceRoundCompleted (map car ordered)))))))
 
+  (test-assert "diagnostic sink is observable but never durable or broadcast"
+    (let ((diagnostics '()))
+      (let* ((session
+              (make-cognitive-session
+               #:diagnostic-sink
+               (lambda (observed-session type payload)
+                 (set! diagnostics (cons (cons type payload) diagnostics)))))
+             (before-events (length (state-events (session-state session))))
+             (before-bus (length (bus-events-history (session-bus session)))))
+        (session-diagnose! session 'Probe '((detail . "non-durable")))
+        (and (= (length diagnostics) 1)
+             (= (length (state-events (session-state session))) before-events)
+             (= (length (bus-events-history (session-bus session))) before-bus)))))
+
   (test-assert "state, event log, and reproducibility record survive session restoration"
     (let* ((path "/tmp/gaia-gcas-state-test.scm")
            (_ (when (file-exists? path) (delete-file path)))

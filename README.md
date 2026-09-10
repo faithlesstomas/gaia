@@ -7,36 +7,43 @@
 
 
 **GAIA** is a local-first project implementing the [General Cognitive Architecture Specification (GCAS)](gcas.md).
-The current codebase provides persistent cognitive state, explicit epistemic provenance, a bounded Workspace substrate,
+The current codebase provides a memory-backed conversational assistant, persistent cognitive state, explicit epistemic provenance, a bounded Workspace substrate,
 processor contracts, and an auditable execution environment built in **GNU Guile**. Production `solve` is now assembled from
 processors reacting through the Cognitive Bus. Production `solve` uses explicit Workspace competition rounds and bounded
 feedback-driven replanning after failed actions or conflicts. A Goal may complete only through an independent verifier and a verified
-Claim. The minimum GCAS-Core conformance gate covers failure-first repair, persistence, budgets, interruption, and both supported
+Claim. The GCAS-Core 0.2 baseline conformance gate covers failure-first repair, persistence, budgets, interruption, and both supported
 clients. This is architectural conformance, not general task competence: Fibonacci is the first registered production verifier,
 while unsupported task classes deliberately terminate as `INCONCLUSIVE`.
 Control-driven budget exhaustion now also reaches the client as a terminal response, including the three-failed-Action case that
-previously left the CLI waiting. The current product milestone is a reliable, measurable vertical slice rather than immediate
-implementation of every GCAS extension.
+previously left the CLI waiting. The current product milestone is the
+[GAIA MVP — Persistent Verified Assistant](docs/gaia-mvp.md): a measurable
+vertical slice combined with durable graph memory and longitudinal acceptance
+tests, rather than immediate implementation of every GCAS extension.
 
 Thanks to the Guile language, GAIA treats code as data (homoiconicity), enabling structural validation,
 sandboxed evaluation, and white-box auditability. These mechanisms constrain generated code; they do not eliminate LLM errors.
 
 GAIA aims to bridge probabilistic Large Language Models (LLMs) and deterministic symbolic reasoning.
 The read-only NCSI/J-space path is implemented as an opt-in experimental
-profile. A Goblins-based AtomSpace, Lean 4 integration, and write-side neural
-intervention remain roadmap work.
+profile. Initial AtomSpace semantics—durable CO nodes, typed edges, traversal,
+dependency invalidation, and supersession—are implemented over the transparent
+local store. A Goblins actor backend, STI/LTI, Lean 4 integration, and write-side
+neural intervention remain roadmap work.
 
 ## Evidence and implementation status
 
 | Area | Status | Evidence and boundary |
 |---|---|---|
-| GCAS-Core lifecycle | **Implemented** | The model-free corpus passes 22/22 cases with zero hangs and false completions, including 4/4 repair paths. |
-| Structured memory and Goal Verification | **Implemented at Core minimum** | Verified evidence chains persist across sessions; unsupported task classes fail closed as `INCONCLUSIVE`. Retrieval remains lexical and this is not yet evidence of cross-task learning. |
+| GCAS-Core 0.2 lifecycle | **Implemented baseline** | The model-free corpus passes 23/23 cases with zero hangs and false completions, including 5/5 repair paths and preflight rejection before execution; GCAS 0.3 uncertainty conformance is roadmap work. |
+| Persistent GCAS assistant | **Implemented slice; product/release gaps remain** | Plain input is a bounded GCAS conversation. Typed user/assistant turns survive restart, prompts are reconstructed from bounded Memory with empty protocol history, and assistant prose remains `HYPOTHESIS`/`UNVERIFIED`. The operator-approved `qwen3.5-4b` two-turn gate passed, but a segmented 50-case capability diagnostic was below threshold for all five capabilities. The current conversation projector also does not yet causally compose its prompt from independently admitted Workspace COs. |
 | NCSI/J-space observation path | **Experimental** | The versioned protocol, RAI UDS adapter, neural Observation COs, bounded Workspace proposals, fallback, and matched M5 harness are implemented. The 18-run SmolLM2 pilot supports `SHIP_EXPERIMENTAL`, not a causal or epistemic claim. |
 | NCSI sidecar hardening and artifact replication | **In progress in RAI** | The clean-environment artifact reproduction/resource baseline and several operational M1–M3 gates remain open. |
-| Steering, AtomSpace, formal proving, cross-task benchmark | **Roadmap** | These capabilities are not part of the current production claim. |
+| Goblins AtomSpace backend, STI/LTI, steering, formal proving, cross-task benchmark | **Roadmap** | These capabilities are not part of the current production claim. |
 
-See the [deterministic evaluation report](docs/gcas-evaluation.md), the
+See the [GAIA MVP contract](docs/gaia-mvp.md), the
+[capability and readiness matrix](docs/capability-matrix.md), the
+[uncertainty implementation](docs/gcas-uncertainty.md), the
+[deterministic evaluation report](docs/gcas-evaluation.md), the
 [M5 evaluation](docs/evaluations/ncsi-smollm2-m5.md), its
 [machine-readable summary](docs/evaluations/ncsi-smollm2-m5-summary.json), and
 the [canonical NCSI milestone checklist](docs/ncsi-jlens-integration.md).
@@ -70,7 +77,7 @@ Question / Environment → Cognitive Objects → Workspace competition
                               Result / Failure / Reflection
 ```
 
-In the current GCAS-Core `solve` path, LLM output begins as a hypothesis and sandbox execution crosses an explicit
+In the current GCAS-Core 0.2 baseline `solve` path, LLM output begins as a hypothesis and sandbox execution crosses an explicit
 Action/Result boundary. State and event traces are durable, and Memory, Generative, Planner, Execution, Deliberative, Answer,
 Goal Verifier, and Control processors react through the Cognitive Bus. Control runs explicit Workspace rounds and
 failure/conflict feedback can produce a revised hypothesis, Plan, and Action under bounded budgets. Successful execution remains
@@ -81,7 +88,15 @@ testimony are stored separately from chat transcripts and can be retrieved acros
 currently receives, [the GCAS 0.2 research synthesis](docs/gcas-0.2-research-synthesis.md)
 for the consolidated rationale, and [gcas.md](gcas.md) for the normative specification.
 
-Production `solve` does **not** replay chat history to the model. It currently
+The normative specification is now GCAS 0.3. GAIA does not yet claim `GCAS-Uncertainty 0.3` conformance: its existing scalar CO
+confidence and Workspace uncertainty fields are scheduling metadata, not calibrated posterior probabilities. The migration is tracked
+in [ROADMAP.md](ROADMAP.md), with reviewable implementation slices and acceptance
+criteria in [the GAIA MVP contract](docs/gaia-mvp.md#gcas-03-implementation-plan).
+
+Neither ordinary conversation nor production `solve` replays chat history to
+the model. Normal input reconstructs a bounded conversational projection from
+recent episodic turns and relevant structured Memory; the delivered prose stays
+an unverified hypothesis. Production `solve`
 sends a compact GCAS-specific Action contract plus a transient projection reconstructed
 from the current Goal, admitted Workspace objects, selected structured Memory,
 constraints, and—during repair—the latest Reflection. This avoids transcript
@@ -218,6 +233,13 @@ make gcas-eval
 # Run the opt-in live-model matrix (uses GAIA_MODEL by default)
 make gcas-live-eval
 
+# Run the two-turn restart/recall gate for ordinary GCAS conversation
+GAIA_EVAL_MODELS='<litellm-model-name>' \
+GAIA_EVAL_MODEL_PARAMETERS_B=4 \
+GAIA_EVAL_RESOURCE_APPROVED=1 \
+GAIA_CONVERSATION_EVAL_OUTPUT=/tmp/gcas-conversation.json \
+make gcas-live-conversation-eval
+
 # Run the production GCAS-Core conformance gate, including CLI and Emacs protocol tests
 make gcas-conformance
 
@@ -226,7 +248,9 @@ make test-ncsi
 ```
 
 The deterministic commands above require no model server and are the public
-reproducibility floor. The live GCAS and NCSI evaluations are opt-in because
+reproducibility floor. Live calls have a 300-second per-call bound and a
+2048-token output bound by default; override them with
+`GAIA_LLM_TIMEOUT_SECONDS` and `GAIA_LLM_MAX_OUTPUT_TOKENS`. The live GCAS and NCSI evaluations are opt-in because
 they require pinned model endpoints and, for NCSI, the separately installed RAI
 neural dependencies and a checksummed lens artifact. To reproduce the published
 M5 pilot, start the RAI sidecar at `$XDG_RUNTIME_DIR/rai/neural.sock`, then run:
@@ -246,8 +270,11 @@ The exact revisions, artifact checksum, aggregate results, acceptance rule, and
 limitations are recorded with the M5 report. Run-specific request IDs and
 timings are intentionally not treated as stable golden values.
 
-In the interactive CLI, plain text starts the recurrent GCAS-Core `solve` path. Use
-`/ask <query>` for one-shot chat, `/investigate <query>` for the legacy
+In the interactive CLI and Emacs client, plain text starts the memory-backed
+GCAS conversation path. The client resumes the last logical session from
+`.last_session` by default. Use `/chat <message>` explicitly for the same path,
+`/solve <goal>` for one of the five executable and independently verified
+capabilities, `/ask <query>` for legacy one-shot chat, `/investigate <query>` for the legacy
 LLM–REPL investigation processor, `/eval <scheme>` for direct REPL execution,
 `/cognitive-events` to inspect the session event trace, and `/cognitive-state`
 (alias `/cognitive-objects`) to inspect the current Goal, Control budgets,
@@ -260,6 +287,20 @@ This trace is ordered before synchronous processor reactions, so causes appear
 before the events they trigger. CO content is truncated to keep the log usable;
 the complete durable graph remains available through `/cognitive-state` and
 the session's `sessions/*.gcas-state.scm` file.
+
+For example, these two ordinary turns use typed durable Memory rather than an
+ever-growing LLM transcript:
+
+```text
+Mam na imię Tomasz.
+Jak mam na imię?
+```
+
+Use `/cognitive-events` to see `ConversationTurnReceived`, `MemoryRetrieved`,
+Workspace broadcasts, `HypothesisProposed`, `ResponseDeliveryVerified`, and
+the terminal Goal events. Use `/cognitive-state` to inspect the corresponding
+COs and epistemic statuses. The exact architecture and operational boundary are
+described in [the conversation design](docs/gcas-conversation.md).
 
 **4. Curate Data for Fine-tuning:**
 

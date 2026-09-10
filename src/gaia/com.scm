@@ -29,7 +29,8 @@
 
 ;; Permissible values per GCAS 0.1 taxonomy
 (define VALID-TYPES
-  '(claim hypothesis observation evidence goal plan action result question conflict reflection rule procedure))
+  '(claim hypothesis observation evidence goal plan action result question conflict reflection rule procedure
+          uncertainty-assessment calculus-declaration calibration-record correctness-observed))
 
 (define VALID-PROVENANCES
   '(USER LLM REPL SENSOR MEMORY EXTERNAL_SOURCE SYMBOLIC_INFERENCE FORMAL_PROOF EXECUTION NEURAL NEURAL_J_LENS))
@@ -64,6 +65,35 @@ neural provenance is never itself accepted or verified evidence."
     (error "Neural signals cannot be ACCEPTED or VERIFIED"
            provenance epistemic verification)))
 
+(define SPECIALIZED-CO-FIELDS
+  '((uncertainty-assessment
+     target-ref quantity calculus-id calculus-version value outcome-space
+     semantics units uncertainty-sources conditioned-on assumptions lineage
+     dependence method diagnostics previous-assessment-refs calibration-ref
+     scope producer created-at)
+    (calculus-declaration
+     calculus-id calculus-version value-domain interpretation operations
+     assumptions diagnostics compatible-quantities unsupported-operations)
+    (calibration-record
+     target quantity calculus-id scope samples sample-count brier-score
+     log-loss calibration-curve sharpness coverage decision-loss shift-status)
+    (correctness-observed
+     target-ref assessment-ref outcome verification-method scope observed-at)))
+
+(define (validate-specialized-content! type content)
+  "Fail closed for the new GCAS 0.3 uncertainty CO contracts.  Older CO types
+remain byte-for-byte compatible and their legacy confidence field acquires no
+new probabilistic meaning."
+  (let ((contract (assoc-ref SPECIALIZED-CO-FIELDS type)))
+    (when contract
+      (unless (list? content)
+        (error "Specialized Cognitive Object content must be an alist" type content))
+      (for-each
+       (lambda (field)
+         (unless (assoc field content)
+           (error "Semantically incomplete Cognitive Object" type field)))
+       contract))))
+
 ;; Definition of Cognitive Object Record
 (define-record-type <cognitive-object>
   (%make-co id type content provenance epistemic-status verification-status confidence valid-from valid-to invalidated-by relations)
@@ -96,6 +126,7 @@ neural provenance is never itself accepted or verified evidence."
                                 (relations '()))
   "Constructor for Cognitive Objects enforcing GCAS epistemic classification rules."
   (valid-member? type VALID-TYPES 'Cognitive-Object-type)
+  (validate-specialized-content! type content)
   (valid-member? provenance VALID-PROVENANCES 'provenance)
   (valid-confidence? confidence)
   (let* ((actual-valid-from (or valid-from (current-time)))
@@ -134,7 +165,10 @@ neural provenance is never itself accepted or verified evidence."
   (and (cognitive-object? co)
        (eq? (co-type co) 'claim)
        (eq? (co-epistemic-status co) 'ACCEPTED)
-       (memq (co-verification-status co) '(VERIFIED FORMALLY_VERIFIED))))
+       (memq (co-verification-status co) '(VERIFIED FORMALLY_VERIFIED))
+       ;; Historical acceptance remains auditable, but an invalidated Claim is
+       ;; no longer eligible for use as a current fact.
+       (not (co-invalidated-by co))))
 
 (define (hypothesis? co)
   "Predicate: Returns #t if Cognitive Object is a HYPOTHESIS."
@@ -220,6 +254,7 @@ confidence, or temporal metadata to enter Cognitive State."
       (unless (and (string? id) (positive? (string-length id)))
         (error "Persisted Cognitive Object requires a non-empty id" id))
       (valid-member? type VALID-TYPES 'Cognitive-Object-type)
+      (validate-specialized-content! type content)
       (valid-member? prov VALID-PROVENANCES 'provenance)
       (valid-member? epistemic VALID-EPISTEMIC-STATUSES 'epistemic-status)
       (valid-member? verif VALID-VERIFICATION-STATUSES 'verification-status)

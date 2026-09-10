@@ -8,11 +8,15 @@
             cognitive-control?
             control-transition-count
             control-max-transitions
+            control-max-stalled-transitions
+            control-max-failures
             control-record-transition!
             control-record-progress!
             control-progress-count
+            control-stalled-count
             control-record-failure!
             control-failure-count
+            control-remaining-budgets
             control-request-interrupt!
             control-termination-reason
             control-select-candidate
@@ -55,6 +59,9 @@
 (define (control-progress-count control)
   (car (control-progress-cell control)))
 
+(define (control-stalled-count control)
+  (car (control-stalled-cell control)))
+
 (define (control-record-progress! control)
   "Register an externally observable state advance, not an LLM confidence claim."
   (let ((cell (control-progress-cell control)))
@@ -64,6 +71,14 @@
 
 (define (control-failure-count control)
   (car (control-failures-cell control)))
+
+(define (control-remaining-budgets control)
+  `((transitions . ,(max 0 (- (control-max-transitions control)
+                              (control-transition-count control))))
+    (stalled-transitions . ,(max 0 (- (control-max-stalled-transitions control)
+                                      (control-stalled-count control))))
+    (failures . ,(max 0 (- (control-max-failures control)
+                           (control-failure-count control))))))
 
 (define (control-record-failure! control)
   (let ((cell (control-failures-cell control)))
@@ -91,9 +106,13 @@ the other fields penalize proposals that are less relevant, more risky, more
 expensive, or less certain.  Equal scores preserve submission order."
   (+ (candidate-priority candidate)
      (* 10 (candidate-relevance candidate))
+     (* 10 (candidate-urgency candidate))
+     (* 5 (candidate-risk candidate))
+     (* 15 (candidate-conflict candidate))
+     (* 20 (candidate-out-of-domain candidate))
+     (* 15 (candidate-information-gain candidate))
      (* -10 (candidate-risk candidate))
-     (* -10 (candidate-cost candidate))
-     (* -10 (candidate-uncertainty candidate))))
+     (* -10 (candidate-cost candidate))))
 
 (define (control-select-candidate control candidates)
   "Choose one pending workspace candidate under the current Control policy."

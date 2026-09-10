@@ -4,8 +4,10 @@ use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::io::BufReader;
 use std::os::unix::net::UnixStream;
+use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
+use std::{env, fs};
 
 mod connection;
 mod protocol;
@@ -20,12 +22,66 @@ enum Action {
     Exit,
 }
 
+fn valid_session_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+}
+
+fn generated_session_id() -> String {
+    format!(
+        "gaia-cli-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or_default()
+    )
+}
+
+fn initial_session_id() -> String {
+    env::var("GAIA_SESSION_ID")
+        .ok()
+        .filter(|value| valid_session_id(value))
+        .or_else(|| {
+            fs::read_to_string(".last_session")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| valid_session_id(value))
+        })
+        .unwrap_or_else(generated_session_id)
+}
+
 fn cognitive_inspection_operation(command: &str) -> Option<&'static str> {
     match command {
         "/cognitive-events" => Some("get-cognitive-events"),
         "/cognitive-state" | "/cognitive-objects" => Some("get-cognitive-state"),
         _ => None,
     }
+}
+
+fn permission_response(choice: &str, expr: &Value) -> Option<Value> {
+    let response = match choice.trim().to_lowercase().as_str() {
+        "y" | "yes" => Value::Bool(true),
+        "" | "n" | "no" => Value::Bool(false),
+        "a" | "always" => Value::list(vec![Value::symbol("always"), expr.clone()]),
+        "d" | "directory" => {
+            let expr_cons = expr.as_cons()?;
+            if expr_cons.car().as_symbol()? != "write-file" {
+                return None;
+            }
+            let path_cons = expr_cons.cdr().as_cons()?;
+            let path = path_cons.car().as_str()?;
+            let directory = Path::new(path).parent()?.to_str()?;
+            Value::list(vec![Value::symbol("directory"), Value::string(directory)])
+        }
+        _ => return None,
+    };
+    Some(Value::list(vec![
+        Value::symbol("permission-response"),
+        response,
+    ]))
 }
 
 /// Events forwarded from the listener thread to the main thread.
@@ -44,15 +100,11 @@ use std::sync::Arc;
 
 fn main() -> Result<()> {
     let running_agent = Arc::new(AtomicBool::new(false));
-    let mut session_id = format!(
-        "gaia-cli-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs()
-    );
+    let mut session_id = initial_session_id();
 
     println!("\n{BOLD}{GREEN}GAIA CLI {}{RESET}", env!("GAIA_VERSION"));
-    println!("Type {BOLD}/help{RESET} for commands. Normal input runs the GCAS solve process.\n");
+    println!("Type {BOLD}/help{RESET} for commands. Normal input runs a memory-backed GCAS conversation.\n");
+    println!("Resuming session: {BOLD}{session_id}{RESET}\n");
 
     let mut stream = connect_with_retry(SOCKET_PATH)?;
 
@@ -395,12 +447,13 @@ fn dispatch(
             }
             Ok(Action::Continue)
         }
-        "/solve" | "/investigate" | "/ask" | "/eval" => {
+        "/chat" | "/converse" | "/solve" | "/investigate" | "/ask" | "/eval" => {
             let query = input[cmd.len()..].trim();
             if query.is_empty() {
                 return Err(anyhow::anyhow!("{} requires an argument", cmd));
             }
             let operation = match cmd {
+                "/chat" | "/converse" => "converse",
                 "/solve" => "solve",
                 "/investigate" => "investigate",
                 "/ask" => "ask",
@@ -443,12 +496,12 @@ fn dispatch(
             // Drain any stale events in the channel
             while rx.try_recv().is_ok() {}
 
-            // Normal input starts a GCAS process. One-shot chat and legacy
-            // investigation are available through explicit commands.
+            // Normal input starts a GCAS conversational process. Executable
+            // Goals, one-shot chat, and legacy investigation are explicit.
             send_sexp(
                 stream,
                 &Value::list(vec![
-                    Value::symbol("solve"),
+                    Value::symbol("converse"),
                     Value::string(input.to_string()),
                 ]),
             )?;
@@ -460,7 +513,8 @@ fn dispatch(
 
 #[cfg(test)]
 mod tests {
-    use super::cognitive_inspection_operation;
+    use super::{cognitive_inspection_operation, permission_response, valid_session_id};
+    use lexpr::Value;
 
     #[test]
     fn maps_gcas_inspection_commands_to_protocol_operations() {
@@ -477,6 +531,39 @@ mod tests {
             Some("get-cognitive-state")
         );
         assert_eq!(cognitive_inspection_operation("/help"), None);
+    }
+
+    #[test]
+    fn validates_persistent_session_identifiers() {
+        assert!(valid_session_id("gaia-cli-42"));
+        assert!(valid_session_id("project.chat_1"));
+        assert!(!valid_session_id("../outside"));
+        assert!(!valid_session_id("contains space"));
+        assert!(!valid_session_id(""));
+    }
+
+    #[test]
+    fn builds_scoped_hitl_permission_responses() {
+        let write = Value::list(vec![
+            Value::symbol("write-file"),
+            Value::string("/tmp/gaia/report.txt"),
+            Value::string("content"),
+        ]);
+        assert_eq!(
+            permission_response("a", &write),
+            Some(Value::list(vec![
+                Value::symbol("permission-response"),
+                Value::list(vec![Value::symbol("always"), write.clone()]),
+            ]))
+        );
+        assert_eq!(
+            permission_response("d", &write),
+            Some(Value::list(vec![
+                Value::symbol("permission-response"),
+                Value::list(vec![Value::symbol("directory"), Value::string("/tmp/gaia"),]),
+            ]))
+        );
+        assert!(permission_response("d", &Value::symbol("other")).is_none());
     }
 }
 
@@ -521,31 +608,31 @@ fn wait_and_print(rx: &Receiver<ServerEvent>, stream: &mut UnixStream) -> Result
                                     print_scheme(&expr_str);
                                 }
 
+                                let directory_available = handled_diff;
                                 let mut input = String::new();
                                 loop {
-                                    print!("Allow execution? (y/N): ");
+                                    print!(
+                                        "Allow? [y] once / [n] deny / [a] always exact{}: ",
+                                        if directory_available {
+                                            " / [d] directory writes"
+                                        } else {
+                                            ""
+                                        }
+                                    );
                                     use std::io::Write;
                                     std::io::stdout().flush()?;
                                     input.clear();
                                     std::io::stdin().read_line(&mut input)?;
-                                    let ans = input.trim().to_lowercase();
-                                    if ans == "y" || ans == "yes" {
-                                        send_sexp(
-                                            stream,
-                                            &Value::list(vec![
-                                                Value::symbol("permission-response"),
-                                                Value::Bool(true),
-                                            ]),
-                                        )?;
-                                        break;
-                                    } else if ans == "" || ans == "n" || ans == "no" {
-                                        send_sexp(
-                                            stream,
-                                            &Value::list(vec![
-                                                Value::symbol("permission-response"),
-                                                Value::Bool(false),
-                                            ]),
-                                        )?;
+                                    if let Some(response) = permission_response(&input, expr) {
+                                        if !directory_available
+                                            && matches!(
+                                                input.trim().to_lowercase().as_str(),
+                                                "d" | "directory"
+                                            )
+                                        {
+                                            continue;
+                                        }
+                                        send_sexp(stream, &response)?;
                                         break;
                                     }
                                 }

@@ -2,17 +2,34 @@
 
 ## Current behavior
 
-Production `solve` does not replay the session transcript as an LLM
-conversation. The Session Orchestrator calls the Generative Processor with:
+Neither ordinary conversation nor production `solve` replays the session
+transcript. Both Session Orchestrator paths call their Generative Processor
+with an empty chat-history list and a task-specific system contract.
+
+For ordinary conversation, `get-gcas-conversation-system-prompt` defines the
+epistemic boundary and the transient prompt contains:
+
+- the active conversational Goal and current utterance;
+- a bounded recent episode of typed USER/ASSISTANT turns;
+- bounded relevant structured Memory with provenance and status;
+- an explicit marker that the projection is not transcript replay.
+
+Assistant output remains an LLM `HYPOTHESIS`/`UNVERIFIED`. A separate
+`DELIVERY_ONLY` Claim can complete the turn but says nothing about the factual
+truth of the prose. The default context cap is 6000 characters.
+
+For production `solve`, the Session Orchestrator uses:
 
 - `get-gcas-system-prompt` as a compact stable system contract;
 - a transient user/context prompt reconstructed from Cognitive Objects;
 - an empty chat-history list.
 
 The initial projection contains the current Goal, admitted Workspace objects,
-lexically selected structured Memory, completion criteria, and active
-constraints. After a failed Action or verifier conflict, the next projection
-adds the relevant Reflection and exact execution feedback. The complete history
+guarded graph-selected structured Memory, a versioned capability and Action
+schema when registered, completion criteria, remaining Control budgets, and
+active constraints. After a preflight failure, failed Action, or verifier
+conflict, the next projection adds a typed repair phase, exact error class,
+failing form, relevant Reflection, remaining budgets, and execution feedback. The complete history
 remains available for audit and UI, but it is not treated as cognitive memory.
 
 This satisfies the GCAS separation between transcript and Memory. Production
@@ -21,7 +38,12 @@ contract explicitly forbids `FINAL`, `FINAL_VAR`, and `CONFIDENCE`, because the
 GCAS Answer Processor and Goal Verifier own terminal decisions. The legacy
 solver prompt remains available only to the `investigate` compatibility path.
 
-The current contract also states the transactional execution boundary, requires
+The production capability manifests are v2. Their model-visible contract names
+only a procedure signature and behavior. At the execution boundary GAIA appends
+a private deterministic harness; a repair receives a larger fresh holdout.
+Only aggregate passed/failed counts reach the verifier and repair projection.
+
+The current Action contract also states the transactional execution boundary, requires
 one complete distinct Action, prefers a returned value, and includes compact
 Guile rules for `if`, bindings, and `set!`. Wisp instructions are appended only
 when Wisp mode is enabled. An explicit `GAIA_SYSTEM_PROMPT` override still wins.

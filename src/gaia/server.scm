@@ -94,6 +94,11 @@
       (if (string-null? args)
           #f
           `(solve ,args)))
+     ((or (string=? cmd "/chat")
+          (string=? cmd "/converse"))
+      (if (string-null? args)
+          #f
+          `(converse ,args)))
      ((string=? cmd "/investigate")
       (if (string-null? args)
           #f
@@ -139,7 +144,12 @@
             (equal? expr approved-expr))
            (('directory . dir-prefix)
             (and (eq? (car expr) 'write-file)
-                 (string-prefix? dir-prefix (cadr expr))))
+                 (let* ((normalized (if (string-suffix? "/" dir-prefix)
+                                        dir-prefix
+                                        (string-append dir-prefix "/")))
+                        (path (cadr expr)))
+                   (or (string=? path dir-prefix)
+                       (string-prefix? normalized path)))))
            (_ #f)))
        scopes))
 
@@ -240,10 +250,15 @@
                                              (wait-condition-variable perm-cond perm-mutex)
                                              (loop))))))))))
            (first-msg (get-message channel))
-           (session-id (match first-msg
-                         (('session id) id)
-                         (('session id workspace-dir) id)
-                         (_ (string-append "gaia-" (number->string (current-time))))))
+           (requested-session-id
+            (match first-msg
+              (('session id) id)
+              (('session id workspace-dir) id)
+              (_ #f)))
+           (session-id
+            (if (valid-session-id? requested-session-id)
+                requested-session-id
+                (string-append "gaia-" (number->string (current-time)))))
            (workspace-dir (match first-msg
                             (('session id workspace-dir) workspace-dir)
                             (_ #f)))

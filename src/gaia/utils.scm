@@ -4,13 +4,15 @@
             read-json-file
             write-json-file
             send-event
+            valid-session-id?
             save-session
             load-session))
 
 (use-modules (json)
              (ice-9 match)
              (ice-9 rdelim)
-             (ice-9 popen))
+             (ice-9 popen)
+             (srfi srfi-1))
 
 (define (json->scm str)
   (json-string->scm str))
@@ -38,7 +40,20 @@
         (force-output client-socket))
       (lambda _ #f))))
 
+(define (valid-session-id? session-id)
+  "Accept only bounded identifiers that cannot escape the session directory."
+  (and (string? session-id)
+       (> (string-length session-id) 0)
+       (<= (string-length session-id) 128)
+       (every (lambda (character)
+                (or (char-alphabetic? character)
+                    (char-numeric? character)
+                    (memv character '(#\- #\_ #\.))))
+              (string->list session-id))))
+
 (define (save-session session-id history)
+  (unless (valid-session-id? session-id)
+    (error "Invalid session identifier" session-id))
   (unless (file-exists? "sessions")
     (mkdir "sessions"))
   (let ((port (open-file (string-append "sessions/" session-id ".json") "w")))
@@ -46,6 +61,8 @@
     (close-port port)))
 
 (define (load-session session-id)
+  (unless (valid-session-id? session-id)
+    (error "Invalid session identifier" session-id))
   (let ((path (string-append "sessions/" session-id ".json")))
     (if (file-exists? path)
         (let* ((port (open-file path "r"))

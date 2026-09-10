@@ -5,7 +5,8 @@ It does not define a single recursive call or an LLM loop. It defines a minimal,
 controlled feedback process in which no processor is the source of truth for the
 entire system.
 
-**Status:** the production path satisfies this minimal operational contract.
+**Status:** the production path satisfies this GCAS-Core 0.2 baseline contract.
+It does not yet satisfy the GCAS 0.3 uncertainty requirements.
 The conformance gate exercises the same `solve` path used by the server and
 clients, including failure-first replanning, restoration, Control termination,
 and client inspection. The deterministic showcase remains a narrower scripted
@@ -65,9 +66,13 @@ inspectable baseline policy: it prefers higher priority and relevance while
 penalizing risk, cost, and uncertainty. It preserves submission order for equal
 scores. Capacity prevents a further admission until an active CO is released.
 
-This is a deliberately small policy, not an assertion that these weights are a
-final model of attention. It provides a tested replacement point for future
-goal-, budget-, and safety-aware scheduling.
+This is a deliberately small GCAS 0.2 compatibility policy, not an assertion
+that these weights are a final model of attention. Its monotonic uncertainty
+penalty is not conformant with GCAS 0.3, where an uncertain candidate may
+require higher priority because of risk, conflict, surprise, or expected
+information gain. The U3 MVP slice replaces this policy while preserving the
+tested competition boundary and keeping scheduling priority distinct from
+confidence.
 
 ## Current Implementation Scope
 

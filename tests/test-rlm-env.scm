@@ -106,15 +106,14 @@
         (not (and (pair? result) (eq? (car result) 'error)
                   (pair? (cdr result)) (eq? (cadr result) 'permission))))))
 
-  ;; Handler that always denies → throws user-interrupt
+  ;; Raw shell execution is unavailable even when a handler exists.
   (let ((env (make-rlm-env)))
-    (test-assert "handler-deny throws user-interrupt"
-      (catch 'user-interrupt
-        (lambda ()
-          (rlm-eval! env "(system \"ls\")"
-                     #:permission-handler (lambda (expr) #f))
-          #f)  ;; should not reach here
-        (lambda (key . args) #t))))
+    (test-assert "raw shell is rejected before HITL"
+      (let ((result (rlm-eval! env "(system \"ls\")"
+                               #:permission-handler (lambda (expr) #t))))
+        (and (pair? result) (eq? (car result) 'error)
+             (string-contains (caddr result)
+                              "Raw shell execution is not supported")))))
 
   ;; Safe code with handler → handler is never called
   (let* ((env (make-rlm-env))
@@ -135,8 +134,8 @@
                                       #t))
     (test-assert "handler receives full expression"
       (and (pair? captured-expr)
-           (or (eq? (car captured-expr) 'run-in-sandbox)
-               (eq? (car captured-expr) 'run-local-fallback))))))
+           (eq? (car captured-expr) 'run-in-sandbox)
+           (equal? (cadr captured-expr) '("echo" "hello"))))))
 
 ;; --- Syntax Error Handling ---
 

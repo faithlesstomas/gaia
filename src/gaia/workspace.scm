@@ -15,6 +15,10 @@
             candidate-risk
             candidate-cost
             candidate-uncertainty
+            candidate-urgency
+            candidate-conflict
+            candidate-out-of-domain
+            candidate-information-gain
             workspace-active
             workspace-propose!
             workspace-admit-next!
@@ -33,14 +37,20 @@
 ;; A proposal carries decision metadata separately from the immutable CO.  This
 ;; lets Control change scheduling policy without mutating evidence or claims.
 (define-record-type <workspace-candidate>
-  (%make-candidate co priority relevance risk cost uncertainty)
+  (%make-candidate co priority relevance risk cost uncertainty urgency conflict
+                   out-of-domain information-gain)
   workspace-candidate?
   (co candidate-co)
   (priority candidate-priority)
   (relevance candidate-relevance)
   (risk candidate-risk)
   (cost candidate-cost)
-  (uncertainty candidate-uncertainty))
+  ;; Legacy scheduler signal.  It is not a posterior probability.
+  (uncertainty candidate-uncertainty)
+  (urgency candidate-urgency)
+  (conflict candidate-conflict)
+  (out-of-domain candidate-out-of-domain)
+  (information-gain candidate-information-gain))
 
 (define* (make-global-workspace #:key (capacity 7))
   (unless (and (integer? capacity) (> capacity 0))
@@ -67,7 +77,11 @@
                             (relevance 0)
                             (risk 0)
                             (cost 0)
-                            (uncertainty 0))
+                            (uncertainty 0)
+                            (urgency 0)
+                            (conflict 0)
+                            (out-of-domain 0)
+                            (information-gain 0))
   (unless (cognitive-object? co)
     (error "Workspace proposals must be Cognitive Objects" co))
   (for-each (lambda (pair) (valid-decision-value? (cdr pair) (car pair)))
@@ -75,23 +89,33 @@
               (relevance . ,relevance)
               (risk . ,risk)
               (cost . ,cost)
-              (uncertainty . ,uncertainty)))
+              (uncertainty . ,uncertainty)
+              (urgency . ,urgency)
+              (conflict . ,conflict)
+              (out-of-domain . ,out-of-domain)
+              (information-gain . ,information-gain)))
   (let ((cell (workspace-candidates-cell workspace)))
     ;; Stable ordering makes equal-score competition deterministic.
     (set-car! cell
               (append (car cell)
-                      (list (%make-candidate co priority relevance risk cost uncertainty)))))
+                      (list (%make-candidate co priority relevance risk cost uncertainty
+                                             urgency conflict out-of-domain
+                                             information-gain)))))
   co)
 
 (define (default-candidate-score candidate)
-  ;; Priority is the explicit operator/processor preference.  The remaining
-  ;; terms make selection inspect goal relevance and the expected safety and
-  ;; resource consequences of executing a proposal.
+  ;; Every term is scheduling/decision metadata, never epistemic promotion.
+  ;; High-impact uncertainty raises attention through risk, conflict, OOD, and
+  ;; information gain instead of being monotonically suppressed.
   (+ (candidate-priority candidate)
      (* 10 (candidate-relevance candidate))
+     (* 10 (candidate-urgency candidate))
+     (* 5 (candidate-risk candidate))
+     (* 15 (candidate-conflict candidate))
+     (* 20 (candidate-out-of-domain candidate))
+     (* 15 (candidate-information-gain candidate))
      (* -10 (candidate-risk candidate))
-     (* -10 (candidate-cost candidate))
-     (* -10 (candidate-uncertainty candidate))))
+     (* -10 (candidate-cost candidate))))
 
 (define* (workspace-admit-next! workspace #:key (selector #f))
   (let ((candidates (car (workspace-candidates-cell workspace)))

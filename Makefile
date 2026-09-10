@@ -8,7 +8,7 @@ export GAIA_MODEL
 export GAIA_BASE_MODEL
 export GAIA_ALLOW_SANDBOX_FALLBACK
 
-.PHONY: run repl check test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-actors test-server test-rlm test-tool-use benchmark dataset clean llm-server llm-server-stop clean-trajectories monitor client server gcas-showcase gcas-eval gcas-live-eval gcas-conformance gcas-conformance-scheme test-clients test-emacs-client
+.PHONY: run repl check test-units test-sandbox test-tools test-rlm-env test-sessions test-meta-commands test-actors test-server test-rlm test-tool-use benchmark dataset clean llm-server llm-server-logs llm-server-stop clean-trajectories monitor client server gcas-showcase gcas-eval gcas-live-eval gcas-live-conversation-eval gcas-conformance gcas-conformance-scheme test-clients test-emacs-client
 
 GUIX_SHELL = guix shell -m guix.scm --
 GUIX_DEV_SHELL = guix shell -m guix-dev.scm --
@@ -34,6 +34,10 @@ gcas-eval:
 gcas-live-eval:
 	GUILE_AUTO_COMPILE=0 guile -L src scripts/run-gcas-live-eval.scm
 
+gcas-live-conversation-eval:
+	@test -z "$$CI" || { echo "ERROR: gcas-live-conversation-eval is local-only and forbidden in CI" >&2; exit 2; }
+	GUILE_AUTO_COMPILE=0 guile -L src scripts/run-gcas-live-conversation-eval.scm
+
 ncsi-eval:
 	GUILE_AUTO_COMPILE=0 guile -L src scripts/run-ncsi-evaluation.scm
 
@@ -45,12 +49,19 @@ test-emacs-client:
 	emacs --batch -Q -L src/gaia-desktop/emacs -l tests/test-emacs-client.el
 
 gcas-conformance-scheme:
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-uncertainty.scm
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-command-policy.scm
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-action-preflight.scm
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-capability-registry.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-goal-verifier.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-cognitive-memory.scm
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-cognitive-memory-graph.scm
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-conversation-processors.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-cognitive-session.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-production-processors.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-ncsi.scm
 	$(MAKE) gcas-eval
+	GUILE_AUTO_COMPILE=0 guile -L src tests/test-gcas-live-evaluation.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-server.scm
 	GUILE_AUTO_COMPILE=0 guile -L src tests/test-actors.scm
 
@@ -139,6 +150,10 @@ llm-server:
 		uv run litellm --config litellm_config.yaml --port 4000 > .litellm.log 2>&1 & echo $$! > .litellm.pid; \
 		sleep 6; \
 	fi
+
+llm-server-logs:
+	@touch .litellm.log
+	tail -F .litellm.log
 
 llm-server-stop:
 	@echo "Stopping LiteLLM server..."

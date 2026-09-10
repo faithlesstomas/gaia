@@ -35,13 +35,15 @@
   (fcntl port F_SETFL (logior O_NONBLOCK (fcntl port F_GETFL)))
   (setvbuf port 'none))
 
-(define (interruptible-http-post url body headers)
+(define (interruptible-http-post url body headers timeout-seconds)
   "Runs http-post in a thread so the main thread can poll for Ctrl-C.
-Returns (response-header . response-body) or throws 'user-interrupt."
+Returns (response-header . response-body), throws 'user-interrupt, or throws
+'llm-timeout when the configured wall-clock bound expires."
   (let* ((result-box (make-mutex))
          (result-val #f)
          (result-err #f)
          (done? #f)
+         (started (get-internal-real-time))
          (worker (call-with-new-thread
                   (lambda ()
                     (catch #t
@@ -61,9 +63,16 @@ Returns (response-header . response-body) or throws 'user-interrupt."
         (throw 'user-interrupt))
        (done?
         ;; Worker finished — return result or re-throw error
-        (if result-err
+       (if result-err
             (apply throw (car result-err) (cdr result-err))
             result-val))
+       ((and (number? timeout-seconds)
+             (> timeout-seconds 0)
+             (>= (/ (- (get-internal-real-time) started)
+                    (* 1.0 internal-time-units-per-second))
+                 timeout-seconds))
+        (cancel-thread worker)
+        (throw 'llm-timeout timeout-seconds))
        (else
         (usleep 100000) ;; 100ms
         (poll))))))
@@ -153,6 +162,8 @@ Returns (response-header . response-body) or throws 'user-interrupt."
   (let ((m (string-downcase model)))
     (or (string-contains m "think")
         (string-contains m "r1")
+        (string-contains m "qwen3")
+        (string-contains m "gpt-oss")
         (string-contains m "gemma4")
         (string-contains m "reasoning"))))
 
@@ -163,20 +174,31 @@ Returns (response-header . response-body) or throws 'user-interrupt."
 
 (define (get-thinking-fields model think)
   "Return list of association pairs for thinking parameters based on the model and toggle state."
-  (cond
-   ((model-is-cloud-reasoning? model)
-    (if think
-        `(("reasoning_effort" . "medium")
-          ("thinking" . (("type" . "enabled") ("budget_tokens" . 2048) ("budget" . 2048)))
-          ("allowed_openai_params" . #("reasoning_effort" "thinking")))
-        `(("reasoning_effort" . "none")
-          ("thinking" . (("type" . "disabled") ("budget_tokens" . 0) ("budget" . 0)))
-          ("allowed_openai_params" . #("reasoning_effort" "thinking")))))
-   ((model-is-local-reasoning? model)
-    `(("think" . ,think)
-      ("allowed_openai_params" . #("think"))))
-   (else
-    '())))
+  (let* ((normalized (normalize-thinking-setting think))
+         (setting (if (eq? normalized 'invalid) #f normalized))
+         (enabled? (not (eq? setting #f)))
+         (effort (cond
+                  ((eq? setting #f) "none")
+                  ((eq? setting #t) "medium")
+                  ((string? setting) setting)
+                  (else "none"))))
+    (cond
+     ((model-is-cloud-reasoning? model)
+      (if enabled?
+          `(("reasoning_effort" . ,effort)
+            ("thinking" . (("type" . "enabled") ("budget_tokens" . 2048) ("budget" . 2048)))
+            ("allowed_openai_params" . #("reasoning_effort" "thinking")))
+          `(("reasoning_effort" . "none")
+            ("thinking" . (("type" . "disabled") ("budget_tokens" . 0) ("budget" . 0)))
+            ("allowed_openai_params" . #("reasoning_effort" "thinking")))))
+     ((model-is-local-reasoning? model)
+      ;; LiteLLM's allowed-parameter passthrough preserves Ollama's boolean or
+      ;; effort-level `think` value. Its reasoning_effort mapper would collapse
+      ;; Qwen3's low/medium/high levels to a plain boolean.
+      `(("think" . ,setting)
+        ("allowed_openai_params" . #("think"))))
+     (else
+      '()))))
 
 (define (clean-history-for-llm history)
   "Strips extra fields like trajectory from the history turns and normalizes user-repl role for LLM compatibility."
@@ -191,7 +213,16 @@ Returns (response-header . response-body) or throws 'user-interrupt."
                        turn))))
        history))
 
-(define* (chat-with-llm session-id input model system-prompt #:key (think #f) (history '()) (stream-callback #f) (role "user"))
+(define* (chat-with-llm session-id input model system-prompt
+                        #:key
+                        (think #f)
+                        (history '())
+                        (stream-callback #f)
+                        (role "user")
+                        (timeout-seconds (get-config 'llm-timeout-seconds))
+                        (max-output-tokens (get-config 'llm-max-output-tokens)))
+  (unless (and (integer? max-output-tokens) (> max-output-tokens 0))
+    (error "max-output-tokens must be a positive integer" max-output-tokens))
   (let* ((host (get-config 'llm-url))
          (url (string-append host "/v1/chat/completions"))
          (clean-history (clean-history-for-llm history))
@@ -200,6 +231,7 @@ Returns (response-header . response-body) or throws 'user-interrupt."
                                 (list `(("role" . ,role) ("content" . ,input)))))
          (body-fields `(("model" . ,model)
                         ("messages" . ,(list->vector messages-list))
+                        ("max_tokens" . ,max-output-tokens)
                         ("stream" . ,(if stream-callback #t #f))))
          (body-fields (append body-fields (get-thinking-fields model think)))
          (body (scm->json body-fields))
@@ -261,7 +293,8 @@ Returns (response-header . response-body) or throws 'user-interrupt."
                               (loop)))))))
                     (lambda () (set! *active-llm-port* #f)))))))
         ;; Synchronous Non-streaming Path
-        (let* ((result (interruptible-http-post url body headers))
+        (let* ((result (interruptible-http-post
+                        url body headers timeout-seconds))
                (response-header (car result))
                (response-body (cdr result)))
           (let* ((body-str (if (string? response-body) response-body (utf8->string response-body)))

@@ -1,5 +1,7 @@
 (define-module (gaia production-processors)
   #:use-module (srfi srfi-1)
+  #:use-module (gaia action-preflight)
+  #:use-module (gaia capability-registry)
   #:use-module (gaia com)
   #:use-module (gaia cognitive-bus)
   #:use-module (gaia cognitive-control)
@@ -64,9 +66,13 @@ from Goblins actors and a particular LLM/runtime."
                (procedure? on-finished) (procedure? verify-goal)
                (integer? max-replans) (>= max-replans 0))
     (error "Invalid production process adapters or replan budget" session task))
-  (let* ((goal (make-cognitive-object
+  (let* ((capability (select-capability-manifest task))
+         (goal (make-cognitive-object
                 'goal task #:provenance 'USER
-                #:relations `((completion-criteria . ,completion-criteria))))
+                #:relations `((completion-criteria . ,completion-criteria)
+                              (capability . ,(and capability
+                                                  (capability-manifest-id
+                                                   capability))))))
          (process (session-start-process!
                    session goal completion-criteria
                    #:max-transitions max-transitions
@@ -80,6 +86,7 @@ from Goblins actors and a particular LLM/runtime."
          (subscriptions-cell (list '()))
          (hypothesis-text-cell (list ""))
          (replan-count-cell (list 0))
+         (execution-attempt-cell (list 0))
          (generative-processor-cell (list #f))
          ;; A request made while a broadcast is being handled is deferred.  This
          ;; preserves a true proposal batch and releases the current focus before
@@ -106,9 +113,63 @@ from Goblins actors and a particular LLM/runtime."
          (string-append "FAILED: the cognitive process terminated with outcome "
                         (format #f "~a" outcome) "."))))
 
+    (define (consolidate-terminal-process! outcome)
+      "Retain governed episodic and metacognitive records at every terminal
+boundary. Successful semantic/procedural memory is added by the Goal verifier
+path; failures remain reusable evidence without becoming accepted facts."
+      (memory-consolidate!
+       (session-memory session)
+       (filter (lambda (co) (belongs-to-process? co process))
+               (state-objects (session-state session)))
+       #:reason (if (eq? outcome 'COMPLETED)
+                    'VERIFIED_GOAL
+                    'TERMINAL_NON_SUCCESS)
+       #:revalidation (if (eq? outcome 'COMPLETED)
+                          'ON_CONTRADICTION_OR_EXPIRY
+                          'ON_RELATED_GOAL))
+      (when capability
+        (let* ((capability-id (capability-manifest-id capability))
+               (prior
+                (find (lambda (co)
+                        (and (eq? (co-type co) 'reflection)
+                             (equal? (relation-ref co 'assesses-capability)
+                                     capability-id)
+                             (not (assoc-ref (co-relations co) 'superseded-by))))
+                      (memory-objects (session-memory session))))
+               (attempts (+ 1 (or (and prior
+                                        (relation-ref prior 'attempt-count))
+                                   0)))
+               (successes (+ (if (eq? outcome 'COMPLETED) 1 0)
+                             (or (and prior
+                                      (relation-ref prior 'success-count))
+                                 0)))
+               (assessment
+                (make-cognitive-object
+                 'reflection
+                 (format #f
+                         "Capability ~a observed outcome ~a; successes ~a/~a."
+                         capability-id outcome successes attempts)
+                 #:provenance 'SYMBOLIC_INFERENCE
+                 #:relations `((process . ,process-id*)
+                               (memory-role . METACOGNITIVE)
+                               (assesses-capability . ,capability-id)
+                               (observed-outcome . ,outcome)
+                               (attempt-count . ,attempts)
+                               (success-count . ,successes)))))
+          (let ((current
+                 (if prior
+                     (memory-supersede! (session-memory session) (co-id prior)
+                                        assessment)
+                     assessment)))
+            (memory-consolidate!
+             (session-memory session) (list current)
+             #:reason 'CAPABILITY_OUTCOME
+             #:revalidation 'AFTER_NEXT_CAPABILITY_OUTCOME)))))
+
     (define (notify-finished! outcome final-text hypothesis-text)
       (unless (car client-finished-cell)
         (set-car! client-finished-cell #t)
+        (consolidate-terminal-process! outcome)
         (on-finished outcome final-text hypothesis-text)))
 
     (define* (emit-answer! outcome final-text hypothesis-text #:key (verified-claim #f))
@@ -144,13 +205,44 @@ during a broadcast set the flag for a subsequent round."
               (when (car round-requested-cell) (loop)))
           (set-car! round-running-cell #f)))))
 
+    (define (remaining-budget-summary)
+      (let ((remaining (control-remaining-budgets (session-control session))))
+        (format #f
+                "Remaining budgets: transitions=~a, stalled=~a, failures=~a, replans=~a."
+                (assoc-ref remaining 'transitions)
+                (assoc-ref remaining 'stalled-transitions)
+                (assoc-ref remaining 'failures)
+                (max 0 (- max-replans (car replan-count-cell))))))
+
+    (define (capability-summary)
+      (if capability
+          (format #f "Capability: ~a v~a. Action schema: ~a"
+                  (capability-manifest-id capability)
+                  (capability-manifest-version capability)
+                  (capability-manifest-action-schema capability))
+          "Capability: UNSUPPORTED. No registered verifier/action schema is available; fail closed."))
+
+    (define (feedback-error-summary feedback)
+      (let* ((source-id (relation-ref feedback 'based-on))
+             (source (and source-id
+                          (state-find (session-state session) source-id)))
+             (error-class (and source (relation-ref source 'error-class)))
+             (failing-form (and source (relation-ref source 'failing-form))))
+        (format #f "Repair error class: ~a. Failing form: ~a."
+                (or error-class 'UNCLASSIFIED)
+                (or failing-form "<not available>"))))
+
     (define (replan-context feedback)
       (reconstruct-context
        goal
        (list feedback)
        (memory-retrieve (session-memory session) task)
        #:constraints
-       (list completion-criteria
+       (list "Projection phase: REPAIR."
+             (capability-summary)
+             (remaining-budget-summary)
+             (feedback-error-summary feedback)
+             completion-criteria
              "Previous execution feedback is evidence, not an answer."
              "Return one complete, distinct replacement Action; do not repeat or extend the rejected Action."
              "For a syntax failure, simplify the program and correct the exact rejected Guile form before changing the algorithm."
@@ -165,10 +257,35 @@ during a broadcast set the flag for a subsequent round."
                                         (relation-ref execution-claim 'supported-by))))
              (result (and evidence
                           (state-find (session-state session)
-                                      (relation-ref evidence 'observes)))))
+                                      (relation-ref evidence 'observes))))
+             (action (and evidence
+                          (state-find (session-state session)
+                                      (relation-ref evidence 'produced-by))))
+             (retained-action
+              (and action
+                   (co-add-relation action 'memory-role 'EPISODIC)))
+             (procedure
+              (and action evidence
+                   (make-cognitive-object
+                    'procedure
+                    (string-append "Verified procedure for Goal: " task
+                                   "\nAction:\n" (co-content action))
+                    #:provenance 'SYMBOLIC_INFERENCE
+                    #:epistemic-status 'ACCEPTED
+                    #:verification-status 'VERIFIED
+                    #:relations `((process . ,process-id*)
+                                  (memory-role . PROCEDURAL)
+                                  (derived-from . ,(co-id action))
+                                  (supported-by . ,(co-id evidence))
+                                  (validated-by . ,(co-id claim))
+                                  (reusable-for . ,task))))))
         (memory-consolidate!
          (session-memory session)
-         (filter cognitive-object? (list result evidence claim)))))
+         (filter cognitive-object?
+                 (list result retained-action evidence execution-claim
+                       claim procedure))
+         #:reason 'VERIFIED_GOAL
+         #:revalidation 'ON_ENVIRONMENT_CHANGE)))
 
     (define (generate-hypothesis! prompt replanning?)
       (generate
@@ -204,12 +321,13 @@ during a broadcast set the flag for a subsequent round."
                         (cognitive-object? event-goal)
                         (equal? (co-id event-goal) (co-id goal)))
                    (let* ((selected (memory-retrieve (session-memory session) task))
-                          (remembered-facts
-                           (memory-retrieve-facts (session-memory session) task))
                           (context (reconstruct-context
                                     goal '() selected
                                     #:constraints
-                                    (list completion-criteria
+                                    (list "Projection phase: INITIAL."
+                                          (capability-summary)
+                                          (remaining-budget-summary)
+                                          completion-criteria
                                           "Use an explicit Action before requesting execution."
                                           "Treat model output as an unverified hypothesis.")))
                           (context-co
@@ -218,22 +336,13 @@ during a broadcast set the flag for a subsequent round."
                             #:relations `((process . ,process-id*)
                                           (context-for . ,(co-id goal))))))
                      (session-emit! session 'MemoryRetrieved context-co #:origin 'MEMORY)
-                     (append
-                      (map (lambda (remembered)
-                             (make-processor-proposal
-                              (make-cognitive-object
-                               'claim (co-content remembered)
-                               #:provenance 'MEMORY
-                               #:epistemic-status 'ACCEPTED
-                               #:verification-status (co-verification-status remembered)
-                               #:relations `((process . ,process-id*)
-                                             (satisfies . ,(co-id goal))
-                                             (supported-by . ,(co-id remembered))
-                                             (verdict-rationale . "Retrieved accepted user memory.")))
-                              #:priority 100 #:relevance 1))
-                           remembered-facts)
-                      (list (make-processor-proposal context-co
-                                                     #:priority 80 #:relevance 1))))
+                     ;; Retrieval is epistemically neutral. A remembered fact
+                     ;; may inform generation and planning through this context,
+                     ;; but Memory must never manufacture a fresh `satisfies'
+                     ;; edge for the active Goal. Goal completion still requires
+                     ;; the declared Action/Evidence/Goal-Verifier boundary.
+                     (list (make-processor-proposal context-co
+                                                    #:priority 80 #:relevance 1)))
                    '())))))
 
          (generative-processor
@@ -297,7 +406,9 @@ during a broadcast set the flag for a subsequent round."
                  (session-emit! session 'PlanProposed co #:origin 'PLANNER)
                  (let ((action-text (assoc-ref (co-content co) 'action)))
                    (if (string? action-text)
-                       (if (duplicate-action? session process action-text)
+                       (let ((preflight (preflight-action action-text)))
+                         (cond
+                          ((duplicate-action? session process action-text)
                            (list
                             (make-processor-proposal
                              (make-cognitive-object
@@ -306,32 +417,65 @@ during a broadcast set the flag for a subsequent round."
                               #:provenance 'SYMBOLIC_INFERENCE
                               #:relations `((process . ,process-id*)
                                             (goal . ,(co-id goal))
-                                            (repeated-action . ,action-text)))
-                             #:priority 100 #:relevance 1))
+                                            (repeated-action . ,action-text)
+                                            (error-class . NON_PROGRESS)
+                                            (failing-form . ,action-text)))
+                             #:priority 100 #:relevance 1)))
+                          ((not (action-preflight-valid? preflight))
+                           ;; A rejected proposal cannot become an Action CO,
+                           ;; but it is still a failed attempt for Control.  In
+                           ;; particular, syntax-only repair must not evade the
+                           ;; bounded failure guarantee by looping before
+                           ;; execution.
+                           (control-record-failure! (session-control session))
+                           (list
+                            (make-processor-proposal
+                             (make-cognitive-object
+                              'conflict
+                              (string-append
+                               "Action preflight rejected the proposed form before execution: "
+                               (action-preflight-message preflight))
+                              #:provenance 'SYMBOLIC_INFERENCE
+                              #:relations
+                              `((process . ,process-id*)
+                                (goal . ,(co-id goal))
+                                (preflight-rejected . ,(co-id co))
+                                (error-class . ,(action-preflight-error-class
+                                                 preflight))
+                                (failing-form . ,(action-preflight-failing-form
+                                                  preflight))))
+                             #:priority 100 #:relevance 1)))
+                          (else
                            (let ((subgoal
-                              (make-cognitive-object
-                               'goal
-                               (string-append "Verify the execution observation for: " action-text)
-                               #:provenance 'SYMBOLIC_INFERENCE
-                               #:relations `((process . ,process-id*)
-                                             (parent-goal . ,(co-id goal))
-                                             (implemented-by . ,(co-id co))))))
-                         ;; GCAS models subgoals as linked Goal COs, rather than
-                         ;; giving them an untyped side channel in a Plan.
-                         (state-store! (session-state session) subgoal)
-                         (session-emit! session 'GoalCreated subgoal #:origin 'PLANNER)
-                         (list
-                          (make-processor-proposal
-                           (make-cognitive-object
-                            'action action-text #:provenance 'LLM
-                            #:relations `((process . ,process-id*)
-                                          (implements . ,(co-id co))
-                                          (serves . ,(co-id goal))
-                                          (advances . ,(co-id subgoal))))
-                           #:priority 85 #:relevance 1)
-                          (make-processor-proposal subgoal #:priority 60 #:relevance 1))))
+                                  (make-cognitive-object
+                                   'goal
+                                   (string-append
+                                    "Verify the execution observation for: " action-text)
+                                   #:provenance 'SYMBOLIC_INFERENCE
+                                   #:relations `((process . ,process-id*)
+                                                 (parent-goal . ,(co-id goal))
+                                                 (implemented-by . ,(co-id co))))))
+                             ;; GCAS models subgoals as linked Goal COs, rather
+                             ;; than giving them an untyped side channel.
+                             (state-store! (session-state session) subgoal)
+                             (session-emit! session 'GoalCreated subgoal
+                                            #:origin 'PLANNER)
+                             (list
+                              (make-processor-proposal
+                               (make-cognitive-object
+                                'action action-text #:provenance 'LLM
+                                #:relations `((process . ,process-id*)
+                                              (implements . ,(co-id co))
+                                              (serves . ,(co-id goal))
+                                              (advances . ,(co-id subgoal))))
+                               #:priority 85 #:relevance 1)
+                              (make-processor-proposal subgoal
+                                                       #:priority 60
+                                                       #:relevance 1))))))
                        (begin
-                         (emit-answer! 'FAILED "FAILED: Planner produced a Plan without an Action." "")
+                         (emit-answer! 'FAILED
+                                       "FAILED: Planner produced a Plan without an Action."
+                                       "")
                          '()))))
                 ((and (active-process? session process)
                       (belongs-to-process? co process)
@@ -357,15 +501,35 @@ during a broadcast set the flag for a subsequent round."
                           (eq? (co-type action) 'action))
                  (session-emit! session 'ActionRequested action #:origin 'CONTROL)
                  (on-client-event `(code ,(co-content action)))
-                 (execute
-                  (co-content action)
+                 (set-car! execution-attempt-cell
+                           (+ 1 (car execution-attempt-cell)))
+                 (let* ((private-harness
+                         (and capability
+                              (capability-manifest-private-harness capability)))
+                        (executed-code
+                         (if private-harness
+                             (capability-manifest-prepare-action
+                              capability (co-content action)
+                              (car execution-attempt-cell))
+                             (co-content action))))
+                   (execute
+                  executed-code
                   (lambda (result-text)
                     (when (active-process? session process)
                       (let ((result
                              (make-cognitive-object
                               'result result-text #:provenance 'REPL
-                              #:relations `((process . ,process-id*)
-                                            (produced-by . ,(co-id action))))))
+                              #:relations
+                              (append
+                               `((process . ,process-id*)
+                                 (produced-by . ,(co-id action)))
+                               (if private-harness
+                                   `((capability-manifest-version
+                                      . ,(capability-manifest-version capability))
+                                     (oracle-class . HIDDEN_PROPERTY_TESTS)
+                                     (private-harness-attempt
+                                      . ,(car execution-attempt-cell)))
+                                   '())))))
                         (on-client-event `(result ,result-text))
                         (session-record-result! session (co-id action) result))))
                   (lambda (error-type error-text)
@@ -374,12 +538,14 @@ during a broadcast set the flag for a subsequent round."
                                        "Runtime Error (" (format #f "~a" error-type) "): "
                                        error-text))
                              (failure
-                              (make-cognitive-object
+                             (make-cognitive-object
                                'result message #:provenance 'REPL
                                #:relations `((process . ,process-id*)
-                                             (produced-by . ,(co-id action))))))
+                                             (produced-by . ,(co-id action))
+                                             (error-class . ,error-type)
+                                             (failing-form . ,(co-content action))))))
                         (on-client-event `(repl-error ,message))
-                        (session-record-failure! session (co-id action) failure))))))
+                        (session-record-failure! session (co-id action) failure)))))))
              '()))))
 
          (deliberative-processor
@@ -506,7 +672,10 @@ during a broadcast set the flag for a subsequent round."
                                  #:relations `((process . ,process-id*)
                                                (contradicts . ,(co-id claim))
                                                (goal . ,(co-id goal))
-                                               (evidence . ,(co-id evidence))))
+                                               (evidence . ,(co-id evidence))
+                                               (error-class . VERIFIER_REJECTION)
+                                               (unmet-condition . ,(goal-verdict-rationale
+                                                                    verdict))))
                                 #:priority 100 #:relevance 1)))
                              ((INCONCLUSIVE)
                               (let ((reflection

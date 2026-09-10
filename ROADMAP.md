@@ -1,6 +1,6 @@
 # GAIA Roadmap
 
-> *Last updated: 2026-08-25*
+> *Last updated: 2026-08-27*
 >
 > This document tracks the development plan for the GAIA (GNU AI Assistant) project.
 > For an introduction to the project, see [README.md](README.md).
@@ -14,12 +14,13 @@ trajectory logging, and LiteLLM integration. It also has a substantial GCAS subs
 state and events, a bounded Workspace implementation, Control primitives, structured memory, and auditable
 Action/Result execution. Production `solve` is assembled from Bus-attached processors with a per-Goal lifecycle, explicit
 Workspace rounds, bounded replanning after failed actions or conflicts, and an independent Goal-verification boundary. The minimal
-GCAS-Core conformance gate now covers failure-first replanning, persistence, budgets, interruption, and both supported clients.
+GCAS-Core 0.2 conformance gate now covers failure-first replanning, persistence, budgets, interruption, and both supported clients.
 This establishes the architecture, not broad task competence: the production verifier registry currently contains a deterministic
 Fibonacci contract, while unknown natural-language task classes fail closed as `INCONCLUSIVE`.
-The immediate product milestone is now a **reliable vertical slice**: every `solve` must terminate at the client boundary,
-repair behavior must be measurable, and a small set of task classes must have executable acceptance contracts before the
-architecture is expanded further.
+The immediate product milestone is now the **GAIA MVP — Persistent Verified Assistant**: every `solve` must terminate at the
+client boundary, verified memory and its justification graph must survive restarts without transcript replay, contradictions
+must remain explicit, repair behavior must be measurable, and a small set of task classes must have executable acceptance
+contracts. The normative MVP contract and acceptance scenarios are maintained in [docs/gaia-mvp.md](docs/gaia-mvp.md).
 
 **Architecture:** Rust Client - GAIA Server (Guile REPL) - LiteLLM Proxy - LLM backends (Ollama, Lemonade, external LLM API etc.)
 
@@ -65,7 +66,7 @@ GCAS is GAIA's normative architectural source of truth. The goal is a **working,
 that coordinates specialized processors through explicit state, workspace competition, control, memory, and auditable execution.
 The legacy RLM loop is retained only as a compatibility and long-context investigation capability.
 
-## GCAS-Core — Immediate Priority
+## GCAS-Core 0.2 Baseline — Completed
 
 - [x] **Cognitive Object Model** — Validated COs carry provenance, epistemic and verification statuses, temporal validity, confidence, and relations.
 - [x] **Session Cognitive State** — Each server session owns durable CO state and an event log. Action outcomes receive linked reproducibility observations.
@@ -80,6 +81,25 @@ The legacy RLM loop is retained only as a compatibility and long-context investi
 - [x] **Client observability and conformance gate** — CLI and Emacs expose the event trace and Cognitive State view. Automated tests cover accepted-answer policy, restoration, Control budgets, interruption/late callbacks, failure-first repair, and both clients. Control-driven termination now invokes the client completion callback exactly once; three failed REPL Actions regress through the server adapter to a terminal `(final ...)` response instead of leaving the CLI waiting.
 
 The detailed gap analysis and conformance gate are maintained in [docs/gcas-core-conformance.md](docs/gcas-core-conformance.md).
+
+## GCAS 0.3 Uncertainty Framework — Migration Priority
+
+The GCAS 0.3 specification makes uncertainty a versioned cognitive state and distinguishes correctness, verification, and confidence.
+The existing scalar CO `confidence` and Workspace `uncertainty` fields are not calibrated posterior probabilities and MUST remain labeled
+as scheduling or legacy compatibility metadata until migrated.
+
+- [x] **UncertaintyAssessment CO and graph schema (P0)** — Machine-validated assessment, calculus, correctness-observation, and calibration COs carry target, quantity, representation, typed sources, conditioning, lineage/dependence, method/diagnostics, version links, scope, provenance, and validity without overwriting historical values.
+- [x] **Rebuildable uncertainty projection `U` and Bayesian updater (P0)** — `U` is rebuilt deterministically from ordinary Cognitive State COs and relations. The exact Beta–Bernoulli slice records explicit priors, Bernoulli assumptions, prior/posterior predictive checks, exact-inference diagnostics, sensitivity, and immutable update links.
+- [x] **Correctness feedback and calibration records (P0)** — Later correctness observations link to the exact forecast assessment. Calibration records retain assessment IDs, samples, Brier score, log loss, curve bins, sharpness, coverage/decision-loss applicability, sample count, and detected scope shift.
+- [x] **Uncertainty propagation and dependence control (P1)** — Assessment dependencies and source lineage are explicit, invalidation propagates through conditioning/update chains, and processor outputs record either a `quantified-by` dependency or `NO_APPLICABLE_ASSESSMENT`. Cross-calculus numeric combination fails closed.
+- [x] **Uncertainty-aware Control policy (P1)** — Control separately exposes urgency, risk, conflict, out-of-domain state, expected information gain, cost, relevance, and priority. Goal-scoped decisions support acceptance, abstention, escalation, and evidence acquisition; no universal threshold is introduced.
+- [x] **Legacy scalar migration (P1)** — Historical CO `confidence` and Workspace `uncertainty` remain validated legacy/scheduling metadata and acquire no posterior semantics. Restored legacy sessions create no synthetic assessments; neural invariants remain unchanged.
+- [x] **GCAS-Uncertainty 0.3 conformance gate (P1)** — `tests/test-uncertainty.scm` covers malformed schemas, legacy restoration, normative Beta–Bernoulli values, restart/rebuild, supersession/invalidation, immutable correctness/calibration, scope shift, abstention/escalation, Control competition, and cross-calculus non-combinability. Reports distinguish `GCAS-Uncertainty 0.3` from the narrow `GCAS-Bayesian 0.3 / BETA_BERNOULLI` profile.
+
+The implementation order and acceptance criteria are defined as U0–U4 in
+[the GAIA MVP contract](docs/gaia-mvp.md#gcas-03-implementation-plan). The first
+implementation slice remains the graph-memory foundation and documentation
+alignment; it does not itself claim GCAS 0.3 uncertainty conformance.
 
 ### Operational completion sequence
 
@@ -100,35 +120,56 @@ The detailed gap analysis and conformance gate are maintained in [docs/gcas-core
 7. **[Completed at Core minimum] Memory consolidation** — Store verified evidence and claims,
    preserve their provenance graph, persist explicit user testimony, and retrieve structured facts across turns.
 8. **[Completed] Conformance acceptance** — Pass the failure-first vertical test plus restart,
-   budget, interruption, and both-client protocol tests before claiming GCAS-Core.
+   budget, interruption, and both-client protocol tests before claiming the GCAS-Core 0.2 baseline.
 
 The next implementation phase expands the verifier registry and planner beyond
 the reference Fibonacci capability, adds semantic/conflict-aware memory, and
-strengthens capability policy. These improve competence and robustness without
-changing the completed GCAS-Core architectural boundary.
+strengthens capability policy. GCAS 0.3 additionally changes the architectural
+boundary through the uncertainty-state migration defined above.
 
-## Reliable vertical slice — current product priority
+## GAIA MVP — Persistent Verified Assistant
 
-Full GCAS expansion is not a prerequisite for a useful GAIA. The next milestone
-is a narrow but dependable `solve` path whose behavior can be measured with the
-small local model currently used by default (`gemma4:e2b`). That model is tuned
-primarily for tool use rather than sustained Guile REPL programming, and similar
-Scheme-generation failures were already present in the legacy RLM loop. GCAS
-must therefore expose model limitations honestly and compensate with structure;
-architectural conformance alone is not evidence of task competence.
+Full GCAS expansion is not a prerequisite for a useful GAIA, but persistent
+cognitive memory is part of the MVP rather than a later product extension. The
+milestone combines a narrow dependable `solve` path with durable graph memory,
+guarded retrieval, contradiction preservation, and multi-session evaluation.
+The local models used for evaluation vary substantially in size and are tuned
+primarily for tool use rather than sustained Guile REPL programming. Live gates
+run only one explicitly approved model at a time, with a 4B default ceiling and
+an explicitly recorded per-run override for operator-approved exceptions. GCAS
+must expose model limitations honestly and compensate with structure;
+architectural conformance alone is not evidence of task competence or cognitive
+continuity.
+
+**Status:** the M0–M6 implementation scope is complete. The deterministic
+conformance gate is green. Release readiness remains provisional until one
+operator-approved model passes the repeated eval-v2 capability matrix. The
+two-turn live conversation gate passed on `qwen3.5-4b` under the recorded
+single-model 4.7B resource envelope.
+
+- [x] **MVP definition and acceptance contract (P0)** — `docs/gaia-mvp.md` defines the product claim, required invariants, eleven longitudinal acceptance scenarios, delivery milestones, and explicit post-MVP scope.
+- [x] **Cognitive Memory Graph v1 (P0)** — The local durable store exposes typed duplicate-safe links, bounded graph traversal, dependency discovery, transitive invalidation, versioned supersession, explicit episodic/semantic/procedural/user-testimony/metacognitive roles, and a bounded lazy STI projection. Invalidated, expired, and superseded Claims are ineligible as current facts. The public memory interface remains the adapter boundary; a Goblins/AtomSpace backend is an implementation replacement rather than an MVP acceptance dependency.
+- [x] **Verified cross-session graph-memory gate (P0)** — A deterministic test stores a verified Evidence/Claim chain, creates a fresh session, resolves its justification edge, retrieves the Claim for a new Goal, and reconstructs context without transcript replay. The same gate covers transitive dependency invalidation and auditable supersession.
+- [x] **Consolidation and guarded graph retrieval (P0)** — Governed consolidation runs at every production terminal boundary, records memory role, retention reason, and revalidation policy, and retains a verified procedure after successful Goal verification. Retrieval is bounded and ranks by Goal content, graph neighborhood, temporal validity, provenance, contradiction/supersession state, memory role, and STI activation without epistemic promotion.
+- [x] **Longitudinal memory corpus (P0)** — Deterministic restart gates cover unverified user testimony, verified graph memory, contradiction-driven transitive invalidation and successor revision, procedural reuse, stale-memory rejection, and versioned metacognitive capability assessment after successive outcomes. Repeated live-model cases remain part of the M5 readiness gate.
+- [x] **GCAS conversational assistant (P0)** — Plain input creates a bounded conversational Cognitive Process whose user turn, retrieved memories, Workspace broadcasts, assistant hypothesis, delivery evidence, and terminal answer are auditable COs/events. The LLM protocol history stays empty; its prompt is reconstructed from a bounded recent episode plus relevant structured memory. Assistant prose remains `HYPOTHESIS`/`UNVERIFIED`, while the independent completion Claim verifies only delivery. CLI and Emacs resume the last validated logical session by default. Model-free gates cover restart recall, context bounds, epistemic status, exactly-once completion, interruption, and late output.
 
 - [x] **Terminal delivery invariant (P0)** — Every active production process reaches one durable terminal event and invokes `on-finished` exactly once. Failure-budget, transition-budget, no-progress, and user-interrupt outcomes all reach the client. An interrupt with no active process does not create an orphan `ProcessTerminated` event.
 - [x] **Three-failure regression (P0)** — Deterministic processor and server-adapter tests execute three distinct failing Actions, assert `FAILURE_BUDGET_EXHAUSTED`, one `ProcessTerminated`, one completion callback, and a terminal `(final ...)` protocol message.
-- [x] **Small deterministic evaluation corpus (P0)** — `make gcas-eval` runs 22 model-free fixtures through the production processor: first-pass success, syntax/runtime/verifier repair, incorrect and repeated Actions, missing Actions, unavailable verifiers, all Control budgets, interruption, and late callbacks. It gates exact outcomes, model/execution attempts, one terminal event/callback, hangs, false completion, repair success, and reports latency. The initial baseline is 22/22, zero hangs, zero false completions, and 4/4 successful repair paths.
-- [/] **Model-agnostic live evaluation matrix (P0)** — `make gcas-live-eval` runs a shared five-task verifier-backed corpus across configurable OpenAI-compatible models, repetitions, thinking modes, endpoints, and prompt overrides. It reports every run plus model/task cells, first-pass and repair success, lifecycle failures, calls, executions, latency, and token usage when supplied by the endpoint. Remaining work: establish a repeated `gemma4:e2b` baseline, add prompt-variant comparison, and set readiness thresholds per advertised capability.
-- [/] **Phase-aware cognitive prompt projection (P1)** — Production `solve` now uses a compact GCAS-only Action contract without legacy `FINAL/CONFIDENCE`, while `/investigate` retains the RLM prompt. Initial and repair calls keep chat history empty and project typed Goal/Workspace/Memory/Reflection state; repair constraints require one complete distinct Action and syntax simplification. Remaining work: structured phase/error fields, remaining-budget projection, and capability schemas evaluated against the task corpus.
-- [ ] **Structured repair policy (P1)** — Preflight Scheme syntax before state mutation, classify the failing form, require a complete and distinct replacement Action, detect non-progress, and prefer short known-valid templates or high-level tools for small local models.
-- [ ] **Capability/verifier registry (P1)** — Grow from the Fibonacci oracle to reusable exact-value, predicate/property, unit-test, and artifact verifiers. Unknown task classes continue to fail closed. LLM judgments may propose evidence but cannot independently confer `VERIFIED`.
-- [ ] **Readiness gate (P1)** — Claim general assistant usefulness only after the evaluation corpus has zero hangs and false completions, bounded interruption latency, and an explicitly reported success rate for every advertised capability.
+- [x] **Small deterministic evaluation corpus (P0)** — `make gcas-eval` runs 23 model-free fixtures through the production processor: first-pass success, preflight/syntax/runtime/verifier repair, incorrect and repeated Actions, missing Actions, unavailable verifiers, all Control budgets, interruption, and late callbacks. It gates exact outcomes, model/execution attempts, one terminal event/callback, hangs, false completion, repair success, and reports latency. The current baseline is 23/23, zero hangs, zero false completions, and 5/5 successful repair paths.
+- [x] **Model-agnostic live evaluation matrix (P0)** — `make gcas-live-eval` runs five eval-v2 behavioral contracts with repetition-seeded hidden probes and a fresh post-repair holdout for exactly one explicitly approved model per invocation. Fixed answers fail deterministic anti-shortcut regressions. Reports separate lifecycle, Action execution, and hidden-test success; eval-v1 reports are diagnostic-only. Resource guards, observability, and machine-readable readiness remain enforced.
+- [x] **Phase-aware cognitive prompt projection (P1)** — Production `solve` uses a compact GCAS-only Action contract without legacy `FINAL/CONFIDENCE`, while `/investigate` retains the RLM prompt. Initial and repair projections keep chat history empty and include typed phase, capability/action schema, remaining transition/stall/failure/replan budgets, exact error class and failing form, Goal, Workspace, Memory, and Reflection state.
+- [x] **Structured repair policy (P1)** — Scheme and Wisp Actions are parsed and macro-expanded without evaluation before an Action CO or execution request is created. Reader and macro syntax failures name the rejected form, feed bounded replanning, require a complete distinct replacement, and preserve non-progress detection.
+- [x] **Capability/verifier registry (P1)** — Reusable verifier classes, fail-closed matching, and five production-v2 manifests are implemented. Normal `/solve` and the live corpus append private behavioral harnesses only at the execution boundary; repaired Actions receive fresh holdouts and model-visible feedback contains aggregate results only.
+- [/] **Readiness gate (P1)** — Threshold enforcement fails closed below 10 repetitions, 100% terminal responses, zero false completions/duplicate executions, 80% verified success per capability, the interruption bound, or eval-v2 hidden-test provenance. The operator-approved `qwen3.5-4b` restart/recall run passed with empty provider history and a bounded restored projection; see [the live conversation report](docs/evaluations/gcas-conversation-qwen3.5-4b-mvp.md). A segmented 50-case capability diagnostic found every capability below threshold (50%, 10%, 10%, 10%, and 0%); see [the diagnostic report](docs/evaluations/gcas-live-qwen3.5-4b-diagnostic.md). A canonical single-invocation release artefact remains required for any future ready model; prior eval-v1 runs are invalidated.
 
 The prompting design is documented in
 [docs/gcas-prompt-projection.md](docs/gcas-prompt-projection.md), and the corpus
 scope and extension rules in [docs/gcas-evaluation.md](docs/gcas-evaluation.md).
+The exact candidate capabilities and release thresholds are published in
+[docs/capability-matrix.md](docs/capability-matrix.md).
+The complete MVP product, memory contract, and GCAS 0.3 implementation plan are documented in
+[docs/gaia-mvp.md](docs/gaia-mvp.md).
 The read-only NCSI/J-space adapter is now implemented as an opt-in experimental
 profile and is not a blocker for this milestone. Its M5 pilot establishes
 transport, epistemic, fallback, stability, and overhead behavior; it does not
@@ -178,10 +219,10 @@ Hardening the agentic loop to handle syntax constraints of smaller local models 
 - [x] **Advanced Terminal UX & Inline Status** — Non-blocking inline spinner or bottom status bar showing current background RLM execution state using ANSI cursor control codes or `indicatif`. | *→ gaia-desktop*
 - [x] **Expanded Auto-healing** — Programmatic unmatched parens closing and syntax self-repair hardening before running `eval`.
 - [x] **Modularize Actors Framework** — Split the monolithic `actors.scm` into separate files (`sandbox-actor.scm`, `agent-actor.scm`, `session-orchestrator.scm`) to separate session orchestration, environment evaluation, and agent cognitive logic.
-- [/] **HITL Security Hardening (Command Injection)** — Replace simple prefix checks in `run-command` with shell-token parsing or direct executable invocation (`system*`) to prevent shell injection bypasses (e.g., `grep; rm -rf /`). *(Partially completed: basic safety checks checking for forbidden characters `#\; #\& #\| #\` #\$` are implemented, but shell-token parsing / direct system* execution is pending).*
+- [x] **HITL Security Hardening (Command Injection)** — `run-command` and `run-in-sandbox` parse a bounded quoting grammar into argv, reject shell operators/expansion/redirection, evaluate policy on exact argv, and execute without reconstructing a command shell. Raw `system` is unavailable; `system*` uses direct argv after scoped approval.
 - [x] **Efficient HITL Sync** — Replace busy-waiting `usleep` polling in `permission-sink` with Guile mutexes and condition variables.
 - [x] **HITL Metadata Exchange** — Define an S-expression metadata format for permission requests so the client doesn't need to parse Scheme AST to print file diffs.
-- [/] **HITL Permission Scoping** — Introduce session/directory scoping in client approvals to reduce prompt fatigue (e.g., "Allow all write-file commands in this path"). *(Partially completed: server-side matching scopes via directory/always rules are implemented, but client UI integration is pending).* | *→ gaia-desktop*
+- [x] **HITL Permission Scoping** — Rust CLI and Emacs UI support once, deny, exact-expression, and write-directory approvals. Server scopes are connection-local and directory matching enforces a path-component boundary, so `/tmp/gaia` cannot authorize `/tmp/gaia-escape`. | *→ gaia-desktop*
 - [x] **Bailout Mechanism** — If confidence drops drastically or the error loop persists too long, pause the main loop and spawn a diagnostic sub-agent.
 - [x] **High-level Standard Library for LLM** — Add ready-made higher-order procedures to `tools.scm` to offload the model from writing complex nested loops:
   - `(read-files '("A" "B"))` — batch file reading
@@ -198,8 +239,8 @@ Hardening the agentic loop to handle syntax constraints of smaller local models 
 
 *Moved from former Phase 7 to address context rot and context window clogging.*
 
-- [/] **Atoms as Goblins Actors** — Leverage the `guile-goblins` library to create a lightweight, local AtomSpace *specifically for cognitive working memory (active relevance context, up to ~1000 nodes)*. Each semantic node and relation becomes an autonomous actor, leveraging Goblins' transactional vats (for automatic state rollback on execution errors) and asynchronous message passing (for spreading activation). *(Partially completed: Goblins is used for session REPLs, but not semantic mapping).* | *→ gaia-sci: Hyperon FFI, gaia-proof: Goal Caching*
-- [ ] **STI/LTI Memory** — Implement Short-Term Importance (STI) and Long-Term Importance (LTI) weights for memory candidates. Decimate STI asynchronously after cognitive process transitions. | *→ gaia-sci: Cognitive State Serialization*
+- [/] **Atoms as Goblins Actors** — The GAIA MVP now treats AtomSpace semantics as a product requirement: durable CO nodes, typed graph edges, traversal, dependency invalidation, and supersession are implemented over the transparent local store. Remaining work is the Goblins actor backend, transactional graph updates, spreading activation, and bounded active relevance context (up to ~1000 nodes). Storage remains replaceable and MUST preserve the contracts in [docs/gaia-mvp.md](docs/gaia-mvp.md). | *→ gaia-sci: Hyperon FFI, gaia-proof: Goal Caching*
+- [/] **STI/LTI Memory** — Bounded lazy STI projection (`memory-activation`, `memory-activate!`, half-life decay) is implemented in `cognitive-memory.scm` and active during retrieval ranking; persistent LTI weights and asynchronous transition decimation remain roadmap work. | *→ gaia-sci: Cognitive State Serialization*
 - [/] **NCSI/J-space Integration Program** — The versioned contract (M0), GAIA production HTTP/NDJSON-over-UDS adapter and bounded JSPACE policy (M4), and comparative pilot with an explicit `SHIP_EXPERIMENTAL` decision (M5) are complete. RAI's M1–M3 lifecycle, artifact-reproduction, resource-baseline, authentication, and failure-path gates remain partially open. Read-only neural observations precede any steering capability; signals remain observations and cannot directly confer `VERIFIED` or `ACCEPTED`. Detailed status is tracked only in the [canonical integration plan](docs/ncsi-jlens-integration.md), and the published evidence is in [the M5 report](docs/evaluations/ncsi-smollm2-m5.md).
   - **J-space to AtomSpace Mapping (M7)** — After AtomSpace and STI/LTI exist, evaluate whether J-lens activations can improve symbolic-node importance over simpler textual or symbolic controls. | *→ gaia-proof: J-space Guided Theorem Proving*
   - **J-lens Activation Injection (M6)** — After the read-only adapter passes comparative evaluation, evaluate bounded steering/patching of symbolic states and REPL errors with explicit Control policy, causal controls, audit, and fallback. | *→ K3: CRT, gaia-proof: J-space Guided Theorem Proving*
@@ -298,7 +339,7 @@ Each module is an independent project that plugs into the GAIA Kernel. Modules h
 
 - [ ] **COSMIC Ecosystem Applet** — Develop a native, highly performant `libcosmic` Applet in Rust. Leverage `tokio` and the Iced architecture for zero-overhead, asynchronous UI rendering of streaming LLM responses.
 - [ ] **GNOME/Ubuntu Integration** — Build a GNOME Shell Extension (GJS) for Ubuntu 26.04+ utilizing global overlays and shortcuts.
-- [ ] **Doom Emacs / Crafted Emacs Module (`+gaia`)** — Write a native `gaia.el` Emacs package connecting to `/tmp/gaia.sock`, supporting interactive HITL diff prompts in buffers, and an Org-Babel interface.
+- [x] **Emacs Client & Org-Babel Module** — Native `gaia.el` package (`gaia-chat.el`, `gaia-connection.el`, `gaia-hitl.el`, `ob-gaia.el`) connects to `/tmp/gaia.sock`, supports interactive HITL diff buffers, Org-Babel evaluation, and passes automated batch tests (`tests/test-emacs-client.el`). Packaging as a standalone Doom/Crafted recipe remains a distribution task.
 - [ ] **GAIA-Edit IDE** — Standalone, modal text-editor written from scratch in Guile Scheme or Rust+Guile TUI.
 
 ---
@@ -366,10 +407,7 @@ CI tooling part of GAIA's runtime dependency manifest.
   project-owned runner do not consume the GitLab.com hosted compute-minute
   quota, but runner maintenance, isolation of untrusted contributions, updates,
   and availability become project responsibilities.
-- [ ] **CI portability fallback** — Keep validation behind Make targets so the
-  same gates can move to GitHub Actions if GitLab pricing, the project plan, or
-  runner availability changes. GitLab remains the canonical repository and
-  GitHub remains a mirror unless that policy is changed explicitly.
+- [x] **CI portability fallback** — GitHub Actions workflow (`.github/workflows/ci.yml`) mirrors all test gates (Scheme/GCAS conformance in Guix container, Rust CLI, and Emacs client) using the same Make targets. GitLab remains the canonical repository and GitHub remains an active mirror.
 - [ ] **Periodic cost review** — Track monthly minutes and per-job duration,
   revisit path rules after major protocol changes, and decide whether to buy
   additional minutes, apply for an eligible GitLab community program, operate a

@@ -1,16 +1,20 @@
-# GCAS-Core Conformance Audit
+# GCAS-Core 0.2 Conformance Audit (Legacy Baseline)
 
-This document evaluates GAIA against the eight minimum requirements in
-[GCAS §11.2](../gcas.md#112-minimal-conformance-requirements-gcas-core). It is a
-implementation audit and executable acceptance record.
+This document evaluates GAIA against the eight minimum requirements of GCAS 0.2. It is an
+implementation audit and executable acceptance record for that historical baseline. The current
+[GCAS 0.3 §11.2](../gcas.md#112-minimal-conformance-requirements-gcas-core) adds versioned
+Uncertainty Assessments, correctness targets, calibration scope, and uncertainty-aware acceptance;
+this audit MUST NOT be cited as evidence of GCAS-Core 0.3 or `GCAS-Uncertainty 0.3` conformance.
 
-**Current conclusion:** GAIA satisfies the minimum GCAS-Core requirements on its
+**Current conclusion:** GAIA satisfies the minimum GCAS-Core 0.2 requirements on its
 production `solve` path. The conformance gate covers the recurrent processor
 graph, independent Goal verification, answer policy, structured cross-turn
 memory, restoration, budgets, interruption, and inspection from the Rust CLI
 and Emacs client. This is a minimum architecture claim, not a claim of general
 intelligence or broad task verification: the registry currently provides a
 deterministic Fibonacci verifier and fails closed for unsupported task classes.
+The scalar `confidence` and Workspace `uncertainty` fields in the current implementation are
+uncalibrated scheduling or compatibility metadata and do not satisfy the GCAS 0.3 uncertainty model.
 
 Status meanings:
 
@@ -27,7 +31,7 @@ Status meanings:
 | Memory separate from prompt history | Implemented at Core minimum | Structured CO memory is persisted separately; user testimony remains an unverified Observation, verified Result/Evidence/Claim chains are consolidated, and selected context is reconstructed without appending chat history. | Add semantic retrieval, conflict/supersession policies, and more typed memory roles. |
 | Recurrent cognitive cycle with progress and loop monitoring | Implemented at bounded minimum | Every `solve` has isolated budgets and exactly-once termination. Failed actions and conflicts become Reflection COs, which trigger a bounded revised Hypothesis → Plan → linked subgoal → Action pass; Control monitors transition, failure, stall, and replan limits. A Goal Verifier decides completion from explicit evidence. | Add richer strategy switching and goal-aware progress measures. |
 | Separate execution with auditable Action/Result | Implemented | An admitted Action crosses an explicit sandbox boundary; Result/Failure links to it and receives a reproducibility observation. | Extend the policy gate beyond checking only the `action` type and add richer environment manifests after Core. |
-| Explicit uncertainty, time, and failure | Implemented | COs receive real creation times; expired or invalidated facts are excluded from fact retrieval. Processor failures and inconclusive terminal states are durable. `/cognitive-state` exposes process outcome, completion criteria, Control counters and termination reason, Workspace, State, and Memory. | Add richer calibrated goal-level uncertainty after Core. |
+| GCAS 0.2 scalar confidence, time, and failure | Implemented at Core minimum | COs receive real creation times; expired or invalidated facts are excluded from fact retrieval. Processor failures and inconclusive terminal states are durable. `/cognitive-state` exposes process outcome, completion criteria, Control counters and termination reason, Workspace, State, and Memory. | This does not satisfy GCAS 0.3. Implement typed `UncertaintyAssessment` COs, declared calculi, calibration scope, correctness feedback, propagation, and uncertainty-aware decisions through the U0–U4 plan in `docs/gaia-mvp.md`. |
 
 ## Production behavior observed in the audit
 
