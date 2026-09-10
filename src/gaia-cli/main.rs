@@ -5,9 +5,9 @@ use rustyline::DefaultEditor;
 use std::io::BufReader;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::{env, fs};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
+use std::{env, fs};
 
 mod connection;
 mod protocol;
@@ -560,10 +560,7 @@ mod tests {
             permission_response("d", &write),
             Some(Value::list(vec![
                 Value::symbol("permission-response"),
-                Value::list(vec![
-                    Value::symbol("directory"),
-                    Value::string("/tmp/gaia"),
-                ]),
+                Value::list(vec![Value::symbol("directory"), Value::string("/tmp/gaia"),]),
             ]))
         );
         assert!(permission_response("d", &Value::symbol("other")).is_none());
@@ -616,7 +613,11 @@ fn wait_and_print(rx: &Receiver<ServerEvent>, stream: &mut UnixStream) -> Result
                                 loop {
                                     print!(
                                         "Allow? [y] once / [n] deny / [a] always exact{}: ",
-                                        if directory_available { " / [d] directory writes" } else { "" }
+                                        if directory_available {
+                                            " / [d] directory writes"
+                                        } else {
+                                            ""
+                                        }
                                     );
                                     use std::io::Write;
                                     std::io::stdout().flush()?;
@@ -624,7 +625,10 @@ fn wait_and_print(rx: &Receiver<ServerEvent>, stream: &mut UnixStream) -> Result
                                     std::io::stdin().read_line(&mut input)?;
                                     if let Some(response) = permission_response(&input, expr) {
                                         if !directory_available
-                                            && matches!(input.trim().to_lowercase().as_str(), "d" | "directory")
+                                            && matches!(
+                                                input.trim().to_lowercase().as_str(),
+                                                "d" | "directory"
+                                            )
                                         {
                                             continue;
                                         }
