@@ -240,7 +240,7 @@ Hardening the agentic loop to handle syntax constraints of smaller local models 
 *Moved from former Phase 7 to address context rot and context window clogging.*
 
 - [/] **Atoms as Goblins Actors** — The GAIA MVP now treats AtomSpace semantics as a product requirement: durable CO nodes, typed graph edges, traversal, dependency invalidation, and supersession are implemented over the transparent local store. Remaining work is the Goblins actor backend, transactional graph updates, spreading activation, and bounded active relevance context (up to ~1000 nodes). Storage remains replaceable and MUST preserve the contracts in [docs/gaia-mvp.md](docs/gaia-mvp.md). | *→ gaia-sci: Hyperon FFI, gaia-proof: Goal Caching*
-- [ ] **STI/LTI Memory** — Implement Short-Term Importance (STI) and Long-Term Importance (LTI) weights for memory candidates. Decimate STI asynchronously after cognitive process transitions. | *→ gaia-sci: Cognitive State Serialization*
+- [/] **STI/LTI Memory** — Bounded lazy STI projection (`memory-activation`, `memory-activate!`, half-life decay) is implemented in `cognitive-memory.scm` and active during retrieval ranking; persistent LTI weights and asynchronous transition decimation remain roadmap work. | *→ gaia-sci: Cognitive State Serialization*
 - [/] **NCSI/J-space Integration Program** — The versioned contract (M0), GAIA production HTTP/NDJSON-over-UDS adapter and bounded JSPACE policy (M4), and comparative pilot with an explicit `SHIP_EXPERIMENTAL` decision (M5) are complete. RAI's M1–M3 lifecycle, artifact-reproduction, resource-baseline, authentication, and failure-path gates remain partially open. Read-only neural observations precede any steering capability; signals remain observations and cannot directly confer `VERIFIED` or `ACCEPTED`. Detailed status is tracked only in the [canonical integration plan](docs/ncsi-jlens-integration.md), and the published evidence is in [the M5 report](docs/evaluations/ncsi-smollm2-m5.md).
   - **J-space to AtomSpace Mapping (M7)** — After AtomSpace and STI/LTI exist, evaluate whether J-lens activations can improve symbolic-node importance over simpler textual or symbolic controls. | *→ gaia-proof: J-space Guided Theorem Proving*
   - **J-lens Activation Injection (M6)** — After the read-only adapter passes comparative evaluation, evaluate bounded steering/patching of symbolic states and REPL errors with explicit Control policy, causal controls, audit, and fallback. | *→ K3: CRT, gaia-proof: J-space Guided Theorem Proving*
@@ -339,7 +339,7 @@ Each module is an independent project that plugs into the GAIA Kernel. Modules h
 
 - [ ] **COSMIC Ecosystem Applet** — Develop a native, highly performant `libcosmic` Applet in Rust. Leverage `tokio` and the Iced architecture for zero-overhead, asynchronous UI rendering of streaming LLM responses.
 - [ ] **GNOME/Ubuntu Integration** — Build a GNOME Shell Extension (GJS) for Ubuntu 26.04+ utilizing global overlays and shortcuts.
-- [ ] **Doom Emacs / Crafted Emacs Module (`+gaia`)** — Write a native `gaia.el` Emacs package connecting to `/tmp/gaia.sock`, supporting interactive HITL diff prompts in buffers, and an Org-Babel interface.
+- [x] **Emacs Client & Org-Babel Module** — Native `gaia.el` package (`gaia-chat.el`, `gaia-connection.el`, `gaia-hitl.el`, `ob-gaia.el`) connects to `/tmp/gaia.sock`, supports interactive HITL diff buffers, Org-Babel evaluation, and passes automated batch tests (`tests/test-emacs-client.el`). Packaging as a standalone Doom/Crafted recipe remains a distribution task.
 - [ ] **GAIA-Edit IDE** — Standalone, modal text-editor written from scratch in Guile Scheme or Rust+Guile TUI.
 
 ---
@@ -407,10 +407,7 @@ CI tooling part of GAIA's runtime dependency manifest.
   project-owned runner do not consume the GitLab.com hosted compute-minute
   quota, but runner maintenance, isolation of untrusted contributions, updates,
   and availability become project responsibilities.
-- [ ] **CI portability fallback** — Keep validation behind Make targets so the
-  same gates can move to GitHub Actions if GitLab pricing, the project plan, or
-  runner availability changes. GitLab remains the canonical repository and
-  GitHub remains a mirror unless that policy is changed explicitly.
+- [x] **CI portability fallback** — GitHub Actions workflow (`.github/workflows/ci.yml`) mirrors all test gates (Scheme/GCAS conformance in Guix container, Rust CLI, and Emacs client) using the same Make targets. GitLab remains the canonical repository and GitHub remains an active mirror.
 - [ ] **Periodic cost review** — Track monthly minutes and per-job duration,
   revisit path rules after major protocol changes, and decide whether to buy
   additional minutes, apply for an eligible GitLab community program, operate a
